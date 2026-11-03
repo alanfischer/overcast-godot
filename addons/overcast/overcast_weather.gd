@@ -99,6 +99,7 @@ const SOUND_SPEED := 340.0
 @export var listener: Node3D
 ## Where the listener's ears are, above its origin.
 @export var listener_height := 0.0
+## Overcast's own rain and thunder (sounds/, CC0) when unset.
 @export var rain_stream: AudioStream
 @export var thunder_stream: AudioStream
 @export var rain_bus := &"Master"
@@ -170,6 +171,10 @@ func _ready() -> void:
 	_drops.visible = false
 	add_child(_drops)
 
+	if rain_stream == null:
+		rain_stream = _sound("rain")
+	if thunder_stream == null:
+		thunder_stream = _sound("thunder")
 	_rain_audio = AudioStreamPlayer.new()
 	_rain_audio.name = "RainAudio"
 	_rain_audio.bus = rain_bus
@@ -181,6 +186,12 @@ func _ready() -> void:
 	if _floor_tex:
 		_hand_floor(_drop_material)
 	_refresh()
+
+
+## One of sounds/. Absent only where nothing has imported the addon yet (a bare headless run).
+static func _sound(sound_name: String) -> AudioStream:
+	var path := "res://addons/overcast/sounds/%s.ogg" % sound_name
+	return load(path) as AudioStream if ResourceLoader.exists(path) else null
 
 
 ## Where rain stops (OvercastRainFloor.bake). A scene loaded into rain already falling starts soaked.
@@ -557,29 +568,34 @@ func _bolt(from: Vector3, to: Vector3, width_scale: float, rng: RandomNumberGene
 				_draw_bolt(points, 2.2 * width_scale, stroke[1], 0.25))
 
 
-## The built-in bolt: two crossed ribbons along the points, glowing, faded out over `fade` s.
+## The built-in bolt (shaders/bolt.gdshader): one camera-facing strip along the points, faded out
+## over `fade` s.
 func _draw_bolt(points: PackedVector3Array, width: float, brightness: float, fade: float) -> void:
 	var mesh := ImmediateMesh.new()
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.no_depth_test = false
-	mat.albedo_color = Color(0.85, 0.9, 1.0, brightness)
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://addons/overcast/shaders/bolt.gdshader")
+	mat.set_shader_parameter("width", width)
+	mat.set_shader_parameter("brightness", brightness)
 	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, mat)
-	for side in [Vector3.RIGHT, Vector3.BACK]:
-		for i in points.size() - 1:
-			var a := points[i]
-			var b := points[i + 1]
-			var across: Vector3 = (b - a).cross(side).normalized() * width * 0.5
-			for v in [a - across, a + across, b + across, a - across, b + across, b - across]:
-				mesh.surface_add_vertex(v)
+	var last := points.size() - 1
+	for i in last:
+		# Each point's direction is shared by the segments either side of it, so they join.
+		var dirs: Array[Vector3] = []
+		for k in [i, i + 1]:
+			dirs.append((points[mini(k + 1, last)] - points[maxi(k - 1, 0)]).normalized())
+		for v in [[i, -1.0], [i, 1.0], [i + 1, 1.0], [i, -1.0], [i + 1, 1.0], [i + 1, -1.0]]:
+			mesh.surface_set_normal(dirs[v[0] - i])
+			mesh.surface_set_uv(Vector2(v[1], float(v[0]) / last))
+			mesh.surface_add_vertex(points[v[0]])
 	mesh.surface_end()
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# The strip widens in the vertex shader, past the mesh's own bounds.
+	mi.extra_cull_margin = width * 4.0
+	mi.top_level = true
 	add_child(mi)
 	var tween := mi.create_tween()
-	tween.tween_property(mat, "albedo_color:a", 0.0, fade)
+	tween.tween_method(func(k: float) -> void: mat.set_shader_parameter("brightness", k),
+		brightness, 0.0, fade)
 	tween.tween_callback(mi.queue_free)

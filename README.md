@@ -46,7 +46,9 @@ and go on their own.
   - haze and far rain only through air that rain is actually falling in
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc`
   - rain sound that fades and low-passes under cover
-  - lightning: a bolt, a flash, and thunder delayed by the distance
+  - lightning: a glowing bolt, a flash, and thunder delayed by the distance
+  - its own rain loop and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream` and
+    `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
 - **`OvercastRainFloor.bake`** raycasts down through your level once to find where rain stops:
   roofs, overhangs, the ground. Without a rain floor, rain falls everywhere.
 - **`OvercastCycle`** produces showers that build, wander and die away. The same seed gives the

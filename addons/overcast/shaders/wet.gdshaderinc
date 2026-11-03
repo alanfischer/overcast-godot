@@ -8,20 +8,7 @@ uniform float puddles = 0.0;      // how far flat ground has pooled
 uniform float puddle_scale = 1.0;  // how readily this surface pools: earth does, planks drain
 uniform vec3 rain_sky = vec3(0.0);  // the sky colour wet surfaces reflect, sRGB
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
-
-float overcast_wet_hash(vec2 p) {
-	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-	p3 += dot(p3, p3.yzx + 33.33);
-	return fract((p3.x + p3.y) * p3.z);
-}
-
-float overcast_wet_noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(overcast_wet_hash(i), overcast_wet_hash(i + vec2(1.0, 0.0)), f.x),
-		mix(overcast_wet_hash(i + vec2(0.0, 1.0)), overcast_wet_hash(i + vec2(1.0, 1.0)), f.x), f.y);
-}
+#include "res://addons/overcast/shaders/noise.gdshaderinc"
 
 // 1 where rain reaches world point p, 0 under cover. The floor's four cells around p are blended,
 // so a roof's shadow on the ground is not drawn as a staircase. Everywhere, with no floor baked.
@@ -63,7 +50,7 @@ void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 w
 	}
 	float pool = 0.0;
 	if (world_normal.y > 0.95) {
-		float n = overcast_wet_noise(world_pos.xz * 0.55) * 0.7 + overcast_wet_noise(world_pos.xz * 2.3) * 0.3;
+		float n = overcast_vnoise(world_pos.xz * 0.55) * 0.7 + overcast_vnoise(world_pos.xz * 2.3) * 0.3;
 		float edge = mix(1.05, 0.55, puddles * puddle_scale);
 		pool = smoothstep(edge, edge + 0.05, n) * reach;
 	}

@@ -16,6 +16,8 @@ const CLOUD_SHADOW := 0.65
 const STORM_SHADOW := 0.88
 ## Cloud cover once a storm has closed the sky over.
 const STORM_COVER := 0.97
+## The params that set the cloud layer's globals rather than the material.
+const LAYER_KEYS := ["cloud_scale", "cloud_speed", "cloud_softness"]
 
 ## The sky's settings: sky.gdshaderinc's uniforms by name, plus the cloud layer's cloud_scale,
 ## cloud_speed and cloud_softness. Colours are sRGB.
@@ -25,6 +27,8 @@ var material: ShaderMaterial
 var storm := 0.0
 ## Whether this sky is on screen: its clouds then shade the ground. See set_drawing.
 var drawing := false
+## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
+var _id := get_instance_id()
 
 
 ## `params` over defaults(); `shader` for a sky drawn on something other than a Godot Sky.
@@ -34,8 +38,25 @@ func _init(sky_params: Dictionary = {}, shader: Shader = null) -> void:
 	material = ShaderMaterial.new()
 	material.shader = shader if shader else SkyShader
 	for key in params:
-		material.set_shader_parameter(key, params[key])
-	material.set_shader_parameter("sun_dir", (params["sun_dir"] as Vector3).normalized())
+		set_param(key, params[key])
+
+
+## A sky must let go of the cloud layer it holds, or its clouds' shadows outlive it.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		Clouds.release(_id)
+
+
+## One setting, on the material or the cloud layer as the key says.
+func set_param(key: String, value: Variant) -> void:
+	if key == "sun_dir":
+		value = (value as Vector3).normalized()
+	params[key] = value
+	if key in LAYER_KEYS or key == "sun_dir" or key == "cloud_amount":
+		if drawing:
+			set_drawing(true)
+	if not key in LAYER_KEYS:
+		material.set_shader_parameter(key, value)
 
 
 static func defaults() -> Dictionary:
@@ -81,15 +102,15 @@ func make_environment() -> Environment:
 
 
 ## On screen or off. Only one sky draws clouds at a time, since the layer is global: the last one
-## turned on owns it, and turning one off clears the shadows.
+## turned on owns it, and turning that one off clears the shadows.
 func set_drawing(on: bool) -> void:
 	drawing = on
 	if on:
-		Clouds.set_layer(params["sun_dir"], params["cloud_scale"], params["cloud_speed"],
+		Clouds.set_layer(_id, params["sun_dir"], params["cloud_scale"], params["cloud_speed"],
 			params["cloud_softness"])
 		_push_weather()
 	else:
-		Clouds.clear()
+		Clouds.release(_id)
 
 
 ## 0 clear, 1 a dark overcast deck.
@@ -110,7 +131,7 @@ func _push_weather() -> void:
 		return
 	var amount: float = params["cloud_amount"]
 	var casting := maxf(amount, storm) > 0.0
-	Clouds.set_weather(lerpf(amount, STORM_COVER, storm),
+	Clouds.set_weather(_id, lerpf(amount, STORM_COVER, storm),
 		lerpf(CLOUD_SHADOW, STORM_SHADOW, storm) if casting else 0.0)
 
 
@@ -129,6 +150,11 @@ static func luma(c: Color) -> float:
 	return c.r * 0.299 + c.g * 0.587 + c.b * 0.114
 
 
-## gl_compatibility shades in the colours' own space; the RD renderers in linear.
+static var _linear := -1
+
+
+## gl_compatibility shades in the colours' own space; the RD renderers in linear. Fixed at startup.
 static func renderer_is_linear() -> bool:
-	return RenderingServer.get_current_rendering_method() != "gl_compatibility"
+	if _linear < 0:
+		_linear = 1 if RenderingServer.get_current_rendering_method() != "gl_compatibility" else 0
+	return _linear == 1

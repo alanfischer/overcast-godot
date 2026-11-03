@@ -3,6 +3,13 @@ extends "res://tests/suite.gd"
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
 
 
+## A weather that draws and plays as on a client, though the suite runs headless.
+func _weather() -> Weather:
+	var w := Weather.new()
+	w._presenting = true
+	return w
+
+
 class FakeSky:
 	var storm := 0.0
 	var flashes := 0
@@ -37,7 +44,7 @@ func test_rain_past_a_downpour_only_adds_drops() -> void:
 
 
 func test_the_floor_is_read_from_its_min_corner() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	w.set_rain_floor(_roofed_floor())
 	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), 3.0, "the min corner's cell is the roof")
 	assert_eq(w.floor_at(Vector3(1.5, 0, 0.5)), 0.0, "the far cell is open")
@@ -46,7 +53,7 @@ func test_the_floor_is_read_from_its_min_corner() -> void:
 
 
 func test_rain_sounds_muffled_under_the_roof() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "no floor: in the open everywhere")
 	var img := Image.create_empty(64, 64, false, Image.FORMAT_RF)
 	img.fill(Color(0, 0, 0))
@@ -62,7 +69,7 @@ func test_rain_sounds_muffled_under_the_roof() -> void:
 
 
 func test_rain_closes_the_sky_over_and_times_strikes() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	var sky := FakeSky.new()
 	w.sky = sky
@@ -81,7 +88,7 @@ func test_rain_closes_the_sky_over_and_times_strikes() -> void:
 
 
 func test_only_the_timing_peer_strikes() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	w.times_strikes = false
 	_root().add_child(w)
@@ -106,7 +113,7 @@ func test_wet_materials_are_found_by_their_shader() -> void:
 		mat.shader = shader
 		mi.mesh.surface_set_material(0, mat)
 		root.add_child(mi)
-	var w := Weather.new()
+	var w := _weather()
 	w.add_wet_materials(root, func(_mi: MeshInstance3D) -> float: return 0.4)
 	assert_eq(w._wet_mats.size(), 1, "only the material that takes rain")
 	assert_almost_eq(w._wet_mats[0].get_shader_parameter("puddle_scale"), 0.4, 1e-6, "pooling as asked")
@@ -116,7 +123,7 @@ func test_wet_materials_are_found_by_their_shader() -> void:
 
 ## Fully featured out of the box: rain and thunder sound with nothing set.
 func test_it_brings_its_own_rain_and_thunder() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	assert_ne(w.rain_stream, null, "its own rain")
@@ -143,7 +150,7 @@ func _platform(at: Vector3) -> Node3D:
 
 
 func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -169,7 +176,7 @@ func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
 
 
 func test_covers_leave_roofs_and_each_other_alone() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -191,7 +198,7 @@ func test_covers_leave_roofs_and_each_other_alone() -> void:
 
 
 func test_covers_restamp_only_for_a_step_that_shows() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -216,17 +223,16 @@ func _quad(a: Vector2, b: Vector2, y: float) -> PackedVector3Array:
 	return PackedVector3Array([p[0], p[1], p[2], p[0], p[2], p[3]])
 
 
-func _covered(w: Node3D) -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	for z in 20:
-		for x in 20:
-			if w._floor.get_pixel(x, z).r != w._baked.get_pixel(x, z).r:
-				cells.append(Vector2i(x, z))
+func _covered(w: Node3D) -> Array[int]:
+	var cells: Array[int] = []
+	for i in w._heights.size():
+		if w._heights[i] != w._baked[i]:
+			cells.append(i)
 	return cells
 
 
 func test_a_turned_beam_covers_its_diagonal_not_its_bounds() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -241,7 +247,7 @@ func test_a_turned_beam_covers_its_diagonal_not_its_bounds() -> void:
 
 
 func test_an_l_shape_leaves_its_corner_open() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -255,7 +261,7 @@ func test_an_l_shape_leaves_its_corner_open() -> void:
 
 
 func test_a_pitched_roof_stops_rain_at_its_slope() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -274,7 +280,7 @@ func test_a_pitched_roof_stops_rain_at_its_slope() -> void:
 
 
 func test_a_cover_defaults_to_its_own_meshes() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -300,7 +306,7 @@ func test_a_cover_defaults_to_its_own_meshes() -> void:
 
 
 func test_a_cover_that_only_slides_reuses_its_raster() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -323,7 +329,7 @@ func test_a_cover_that_only_slides_reuses_its_raster() -> void:
 
 
 func test_turning_covers_share_out_the_work() -> void:
-	var w := Weather.new()
+	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
 	w.set_rain_floor(_open_floor())
@@ -349,3 +355,31 @@ func test_turning_covers_share_out_the_work() -> void:
 	for i in 4:
 		w._update_covers()
 	assert_eq(turned.call(), 6, "and none is left behind")
+
+
+func test_settle_goes_straight_to_the_weather_rain_is_heading_for() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	assert_almost_eq(w.storm, 1.0, 1e-6, "a downpour's sky, closed over")
+	assert_eq(w._wetness, 1.0, "the ground soaked")
+	assert_almost_eq(w._puddles, 1.0, 1e-6, "and pooled")
+	w.rain = 0.0
+	w.settle()
+	assert_eq(w.storm, 0.0, "dry: clear")
+	assert_eq(w._wetness, 0.0, "and dry ground")
+
+
+func test_a_dedicated_server_times_strikes_and_draws_nothing() -> void:
+	var w := Weather.new()  # as the headless suite finds it: no one to draw for
+	_keep(w)
+	_root().add_child(w)
+	var seeds: Array[int] = []
+	w.struck.connect(func(s: int) -> void: seeds.append(s))
+	w.rain = 1.0
+	for i in 600:
+		w._process(0.1)
+	assert_gt(seeds.size(), 2, "strikes are still timed (%d), for the peers that draw them" % seeds.size())
+	assert_eq(w.get_child_count(), 0, "and nothing is built to draw or play them here")

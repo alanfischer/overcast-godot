@@ -44,11 +44,8 @@ void vertex() {
 		* smoothstep(box.y * 0.5, box.y * 0.35, abs(rel.y))
 		* smoothstep(0.2, 1.0, dist)
 		* exp(-haze_density * dist);
-	if (fade > 0.0 && has_floor) {
-		vec2 uv = rain_floor_uv(p);
-		if (!rain_floor_covers(uv) || p.y - streak_length * 0.5 < textureLod(rain_floor, uv, 0.0).r) {
-			fade = 0.0;
-		}
+	if (fade > 0.0 && !rain_falls_at(p - vec3(0.0, streak_length * 0.5, 0.0))) {
+		fade = 0.0;
 	}
 	if (fade <= 0.0) {
 		VERTEX = vec3(0.0);  // nothing to see: a zero-area quad, which draws no pixels at all

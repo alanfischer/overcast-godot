@@ -22,9 +22,7 @@ func _run() -> void:
 	for i in 20:
 		await physics_frame
 	var weather = demo.get_node("Weather")
-	weather.storm = 0.0 if rain <= 0.0 else lerpf(weather.STORM_LIGHT, 1.0, clampf(rain, 0.0, 1.0)) - 0.0001
-	weather._wetness = 1.0 if rain > 0.0 else 0.0
-	weather._puddles = clampf(rain, 0.0, 1.0)
+	weather.settle()
 	demo.get_node("UI").visible = false
 	var views := {"field": [Vector3(0, 1.7, 8), 0.12, 0.0], "up": [Vector3(0, 1.7, 8), 0.7, 0.6],
 		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9]}

@@ -40,11 +40,8 @@ uniform vec3 star_color : source_color = vec3(1.0, 1.0, 1.0);
 // the sky's own colours, so a storm at night stays a night sky.
 uniform float storm : hint_range(0.0, 1.0) = 0.0;
 
-// Lightning (OvercastSky.set_flash): the sky lit from within, brightest toward flash_dir (world
-// space). Black is no flash.
-uniform vec3 flash_color = vec3(0.0);
-uniform vec3 flash_dir = vec3(0.0, 1.0, 0.0);
-
+#include "res://addons/overcast/shaders/flash.gdshaderinc"
+#include "res://addons/overcast/shaders/noise.gdshaderinc"
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 
 const vec3 OVERCAST_LUMA = vec3(0.299, 0.587, 0.114);
@@ -57,18 +54,6 @@ const int MARCH_STEPS_MAX = 48;
 
 float hg_phase(float c, float g) {
 	return (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5);   // x4π: isotropic is 1
-}
-
-float overcast_hash12(vec2 p) {
-	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-	p3 += dot(p3, p3.yzx + 33.33);
-	return fract((p3.x + p3.y) * p3.z);
-}
-
-float overcast_hash13(vec3 p) {
-	p = fract(p * 0.1031);
-	p += dot(p, p.yzx + 33.33);
-	return fract((p.x + p.y) * p.z);
 }
 
 // Ray-march the slab along eye_dir, from `t0` metres out where it meets the shell at noise point
@@ -255,16 +240,14 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	return col;
 }
 
-// Lightning over `col`: open sky only glows, cloud has something to light so the flash multiplies
-// it, and a dark storm deck, which a multiply cannot lift, has its shape added outright.
+// Lightning over `col` (overcast_flash), and over a dark storm deck, which a multiply cannot lift,
+// its shape added outright.
 vec3 overcast_sky_flash(vec3 col, vec3 eye_dir, float storm_cover, float storm_body) {
 	if (flash_color == vec3(0.0)) {
 		return col;
 	}
 	float toward = max(dot(eye_dir, normalize(flash_dir)), 0.0);
-	col *= vec3(1.0) + flash_color * (1.0 + 3.0 * pow(toward, 3.0));
-	col += flash_color * (0.3 + 0.9 * pow(toward, 4.0));
-	return col + flash_color * storm_cover * storm_body * (0.25 + 0.9 * pow(toward, 2.0));
+	return overcast_flash(col, eye_dir) + flash_color * storm_cover * storm_body * (0.25 + 0.9 * pow(toward, 2.0));
 }
 
 // A step of dither, so the wide smooth gradients do not band in 8 bits.

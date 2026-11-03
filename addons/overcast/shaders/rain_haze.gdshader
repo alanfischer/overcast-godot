@@ -51,14 +51,7 @@ void vertex() {
 }
 
 bool raining_at(vec3 p) {
-	if (p.y >= rain_top) {
-		return false;
-	}
-	if (!has_floor) {
-		return true;
-	}
-	vec2 uv = rain_floor_uv(p);
-	return rain_floor_covers(uv) && p.y > textureLod(rain_floor, uv, 0.0).r;
+	return p.y < rain_top && rain_falls_at(p);
 }
 
 // pcg3d. The inputs are whole numbers in the thousands, which a float hash smears together.

@@ -85,10 +85,10 @@ func _set_night(n: float) -> void:
 	weather.night = n
 	weather.sky_light = light
 	sun.light_color = light
-	sky.material.set_shader_parameter("star_amount", n * 0.8)
-	sky.material.set_shader_parameter("zenith_color", Color(0.25, 0.42, 0.70).lerp(Color(0.02, 0.03, 0.07), n))
-	sky.material.set_shader_parameter("horizon_color", Color(0.62, 0.70, 0.82).lerp(Color(0.06, 0.07, 0.12), n))
-	sky.params["horizon_color"] = Color(0.62, 0.70, 0.82).lerp(Color(0.06, 0.07, 0.12), n)
+	var day := SkyScript.defaults()
+	sky.set_param("star_amount", n * 0.8)
+	sky.set_param("zenith_color", (day["zenith_color"] as Color).lerp(Color(0.02, 0.03, 0.07), n))
+	sky.set_param("horizon_color", (day["horizon_color"] as Color).lerp(Color(0.06, 0.07, 0.12), n))
 
 
 func _process(delta: float) -> void:

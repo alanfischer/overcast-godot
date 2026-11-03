@@ -89,9 +89,10 @@ const COVER_STEP := 0.05
 ## number of drops keeps rising.
 @export_range(0.0, 4.0, 0.01, "or_greater") var rain := 0.0:
 	set(value):
+		var was := rain
 		rain = maxf(value, 0.0)
 		if is_node_ready():
-			_refresh()
+			_refresh(was)
 @export var lightning := true
 ## Whether this peer decides when lightning strikes. Off on all but one peer of a networked game.
 @export var times_strikes := true
@@ -109,9 +110,13 @@ const COVER_STEP := 0.05
 @export var rain_bus := &"Master"
 @export var thunder_bus := &"Master"
 
-## The sky the storm closes over and the lightning lights: an OvercastSky, or anything with a
-## `storm` property, set_storm(float), set_flash(Color, Vector3) and horizon_color() -> Color.
-var sky: Object
+## The sky the storm closes over and the lightning lights: an OvercastSky, or anything with
+## set_storm(float), set_flash(Color, Vector3) and horizon_color() -> Color. A new one is brought
+## up to the storm at once.
+var sky: Object:
+	set(value):
+		sky = value
+		_sky_storm = NAN
 ## The light the sky puts on the scene, as a multiplier: white by day, dimmer at night. Lights the
 ## drops and the haze.
 var sky_light := Color.WHITE
@@ -130,21 +135,29 @@ var cover_budget_usec := 1000
 var bolt_drawer: Callable
 
 var storm := 0.0
+var _sky_storm := NAN  # what the sky was last told
+## A dedicated server keeps the weather's timing and draws and plays none of it.
+var _presenting := DisplayServer.get_name() != "headless"
 var _flash_t := -1.0
 var _flash_k := 0.0
 var _flash_dir := Vector3.UP
 var _next_strike := 0.0
-var _shown := 0.0
 var _drops: MultiMeshInstance3D
 var _drop_material: ShaderMaterial
 var _haze: MeshInstance3D
 var _haze_material: ShaderMaterial
 var _rain_audio: AudioStreamPlayer
 var _linear_output := true
+## The rain floor: heights row by row, as baked and with the covers stamped on, and the image
+## and texture the shaders read. _cell is metres per cell.
+var _baked := PackedFloat32Array()
+var _heights := PackedFloat32Array()
+var _floor_dims := Vector2i.ZERO
 var _floor: Image
 var _floor_tex: ImageTexture
 var _floor_origin := Vector3.ZERO
 var _floor_size := Vector2.ONE
+var _cell := Vector2.ONE
 var _floor_top := 1e6
 var _rain_db := 0.0
 var _exposure := 1.0
@@ -156,14 +169,16 @@ var _wetness := 0.0
 var _puddles := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
 var _sun_energy := -1.0
-## The floor as baked, under whatever the covers have stamped onto _floor.
-var _baked: Image
 ## Node3D -> Cover.
 var _covers := {}
 var _cover_in := 0.0
 
 
 func _ready() -> void:
+	if not bolt_drawer.is_valid():
+		bolt_drawer = _draw_bolt
+	if not _presenting:
+		return
 	_linear_output = SkyScript.renderer_is_linear()
 	# The shader places every drop itself; the instances carry no transforms.
 	_drop_material = ShaderMaterial.new()
@@ -198,7 +213,7 @@ func _ready() -> void:
 		_sun_energy = sun.light_energy
 	if _floor_tex:
 		_hand_floor(_drop_material)
-	_refresh()
+	_refresh(0.0)
 
 
 ## One of sounds/.
@@ -208,10 +223,14 @@ static func _sound(sound_name: String) -> AudioStream:
 
 ## Where rain stops (OvercastRainFloor.bake). A scene loaded into rain already falling starts soaked.
 func set_rain_floor(rain_floor: Dictionary) -> void:
-	_baked = rain_floor["image"]
-	_floor = _baked.duplicate()
+	var img: Image = rain_floor["image"]
+	_floor_dims = img.get_size()
+	_baked = img.get_data().to_float32_array()
+	_heights = _baked.duplicate()
+	_floor = img.duplicate()
 	_floor_origin = rain_floor["origin"]
 	_floor_size = rain_floor["size"]
+	_cell = _floor_size / Vector2(_floor_dims)
 	_floor_top = rain_floor.get("top", 1e6)
 	_floor_tex = ImageTexture.create_from_image(_floor)
 	if _drop_material:
@@ -220,13 +239,28 @@ func set_rain_floor(rain_floor: Dictionary) -> void:
 		_hand_floor(_haze_material)
 	for mat in _wet_mats:
 		_hand_floor(mat)
-	if _shown > 0.0:
-		_wetness = 1.0
-		_puddles = heaviness(_shown)
+	if rain > 0.0:
+		_soak()
 	for node in _covers:  # stamped afresh on this floor
 		_covers[node].xform = Transform3D(Basis(), Vector3.INF)
 		_covers[node].raster_xform = Transform3D(Basis(), Vector3.INF)
 		_covers[node].rect = Rect2i()
+
+
+## Straight to the weather the current rain is heading for: the storm closed over as far as it
+## goes, the ground soaked. For a scene that starts mid-shower, and for screenshots.
+func settle() -> void:
+	storm = _storm_target()
+	_soak()
+
+
+func _soak() -> void:
+	_wetness = 1.0 if rain > 0.0 else 0.0
+	_puddles = heaviness(rain)
+
+
+func _storm_target() -> float:
+	return 0.0 if rain <= 0.0 else lerpf(STORM_LIGHT, 1.0, heaviness(rain))
 
 
 ## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge, a
@@ -261,7 +295,8 @@ func remove_cover(node: Node3D) -> void:
 	if _covers.has(node):
 		var rect: Rect2i = _covers[node].rect
 		_covers.erase(node)
-		_restamp(rect)
+		if _floor:
+			_restamp([rect])
 
 
 ## The triangles of every mesh under `node`, in its frame, skipping meshes under a physics body
@@ -308,45 +343,46 @@ class Cover:
 
 ## Re-stamps the cells covers have left or moved onto, and uploads the floor if any changed.
 func _update_covers(delta := COVER_EVERY) -> void:
-	if _floor == null or _covers.is_empty():
+	if _floor == null or _covers.is_empty() or not _presenting:
 		return
 	_cover_in -= delta
 	if _cover_in > 0.0:
 		return
 	_cover_in = COVER_EVERY
-	var region := Rect2i()
+	var dirty: Array[Rect2i] = []
 	var start := Time.get_ticks_usec()
 	var rasterized := 0
 	var done: Array[Node3D] = []
 	for node in _covers.keys():
 		var cover: Cover = _covers[node]
 		if not is_instance_valid(node):
-			region = _union(region, cover.rect)
+			dirty.append(cover.rect)
 			_covers.erase(node)
 			continue
 		var shown: bool = node.is_visible_in_tree()
 		var xform: Transform3D = node.global_transform
 		if shown == cover.shown and not _moved(cover, xform):
 			continue
-		if shown and _turned(cover, xform):
+		var turned := shown and _turned(cover, xform)
+		if turned:
 			if rasterized > 0 and Time.get_ticks_usec() - start > cover_budget_usec:
 				continue  # next tick, and first in line then
 			rasterized += 1
-		region = _union(region, cover.rect)
+		dirty.append(cover.rect)
 		cover.xform = xform
 		cover.shown = shown
 		if shown:
-			_place(cover)
+			_place(cover, turned)
 		else:
 			cover.rect = Rect2i()
-		region = _union(region, cover.rect)
+		dirty.append(cover.rect)
 		done.append(node)
 	# To the back of the line: whoever was put off goes first next tick.
 	for node in done:
 		var cover: Cover = _covers[node]
 		_covers.erase(node)
 		_covers[node] = cover
-	_restamp(region)
+	_restamp(dirty)
 
 
 ## Whether any corner of the cover has moved a step that shows since it was stamped: half a cell
@@ -354,7 +390,7 @@ func _update_covers(delta := COVER_EVERY) -> void:
 func _moved(cover: Cover, xform: Transform3D) -> bool:
 	if not cover.xform.origin.is_finite():
 		return true
-	var half := minf(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height()) * 0.5
+	var half := minf(_cell.x, _cell.y) * 0.5
 	for c in cover.corners:
 		var d := xform * c - cover.xform * c
 		if Vector2(d.x, d.z).length() > half or absf(d.y) > COVER_STEP:
@@ -368,17 +404,15 @@ static func _turned(cover: Cover, xform: Transform3D) -> bool:
 		or not xform.basis.is_equal_approx(cover.raster_xform.basis)
 
 
-## Where the cover stamps at cover.xform: its last raster shifted, if it has only translated
-## since, else a fresh one.
-func _place(cover: Cover) -> void:
-	if _turned(cover, cover.xform):
+## Where the cover stamps at cover.xform: a fresh raster if it `turned`, else its last one shifted.
+func _place(cover: Cover, turned: bool) -> void:
+	if turned:
 		cover.raster_xform = cover.xform
 		_rasterize(cover)
-	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
 	var d := cover.xform.origin - cover.raster_xform.origin
-	cover.shift = Vector2i(roundi(d.x / cell.x), roundi(d.z / cell.y))
+	cover.shift = Vector2i(roundi(d.x / _cell.x), roundi(d.z / _cell.y))
 	cover.rect = Rect2i(cover.raster_rect.position + cover.shift, cover.raster_rect.size) \
-		.intersection(Rect2i(Vector2i.ZERO, _floor.get_size()))
+		.intersection(Rect2i(Vector2i.ZERO, _floor_dims))
 	cover.rise = d.y
 
 
@@ -388,7 +422,6 @@ func _place(cover: Cover) -> void:
 ## every edge at half-cell steps, which also lands a beam narrower than a cell.
 func _rasterize(cover: Cover) -> void:
 	var xform := cover.raster_xform
-	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
 	# Triangles in cell units: x, z across the floor, y the height.
 	var tris := PackedVector3Array()
 	tris.resize(cover.triangles.size())
@@ -396,7 +429,7 @@ func _rasterize(cover: Cover) -> void:
 	var hi := Vector2(-INF, -INF)
 	for i in cover.triangles.size():
 		var w := xform * cover.triangles[i]
-		var u := Vector3((w.x - _floor_origin.x) / cell.x, w.y, (w.z - _floor_origin.z) / cell.y)
+		var u := Vector3((w.x - _floor_origin.x) / _cell.x, w.y, (w.z - _floor_origin.z) / _cell.y)
 		tris[i] = u
 		lo = lo.min(Vector2(u.x, u.z))
 		hi = hi.max(Vector2(u.x, u.z))
@@ -411,7 +444,8 @@ func _rasterize(cover: Cover) -> void:
 	var rh := rect.size.y
 	hs.resize(rw * rh)
 	hs.fill(-INF)
-	# Heights at the cell corners, (rw + 1) by (rh + 1), folded into the cells they bound at the end.
+	# Heights at the cell corners, folded into the cells they bound at the end. Every corner a
+	# triangle reaches is inside the raster; the extra row and column are padding for the fold.
 	var cw := rw + 1
 	var corners := PackedFloat32Array()
 	corners.resize(cw * (rh + 1))
@@ -453,8 +487,6 @@ func _rasterize(cover: Cover) -> void:
 					x0 = minf(x0, x)
 					x1 = maxf(x1, x)
 			var zj := j - rz
-			if zj < 0 or zj > rh:
-				continue
 			for i in range(maxi(ceili(x0 - 1e-4), rx), mini(floori(x1 + 1e-4), rx + rw) + 1):
 				var y := px * i + pz * j + p0
 				var k := zj * cw + i - rx
@@ -470,31 +502,45 @@ func _rasterize(cover: Cover) -> void:
 	cover.raster = hs
 
 
-## `region` back to the baked floor, then every cover over any of it stamped on again.
-func _restamp(region: Rect2i) -> void:
-	if _floor == null or not region.has_area():
-		return
-	_floor.blit_rect(_baked, region, region.position)
-	for node in _covers:
-		var cover: Cover = _covers[node]
-		var rect := cover.rect.intersection(region)
-		if not rect.has_area():
+## The dirty rects back to the baked floor, then every cover over them stamped on again, and the
+## floor uploaded once. Rects are merged only where they overlap: two movers at opposite ends of
+## the map restamp two patches, not everything between them.
+func _restamp(rects: Array[Rect2i]) -> void:
+	var merged: Array[Rect2i] = []
+	for r in rects:
+		if not r.has_area():
 			continue
-		# The raster cell under floor cell (x, z) is (x, z) - shift.
-		var o := cover.raster_rect.position + cover.shift
-		var w := cover.raster_rect.size.x
-		for z in range(rect.position.y, rect.end.y):
-			for x in range(rect.position.x, rect.end.x):
-				var top := cover.raster[(z - o.y) * w + x - o.x] + cover.rise
-				if top > _floor.get_pixel(x, z).r:
-					_floor.set_pixel(x, z, Color(top, 0.0, 0.0))
+		var i := 0
+		while i < merged.size():
+			if merged[i].intersects(r):
+				r = r.merge(merged[i])
+				merged.remove_at(i)
+				i = 0
+			else:
+				i += 1
+		merged.append(r)
+	if merged.is_empty():
+		return
+	var w := _floor_dims.x
+	for region in merged:
+		for z in range(region.position.y, region.end.y):
+			for x in range(region.position.x, region.end.x):
+				_heights[z * w + x] = _baked[z * w + x]
+		for node in _covers:
+			var cover: Cover = _covers[node]
+			var rect := cover.rect.intersection(region)
+			if not rect.has_area():
+				continue
+			# The raster cell under floor cell (x, z) is (x, z) - shift.
+			var o := cover.raster_rect.position + cover.shift
+			var rw := cover.raster_rect.size.x
+			for z in range(rect.position.y, rect.end.y):
+				for x in range(rect.position.x, rect.end.x):
+					var top := cover.raster[(z - o.y) * rw + x - o.x] + cover.rise
+					if top > _heights[z * w + x]:
+						_heights[z * w + x] = top
+	_floor.set_data(w, _floor_dims.y, false, Image.FORMAT_RF, _heights.to_byte_array())
 	_floor_tex.update(_floor)
-
-
-static func _union(a: Rect2i, b: Rect2i) -> Rect2i:
-	if not a.has_area():
-		return b
-	return a if not b.has_area() else a.merge(b)
 
 
 func _hand_floor(mat: ShaderMaterial) -> void:
@@ -507,6 +553,8 @@ func _hand_floor(mat: ShaderMaterial) -> void:
 ## Every material under `root` whose shader takes rain (includes shaders/wet.gdshaderinc). Each
 ## pools by `puddle_scale(mesh_instance)` (0 drains, 1 pools freely) when given, else 1.
 func add_wet_materials(root: Node, puddle_scale := Callable()) -> void:
+	if not _presenting:
+		return
 	var seen := {}
 	for mat in _wet_mats:
 		seen[mat] = true
@@ -535,10 +583,11 @@ static var _rain_shaders := {}
 static func takes_rain(shader: Shader) -> bool:
 	if shader == null:
 		return false
-	if not _rain_shaders.has(shader):
-		_rain_shaders[shader] = shader.get_shader_uniform_list().any(
+	var rid := shader.get_rid()  # by RID, so the cache holds no shader alive
+	if not _rain_shaders.has(rid):
+		_rain_shaders[rid] = shader.get_shader_uniform_list().any(
 			func(u: Dictionary) -> bool: return u["name"] == "wetness")
-	return _rain_shaders[shader]
+	return _rain_shaders[rid]
 
 
 ## 0 at the lightest rain to 1 at a downpour, and 0 when dry: what looks and sounds heavier
@@ -554,21 +603,23 @@ static func strike_gap(amount: float) -> float:
 		lerpf(STRIKE_GAP_LIGHT.y, STRIKE_GAP_HEAVY.y, t))
 
 
-func _refresh() -> void:
+## `was` is the rain before.
+func _refresh(was: float) -> void:
 	# The countdown restarts only when rain starts (rain that wanders would never let it run out);
 	# heavier rain only ever pulls the next strike in.
-	if rain > 0.0 and _shown <= 0.0:
+	if rain > 0.0 and was <= 0.0:
 		_next_strike = strike_gap(rain) * 0.5
-	elif rain > _shown:
+	elif rain > was:
 		_next_strike = minf(_next_strike, lerpf(STRIKE_GAP_LIGHT.y, STRIKE_GAP_HEAVY.y, heaviness(rain)))
-	_shown = rain
+	if not _presenting:
+		return
 	if rain <= 0.0:
 		if _haze_material:
 			_haze_material.set_shader_parameter("streak_opacity", 0.0)
 		if _rain_audio.playing:
 			_rain_audio.stop()
 		return
-	if _haze == null and DisplayServer.get_name() != "headless":
+	if _haze == null:
 		_build_haze()
 
 	var heavy := heaviness(rain)
@@ -605,8 +656,7 @@ func _build_haze() -> void:
 	_haze_material.shader = preload("res://addons/overcast/shaders/rain_haze.gdshader")
 	_haze_material.render_priority = Material.RENDER_PRIORITY_MAX - 1  # over all it hazes, under the drops
 	# OpenGL's NDC z is -1..1, Vulkan/Metal's 0..1.
-	var gl := RenderingServer.get_current_rendering_method() == "gl_compatibility"
-	_haze_material.set_shader_parameter("depth_remap", Vector2(2.0, -1.0) if gl else Vector2(1.0, 0.0))
+	_haze_material.set_shader_parameter("depth_remap", Vector2(1.0, 0.0) if _linear_output else Vector2(2.0, -1.0))
 	_haze_material.set_shader_parameter("linear_output", _linear_output)
 	_haze_material.set_shader_parameter("rain_top", _floor_top)
 	_hand_floor(_haze_material)
@@ -635,13 +685,13 @@ func _build_haze() -> void:
 
 
 func _on_rain_finished() -> void:
-	if _shown > 0.0:
+	if rain > 0.0:
 		_rain_audio.play()
 
 
-func _ears() -> Vector3:
+func _ears(fallback := Vector3.ZERO) -> Vector3:
 	var node := listener if listener else get_viewport().get_camera_3d() as Node3D
-	return node.global_position + Vector3.UP * listener_height if node else Vector3.ZERO
+	return node.global_position + Vector3.UP * listener_height if node else fallback
 
 
 ## How much of the rain around `ears` reaches them, 0 under a roof with no open sky in reach to 1
@@ -667,11 +717,11 @@ func rain_exposure(ears: Vector3) -> float:
 func floor_at(q: Vector3) -> float:
 	if _floor == null:
 		return -INF
-	var u := (q.x - _floor_origin.x) / _floor_size.x
-	var v := (q.z - _floor_origin.z) / _floor_size.y
-	if u < 0.0 or v < 0.0 or u >= 1.0 or v >= 1.0:
+	var x := floori((q.x - _floor_origin.x) / _cell.x)
+	var z := floori((q.z - _floor_origin.z) / _cell.y)
+	if x < 0 or z < 0 or x >= _floor_dims.x or z >= _floor_dims.y:
 		return INF
-	return _floor.get_pixel(int(u * _floor.get_width()), int(v * _floor.get_height())).r
+	return _heights[z * _floor_dims.x + x]
 
 
 func _update_rain_sound(delta: float) -> void:
@@ -701,7 +751,7 @@ func _haze_base() -> Color:
 
 func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	var density := HAZE_DENSITY * storm * storm
-	_haze.visible = (density > 0.0005 or _shown > 0.0) and not underwater
+	_haze.visible = (density > 0.0005 or rain > 0.0) and not underwater
 	if not _haze.visible:
 		return
 	# Kept in [0, 1) rather than driven off TIME, which loses precision as it grows.
@@ -720,8 +770,8 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 func _update_wet(delta: float, reflected: Color) -> void:
 	if _wet_mats.is_empty():
 		return
-	var wet_target := 1.0 if _shown > 0.0 else 0.0
-	var puddle_target := heaviness(_shown)
+	var wet_target := 1.0 if rain > 0.0 else 0.0
+	var puddle_target := heaviness(rain)
 	_wetness = move_toward(_wetness, wet_target,
 		(WET_RISE * lerpf(0.35, 1.0, puddle_target) if wet_target > _wetness else WET_DRY) * delta)
 	_puddles = move_toward(_puddles, puddle_target,
@@ -750,24 +800,23 @@ func _update_drops(light: Color) -> void:
 
 
 func _process(delta: float) -> void:
-	_update_covers(delta)
-	_drops.visible = _shown > 0.0 and not underwater
-	if _rain_audio.playing:
-		_update_rain_sound(delta)
-
-	var storm_target := 0.0 if _shown <= 0.0 else lerpf(STORM_LIGHT, 1.0, heaviness(_shown))
-	storm = move_toward(storm, storm_target, STORM_RATE * delta)
-	# Compared every frame rather than pushed on change: a game may swap the sky for a new one,
-	# which starts clear.
-	if sky and sky.storm != storm:
-		sky.set_storm(storm)
-	if _shown > 0.0 and lightning and times_strikes:
+	storm = move_toward(storm, _storm_target(), STORM_RATE * delta)
+	if rain > 0.0 and lightning and times_strikes:
 		_next_strike -= delta
 		if _next_strike <= 0.0:
-			_next_strike = strike_gap(_shown)
+			_next_strike = strike_gap(rain)
 			var strike_seed := randi()
 			strike(strike_seed)
 			struck.emit(strike_seed)
+	if not _presenting:
+		return
+	if sky and storm != _sky_storm:
+		sky.set_storm(storm)
+		_sky_storm = storm
+	_update_covers(delta)
+	_drops.visible = rain > 0.0 and not underwater
+	if _rain_audio.playing:
+		_update_rain_sound(delta)
 
 	if _flash_t >= 0.0:
 		_flash_t += delta
@@ -795,7 +844,7 @@ func _process(delta: float) -> void:
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes
 ## from the seed, so the bolt, its flash and its thunder agree on every peer that is handed it.
 func strike(strike_seed: int) -> void:
-	if DisplayServer.get_name() == "headless":
+	if not _presenting:
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = strike_seed
@@ -815,7 +864,7 @@ func strike(strike_seed: int) -> void:
 		var to := from + (side + out * 0.4 + Vector3.DOWN).normalized() * rng.randf_range(15.0, 35.0)
 		_bolt(to, from, 0.5, rng)
 
-	var eye := _ears() if (listener or get_viewport().get_camera_3d()) else centre
+	var eye := _ears(centre)
 	_flash_dir = (ground.lerp(top, 0.6) - eye).normalized()
 	_flash_t = 0.0
 
@@ -848,10 +897,7 @@ func _bolt(from: Vector3, to: Vector3, width_scale: float, rng: RandomNumberGene
 		get_tree().create_timer(stroke[0]).timeout.connect(func() -> void:
 			if not is_inside_tree():
 				return
-			if bolt_drawer.is_valid():
-				bolt_drawer.call(points, 2.2 * width_scale, stroke[1], 0.25)
-			else:
-				_draw_bolt(points, 2.2 * width_scale, stroke[1], 0.25))
+			bolt_drawer.call(points, 2.2 * width_scale, stroke[1], 0.25))
 
 
 ## The built-in bolt (shaders/bolt.gdshader): one camera-facing strip along the points, faded out

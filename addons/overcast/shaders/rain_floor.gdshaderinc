@@ -17,4 +17,14 @@ vec2 rain_floor_uv(vec3 p) {
 bool rain_floor_covers(vec2 uv) {
 	return uv.x >= 0.0 && uv.y >= 0.0 && uv.x < 1.0 && uv.y < 1.0;
 }
+
+// Whether rain falling past world point p has not yet been caught: everywhere with no floor,
+// nowhere off it.
+bool rain_falls_at(vec3 p) {
+	if (!has_floor) {
+		return true;
+	}
+	vec2 uv = rain_floor_uv(p);
+	return rain_floor_covers(uv) && p.y > textureLod(rain_floor, uv, 0.0).r;
+}
 #endif

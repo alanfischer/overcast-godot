@@ -1,0 +1,60 @@
+; Overcast — sky, clouds and weather for Godot.
+;
+; The repo is itself a Godot project so a clone can run the suites (./run_tests.sh) and open the
+; demo without any setup. A game consuming Overcast copies addons/overcast/ and enables the plugin,
+; which declares the shader globals below in its own project.
+
+config_version=5
+
+[application]
+
+config/name="overcast"
+run/main_scene="res://demo/demo.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/overcast/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+
+[shader_globals]
+
+overcast_noise={
+"type": "sampler2D",
+"value": ""
+}
+overcast_scale={
+"type": "float",
+"value": 2.2
+}
+overcast_speed={
+"type": "float",
+"value": 0.035
+}
+overcast_softness={
+"type": "float",
+"value": 0.1
+}
+overcast_cover={
+"type": "float",
+"value": 0.0
+}
+overcast_shadow={
+"type": "float",
+"value": 0.0
+}
+overcast_sun_dir={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
+overcast_volumetric={
+"type": "float",
+"value": 0.0
+}
+overcast_volume={
+"type": "sampler3D",
+"value": ""
+}

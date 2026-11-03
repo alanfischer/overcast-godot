@@ -80,7 +80,7 @@ const PUDDLE_DRY := 1.0 / 240.0
 const BOLT_SEGMENTS := 16
 const BOLT_HEIGHT := Vector2(110.0, 170.0)
 const SOUND_SPEED := 340.0
-## Covers re-stamp the rain floor at most this often (s), and only for a step that shows: a whole
+## Covers re-stamp the rain floor at most this often (s), and only for a step that shows: half a
 ## cell sideways or COVER_STEP (m) up or down. The floor is re-uploaded whole each time.
 const COVER_EVERY := 0.1
 const COVER_STEP := 0.05
@@ -121,6 +121,10 @@ var night := 0.0
 var underwater := false
 ## A low-pass on the rain's bus, closed down as the rain goes out of reach. Optional.
 var rain_filter: AudioEffectLowPassFilter
+## Microseconds a tick may spend rasterizing covers that turned (at least one is, whatever the
+## budget). Past it the rest keep their old stamp and go first next tick, so a walking golem
+## spreads its turning limbs over a few ticks rather than hitching one frame.
+var cover_budget_usec := 1000
 ## Draws a bolt instead of the built-in one: (points: PackedVector3Array, width: float,
 ## brightness: float, fade: float) -> void. Called for each stroke.
 var bolt_drawer: Callable
@@ -154,7 +158,7 @@ var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash,
 var _sun_energy := -1.0
 ## The floor as baked, under whatever the covers have stamped onto _floor.
 var _baked: Image
-## Node3D -> [box in its own frame, cells stamped (Rect2i), height stamped (snapped), shown].
+## Node3D -> Cover.
 var _covers := {}
 var _cover_in := 0.0
 
@@ -219,24 +223,87 @@ func set_rain_floor(rain_floor: Dictionary) -> void:
 	if _shown > 0.0:
 		_wetness = 1.0
 		_puddles = heaviness(_shown)
-	for node in _covers:
-		_covers[node] = [_covers[node][0], Rect2i(), INF, false]  # stamped afresh on this floor
+	for node in _covers:  # stamped afresh on this floor
+		_covers[node].xform = Transform3D(Basis(), Vector3.INF)
+		_covers[node].raster_xform = Transform3D(Basis(), Vector3.INF)
+		_covers[node].rect = Rect2i()
 
 
-## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge.
-## `box` is its extent in its own frame. Rain lands on the top of the box's world bounds, which is
-## generous for something rotated. Re-stamped onto the rain floor on any frame it has moved; it
-## covers nothing while hidden (a wall broken down), and a freed node is let go of by itself.
-func add_cover(node: Node3D, box: AABB) -> void:
-	_covers[node] = [box, Rect2i(), INF, false]
+## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge, a
+## wall that can be knocked down. `shape` is what of it rain lands on, in its own frame: an AABB,
+## a PackedVector3Array of triangles, or nothing for the meshes under the node (not those under a
+## physics body of their own). Each floor cell takes the highest of it over that cell, so a
+## rotated, L-shaped or pitched thing keeps rain off exactly what is under it. Re-stamped as it
+## moves (COVER_EVERY, COVER_STEP); it covers nothing while hidden, and a freed node is let go of
+## by itself.
+func add_cover(node: Node3D, shape: Variant = null) -> void:
+	var tris: PackedVector3Array
+	if shape is AABB:
+		tris = _box_triangles(shape)
+	elif shape is PackedVector3Array:
+		tris = shape
+	else:
+		tris = mesh_triangles(node)
+	if tris.is_empty():
+		return
+	var cover := Cover.new()
+	cover.triangles = tris
+	var bounds := AABB(tris[0], Vector3.ZERO)
+	for v in tris:
+		bounds = bounds.expand(v)
+	for i in 8:
+		cover.corners.append(bounds.get_endpoint(i))
+	_covers[node] = cover
 	_cover_in = 0.0
 
 
 func remove_cover(node: Node3D) -> void:
 	if _covers.has(node):
-		var rect: Rect2i = _covers[node][1]
+		var rect: Rect2i = _covers[node].rect
 		_covers.erase(node)
 		_restamp(rect)
+
+
+## The triangles of every mesh under `node`, in its frame, skipping meshes under a physics body
+## of their own (another mover's).
+static func mesh_triangles(node: Node, xform := Transform3D()) -> PackedVector3Array:
+	var tris := PackedVector3Array()
+	for child in node.get_children():
+		if child is PhysicsBody3D or not child is Node3D:
+			continue
+		var at: Transform3D = xform * (child as Node3D).transform
+		var mi := child as MeshInstance3D
+		if mi and mi.mesh:
+			for v in mi.mesh.get_faces():
+				tris.append(at * v)
+		tris.append_array(mesh_triangles(child, at))
+	return tris
+
+
+static func _box_triangles(box: AABB) -> PackedVector3Array:
+	var mesh := BoxMesh.new()
+	mesh.size = box.size
+	var tris := PackedVector3Array()
+	for v in mesh.get_faces():
+		tris.append(v + box.get_center())
+	return tris
+
+
+## One cover: its triangles and bounds in its own frame, and what it last stamped.
+class Cover:
+	var triangles: PackedVector3Array
+	var corners := PackedVector3Array()
+	var xform := Transform3D(Basis(), Vector3.INF)
+	var shown := false
+	## Where it stamps now: its raster moved `shift` cells and raised `rise`, clipped to the floor.
+	var rect := Rect2i()
+	var shift := Vector2i.ZERO
+	var rise := 0.0
+	## Its last rasterization: per cell of raster_rect, row by row, -INF where it is not over. Kept
+	## while it only translates; turning it rasterizes it afresh.
+	var raster_rect := Rect2i()
+	var raster := PackedFloat32Array()
+	var raster_xform := Transform3D(Basis(), Vector3.INF)
 
 
 ## Re-stamps the cells covers have left or moved onto, and uploads the floor if any changed.
@@ -248,23 +315,159 @@ func _update_covers(delta := COVER_EVERY) -> void:
 		return
 	_cover_in = COVER_EVERY
 	var region := Rect2i()
+	var start := Time.get_ticks_usec()
+	var rasterized := 0
+	var done: Array[Node3D] = []
 	for node in _covers.keys():
-		var cover: Array = _covers[node]
+		var cover: Cover = _covers[node]
 		if not is_instance_valid(node):
-			region = _union(region, cover[1])
+			region = _union(region, cover.rect)
 			_covers.erase(node)
 			continue
 		var shown: bool = node.is_visible_in_tree()
-		var box: AABB = node.global_transform * (cover[0] as AABB)
-		var rect := _cells_under(box) if shown else Rect2i()
-		var top := snappedf(box.end.y, COVER_STEP)
-		if rect == cover[1] and top == cover[2] and shown == cover[3]:
+		var xform: Transform3D = node.global_transform
+		if shown == cover.shown and not _moved(cover, xform):
 			continue
-		region = _union(_union(region, cover[1]), rect)
-		cover[1] = rect
-		cover[2] = top
-		cover[3] = shown
+		if shown and _turned(cover, xform):
+			if rasterized > 0 and Time.get_ticks_usec() - start > cover_budget_usec:
+				continue  # next tick, and first in line then
+			rasterized += 1
+		region = _union(region, cover.rect)
+		cover.xform = xform
+		cover.shown = shown
+		if shown:
+			_place(cover)
+		else:
+			cover.rect = Rect2i()
+		region = _union(region, cover.rect)
+		done.append(node)
+	# To the back of the line: whoever was put off goes first next tick.
+	for node in done:
+		var cover: Cover = _covers[node]
+		_covers.erase(node)
+		_covers[node] = cover
 	_restamp(region)
+
+
+## Whether any corner of the cover has moved a step that shows since it was stamped: half a cell
+## sideways or COVER_STEP up or down.
+func _moved(cover: Cover, xform: Transform3D) -> bool:
+	if not cover.xform.origin.is_finite():
+		return true
+	var half := minf(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height()) * 0.5
+	for c in cover.corners:
+		var d := xform * c - cover.xform * c
+		if Vector2(d.x, d.z).length() > half or absf(d.y) > COVER_STEP:
+			return true
+	return false
+
+
+## Whether placing the cover at `xform` needs a fresh raster rather than its last one moved.
+static func _turned(cover: Cover, xform: Transform3D) -> bool:
+	return not cover.raster_xform.origin.is_finite() \
+		or not xform.basis.is_equal_approx(cover.raster_xform.basis)
+
+
+## Where the cover stamps at cover.xform: its last raster shifted, if it has only translated
+## since, else a fresh one.
+func _place(cover: Cover) -> void:
+	if _turned(cover, cover.xform):
+		cover.raster_xform = cover.xform
+		_rasterize(cover)
+	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
+	var d := cover.xform.origin - cover.raster_xform.origin
+	cover.shift = Vector2i(roundi(d.x / cell.x), roundi(d.z / cell.y))
+	cover.rect = Rect2i(cover.raster_rect.position + cover.shift, cover.raster_rect.size) \
+		.intersection(Rect2i(Vector2i.ZERO, _floor.get_size()))
+	cover.rise = d.y
+
+
+## The cover's triangles where it is now, onto the floor's cells: each cell takes the highest of
+## them over it. A flat triangle is highest over a cell at one of the cell's corners or along one
+## of its own edges, so those are what is sampled: the corners each row of the triangle spans, and
+## every edge at half-cell steps, which also lands a beam narrower than a cell.
+func _rasterize(cover: Cover) -> void:
+	var xform := cover.raster_xform
+	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
+	# Triangles in cell units: x, z across the floor, y the height.
+	var tris := PackedVector3Array()
+	tris.resize(cover.triangles.size())
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for i in cover.triangles.size():
+		var w := xform * cover.triangles[i]
+		var u := Vector3((w.x - _floor_origin.x) / cell.x, w.y, (w.z - _floor_origin.z) / cell.y)
+		tris[i] = u
+		lo = lo.min(Vector2(u.x, u.z))
+		hi = hi.max(Vector2(u.x, u.z))
+	# Not clipped to the floor: a cover that drives onto it brings all of itself.
+	var rect := Rect2i(Vector2i(floori(lo.x), floori(lo.y)),
+		Vector2i(floori(hi.x) - floori(lo.x) + 1, floori(hi.y) - floori(lo.y) + 1))
+	cover.raster_rect = rect
+	var hs := PackedFloat32Array()
+	var rx := rect.position.x
+	var rz := rect.position.y
+	var rw := rect.size.x
+	var rh := rect.size.y
+	hs.resize(rw * rh)
+	hs.fill(-INF)
+	# Heights at the cell corners, (rw + 1) by (rh + 1), folded into the cells they bound at the end.
+	var cw := rw + 1
+	var corners := PackedFloat32Array()
+	corners.resize(cw * (rh + 1))
+	corners.fill(-INF)
+	for t in range(0, tris.size() - 2, 3):
+		var a := tris[t]
+		var b := tris[t + 1]
+		var c := tris[t + 2]
+		var det := (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z)
+		# A wall's edges are its neighbours' too: the top face of a closed brush lands its top edge.
+		var steep := absf(det) < 0.05 * (b - a).cross(c - a).length()
+		for e in (0 if steep else 3):
+			var p := tris[t + e]
+			var q := tris[t + (e + 1) % 3]
+			var steps := maxi(ceili(Vector2(q.x - p.x, q.z - p.z).length() * 2.0), 1)
+			for k in steps + 1:
+				var f := float(k) / steps
+				var xi := floori(lerpf(p.x, q.x, f)) - rx
+				var zi := floori(lerpf(p.z, q.z, f)) - rz
+				if xi >= 0 and zi >= 0 and xi < rw and zi < rh:
+					var y := lerpf(p.y, q.y, f)
+					if y > hs[zi * rw + xi]:
+						hs[zi * rw + xi] = y
+		if absf(det) < 1e-6:
+			continue  # edge-on from above: its edges have said all it has to say
+		# The triangle's plane, y = px * x + pz * z + p0.
+		var px := ((b.y - a.y) * (c.z - a.z) - (c.y - a.y) * (b.z - a.z)) / det
+		var pz := ((c.y - a.y) * (b.x - a.x) - (b.y - a.y) * (c.x - a.x)) / det
+		var p0 := a.y - px * a.x - pz * a.z
+		for j in range(ceili(minf(a.z, minf(b.z, c.z))), floori(maxf(a.z, maxf(b.z, c.z))) + 1):
+			# Where the row z = j crosses the triangle's edges.
+			var x0 := INF
+			var x1 := -INF
+			for e in 3:
+				var p := tris[t + e]
+				var q := tris[t + (e + 1) % 3]
+				if (p.z - j) * (q.z - j) <= 0.0 and p.z != q.z:
+					var x := p.x + (q.x - p.x) * (j - p.z) / (q.z - p.z)
+					x0 = minf(x0, x)
+					x1 = maxf(x1, x)
+			var zj := j - rz
+			if zj < 0 or zj > rh:
+				continue
+			for i in range(maxi(ceili(x0 - 1e-4), rx), mini(floori(x1 + 1e-4), rx + rw) + 1):
+				var y := px * i + pz * j + p0
+				var k := zj * cw + i - rx
+				if y > corners[k]:
+					corners[k] = y
+	# A corner is shared by the four cells around it.
+	for zi in rh:
+		for xi in rw:
+			var k := zi * cw + xi
+			var y := maxf(maxf(corners[k], corners[k + 1]), maxf(corners[k + cw], corners[k + cw + 1]))
+			if y > hs[zi * rw + xi]:
+				hs[zi * rw + xi] = y
+	cover.raster = hs
 
 
 ## `region` back to the baked floor, then every cover over any of it stamped on again.
@@ -273,26 +476,19 @@ func _restamp(region: Rect2i) -> void:
 		return
 	_floor.blit_rect(_baked, region, region.position)
 	for node in _covers:
-		var cover: Array = _covers[node]
-		var rect: Rect2i = (cover[1] as Rect2i).intersection(region)
+		var cover: Cover = _covers[node]
+		var rect := cover.rect.intersection(region)
 		if not rect.has_area():
 			continue
-		var top: float = cover[2]
-		for y in range(rect.position.y, rect.end.y):
+		# The raster cell under floor cell (x, z) is (x, z) - shift.
+		var o := cover.raster_rect.position + cover.shift
+		var w := cover.raster_rect.size.x
+		for z in range(rect.position.y, rect.end.y):
 			for x in range(rect.position.x, rect.end.x):
-				if _floor.get_pixel(x, y).r < top:
-					_floor.set_pixel(x, y, Color(top, 0.0, 0.0))
+				var top := cover.raster[(z - o.y) * w + x - o.x] + cover.rise
+				if top > _floor.get_pixel(x, z).r:
+					_floor.set_pixel(x, z, Color(top, 0.0, 0.0))
 	_floor_tex.update(_floor)
-
-
-## The floor cells `box` overlaps on X and Z, clipped to the floor.
-func _cells_under(box: AABB) -> Rect2i:
-	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
-	var lo := Vector2i(floori((box.position.x - _floor_origin.x) / cell.x),
-		floori((box.position.z - _floor_origin.z) / cell.y))
-	var hi := Vector2i(ceili((box.end.x - _floor_origin.x) / cell.x),
-		ceili((box.end.z - _floor_origin.z) / cell.y))
-	return Rect2i(lo, hi - lo).intersection(Rect2i(Vector2i.ZERO, _floor.get_size()))
 
 
 static func _union(a: Rect2i, b: Rect2i) -> Rect2i:

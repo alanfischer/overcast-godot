@@ -150,18 +150,18 @@ func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
 	var lift := _platform(Vector3(-6, 3, -6))
 	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))  # a 2 m deck, top at +0.1
 	w._update_covers()
-	assert_almost_eq(w.floor_at(Vector3(-6, 0, -6)), 3.1, 0.026, "rain lands on the deck")
+	assert_almost_eq(w.floor_at(Vector3(-6, 0, -6)), 3.1, 1e-4, "rain lands on the deck")
 	assert_eq(w.floor_at(Vector3(-6, 0, -3.5)), 0.0, "beside it, on the ground")
 	lift.global_position = Vector3(6, 3, 6)
 	w._update_covers()
 	assert_eq(w.floor_at(Vector3(-6, 0, -6)), 0.0, "where it was is open again")
-	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 0.026, "and where it went is covered")
+	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 1e-4, "and where it went is covered")
 	lift.visible = false
 	w._update_covers()
 	assert_eq(w.floor_at(Vector3(6, 0, 6)), 0.0, "hidden, it covers nothing")
 	lift.visible = true
 	w._update_covers()
-	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 0.026, "shown again, it does")
+	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 1e-4, "shown again, it does")
 	lift.free()
 	w._update_covers()
 	assert_eq(w.floor_at(Vector3(6, 0, 6)), 0.0, "a freed cover lets the rain back")
@@ -182,10 +182,10 @@ func test_covers_leave_roofs_and_each_other_alone() -> void:
 	w.add_cover(b, box)
 	w._update_covers()
 	assert_eq(w.floor_at(Vector3(0, 0, 0)), 5.0, "a lift under a roof leaves the roof where rain stops")
-	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 4.1, 0.026, "where two overlap, the higher catches it")
+	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 4.1, 1e-4, "where two overlap, the higher catches it")
 	b.global_position = Vector3(5, 4, -5)
 	w._update_covers()
-	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 3.1, 0.026, "the one that stayed is still stamped")
+	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 3.1, 1e-4, "the one that stayed is still stamped")
 	w.remove_cover(a)
 	assert_eq(w.floor_at(Vector3(-5, 0, 5)), 0.0, "removed by hand, open again")
 
@@ -208,3 +208,144 @@ func test_covers_restamp_only_for_a_step_that_shows() -> void:
 	assert_eq(uploads[0], 0, "and a real move waits out the interval")
 	w._update_covers(w.COVER_EVERY)
 	assert_gt(uploads[0], 0, "then lands")
+
+
+## Triangles for a flat rectangle at height y, corners a and b on X/Z, in the cover's frame.
+func _quad(a: Vector2, b: Vector2, y: float) -> PackedVector3Array:
+	var p := [Vector3(a.x, y, a.y), Vector3(b.x, y, a.y), Vector3(b.x, y, b.y), Vector3(a.x, y, b.y)]
+	return PackedVector3Array([p[0], p[1], p[2], p[0], p[2], p[3]])
+
+
+func _covered(w: Node3D) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for z in 20:
+		for x in 20:
+			if w._floor.get_pixel(x, z).r != w._baked.get_pixel(x, z).r:
+				cells.append(Vector2i(x, z))
+	return cells
+
+
+func test_a_turned_beam_covers_its_diagonal_not_its_bounds() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var beam := _platform(Vector3(-5, 3, 5))
+	beam.rotation.y = PI / 4
+	w.add_cover(beam, _quad(Vector2(-4, -0.25), Vector2(4, 0.25), 0.0))  # 8 m by 0.5 m
+	w._update_covers()
+	var cells := _covered(w)
+	assert_gt(cells.size(), 8, "it lands all along its length (%d cells)" % cells.size())
+	assert_lt(cells.size(), 30, "and not over the 6 m square around it a box would (%d)" % cells.size())
+	assert_almost_eq(w.floor_at(Vector3(-5, 0, 5)), 3.0, 1e-4, "at its height")
+
+
+func test_an_l_shape_leaves_its_corner_open() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var roof := _platform(Vector3(-5, 3, -5))
+	var tris := _quad(Vector2(-3, -3), Vector2(3, -1), 0.0)  # along the top
+	tris.append_array(_quad(Vector2(-3, -1), Vector2(-1, 3), 0.0))  # down the left
+	w.add_cover(roof, tris)
+	w._update_covers()
+	assert_almost_eq(w.floor_at(Vector3(-7.5, 0, -2.5)), 3.0, 1e-4, "under the leg")
+	assert_eq(w.floor_at(Vector3(-3, 0, -3)), 0.0, "the inside corner stays open")
+
+
+func test_a_pitched_roof_stops_rain_at_its_slope() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var shed := _platform(Vector3(5, 3, -5))
+	# Eaves at 3 m along x = -3, rising to 5 m along x = +3.
+	var a := Vector3(-3, 0, -3)
+	var b := Vector3(3, 2, -3)
+	var c := Vector3(3, 2, 3)
+	var d := Vector3(-3, 0, 3)
+	w.add_cover(shed, PackedVector3Array([a, b, c, a, c, d]))
+	w._update_covers()
+	var low := w.floor_at(Vector3(2.5, 0, -5))
+	var high := w.floor_at(Vector3(7.5, 0, -5))
+	assert_lt(low, 3.6, "near the eaves rain stops low (%.2f)" % low)
+	assert_gt(high, 4.4, "near the ridge, high (%.2f)" % high)
+
+
+func test_a_cover_defaults_to_its_own_meshes() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var body := AnimatableBody3D.new()
+	body.sync_to_physics = false  # moved by hand here, not by a physics step
+	_root().add_child(body)
+	_keep(body)
+	body.global_position = Vector3(5, 3, 5)
+	var mi := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2, 0.2, 2)
+	mi.mesh = mesh
+	body.add_child(mi)
+	var rider := AnimatableBody3D.new()  # another mover parked on it is not part of it
+	var rider_mesh := MeshInstance3D.new()
+	rider_mesh.mesh = BoxMesh.new()
+	rider_mesh.position.y = 5.0
+	rider.add_child(rider_mesh)
+	body.add_child(rider)
+	w.add_cover(body)
+	w._update_covers()
+	assert_almost_eq(w.floor_at(Vector3(5, 0, 5)), 3.1, 1e-4, "the top of its own mesh")
+
+
+func test_a_cover_that_only_slides_reuses_its_raster() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var train := _platform(Vector3(-12, 3, 5))  # starts half off the floor's west edge
+	w.add_cover(train, _quad(Vector2(-2, -0.5), Vector2(2, 0.5), 0.0))
+	w._update_covers()
+	var first: Transform3D = w._covers[train].raster_xform
+	assert_almost_eq(w.floor_at(Vector3(-9.5, 0, 5)), 3.0, 1e-4, "the part on the floor covers")
+	train.global_position = Vector3(4, 4, 5)
+	w._update_covers()
+	assert_eq(w._covers[train].raster_xform, first, "a slide is the same raster moved")
+	assert_almost_eq(w.floor_at(Vector3(2.5, 0, 5)), 4.0, 1e-4, "all of it, once on the floor")
+	assert_almost_eq(w.floor_at(Vector3(5.5, 0, 5)), 4.0, 1e-4, "both ends")
+	assert_eq(w.floor_at(Vector3(-9.5, 0, 5)), 0.0, "and gone from where it was")
+	train.rotation.y = PI / 2
+	w._update_covers()
+	assert_ne(w._covers[train].raster_xform, first, "a turn rasterizes it afresh")
+	assert_almost_eq(w.floor_at(Vector3(4, 0, 6.5)), 4.0, 1e-4, "now lying north-south")
+	assert_eq(w.floor_at(Vector3(5.5, 0, 5)), 0.0, "and no longer east-west")
+
+
+func test_turning_covers_share_out_the_work() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var spinners: Array[Node3D] = []
+	for i in 6:
+		var s := _platform(Vector3(-7.5 + i * 3, 3, -7.5))
+		w.add_cover(s, _quad(Vector2(-1, -0.2), Vector2(1, 0.2), 0.0))
+		spinners.append(s)
+	w._update_covers()
+	for s in spinners:
+		s.rotation.y = PI / 2
+	w.cover_budget_usec = 0  # out of time after the first
+	var turned := func() -> int:
+		var n := 0
+		for s in spinners:
+			if w._covers[s].xform.basis.is_equal_approx(s.global_transform.basis):
+				n += 1
+		return n
+	w._update_covers()
+	assert_eq(turned.call(), 1, "one turns per tick when the budget is spent")
+	w._update_covers()
+	assert_eq(turned.call(), 2, "the next tick, the next one")
+	for i in 4:
+		w._update_covers()
+	assert_eq(turned.call(), 6, "and none is left behind")

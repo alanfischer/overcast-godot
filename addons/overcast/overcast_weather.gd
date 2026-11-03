@@ -188,10 +188,9 @@ func _ready() -> void:
 	_refresh()
 
 
-## One of sounds/. Absent only where nothing has imported the addon yet (a bare headless run).
+## One of sounds/.
 static func _sound(sound_name: String) -> AudioStream:
-	var path := "res://addons/overcast/sounds/%s.ogg" % sound_name
-	return load(path) as AudioStream if ResourceLoader.exists(path) else null
+	return load("res://addons/overcast/sounds/%s.ogg" % sound_name) as AudioStream
 
 
 ## Where rain stops (OvercastRainFloor.bake). A scene loaded into rain already falling starts soaked.

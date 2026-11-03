@@ -114,15 +114,11 @@ func test_wet_materials_are_found_by_their_shader() -> void:
 	root.free()
 
 
-## Fully featured out of the box: rain and thunder sound with nothing set. A bare headless run
-## that has never imported the addon has no sounds to load, and gets silence rather than errors.
+## Fully featured out of the box: rain and thunder sound with nothing set.
 func test_it_brings_its_own_rain_and_thunder() -> void:
 	var w := Weather.new()
 	_keep(w)
 	_root().add_child(w)
-	if not ResourceLoader.exists("res://addons/overcast/sounds/rain.ogg"):
-		assert_eq(w.rain_stream, null, "nothing imported, nothing to play")
-		return
 	assert_ne(w.rain_stream, null, "its own rain")
-	assert_true(w.rain_stream.loop, "which loops without a gap")
+	assert_true(w.rain_stream != null and w.rain_stream.loop, "which loops without a gap")
 	assert_ne(w.thunder_stream, null, "and its own thunder")

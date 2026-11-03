@@ -19,6 +19,10 @@ fi
 
 cd "$(dirname "$0")"
 
+# Import first, as opening the project in the editor would: the addon's sounds load from their
+# imported copies, which a clean checkout does not have yet.
+"$GODOT" --headless --path . --import > /dev/null 2>&1
+
 # A GDScript runtime error (a bad call, a wrong-typed index) kills only the frame it happens in:
 # the test's remaining assertions never run, the suite counts no failure, and the run goes green
 # holding a broken test. The assertion counts cannot see it, so the output is the only witness --

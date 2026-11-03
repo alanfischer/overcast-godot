@@ -80,6 +80,10 @@ const PUDDLE_DRY := 1.0 / 240.0
 const BOLT_SEGMENTS := 16
 const BOLT_HEIGHT := Vector2(110.0, 170.0)
 const SOUND_SPEED := 340.0
+## Covers re-stamp the rain floor at most this often (s), and only for a step that shows: a whole
+## cell sideways or COVER_STEP (m) up or down. The floor is re-uploaded whole each time.
+const COVER_EVERY := 0.1
+const COVER_STEP := 0.05
 
 ## How hard it is raining: 0 dry, from a drizzle just above 0 to a downpour at 1. Past 1 only the
 ## number of drops keeps rising.
@@ -148,6 +152,11 @@ var _wetness := 0.0
 var _puddles := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
 var _sun_energy := -1.0
+## The floor as baked, under whatever the covers have stamped onto _floor.
+var _baked: Image
+## Node3D -> [box in its own frame, cells stamped (Rect2i), height stamped (snapped), shown].
+var _covers := {}
+var _cover_in := 0.0
 
 
 func _ready() -> void:
@@ -195,7 +204,8 @@ static func _sound(sound_name: String) -> AudioStream:
 
 ## Where rain stops (OvercastRainFloor.bake). A scene loaded into rain already falling starts soaked.
 func set_rain_floor(rain_floor: Dictionary) -> void:
-	_floor = rain_floor["image"]
+	_baked = rain_floor["image"]
+	_floor = _baked.duplicate()
 	_floor_origin = rain_floor["origin"]
 	_floor_size = rain_floor["size"]
 	_floor_top = rain_floor.get("top", 1e6)
@@ -209,6 +219,86 @@ func set_rain_floor(rain_floor: Dictionary) -> void:
 	if _shown > 0.0:
 		_wetness = 1.0
 		_puddles = heaviness(_shown)
+	for node in _covers:
+		_covers[node] = [_covers[node][0], Rect2i(), INF, false]  # stamped afresh on this floor
+
+
+## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge.
+## `box` is its extent in its own frame. Rain lands on the top of the box's world bounds, which is
+## generous for something rotated. Re-stamped onto the rain floor on any frame it has moved; it
+## covers nothing while hidden (a wall broken down), and a freed node is let go of by itself.
+func add_cover(node: Node3D, box: AABB) -> void:
+	_covers[node] = [box, Rect2i(), INF, false]
+	_cover_in = 0.0
+
+
+func remove_cover(node: Node3D) -> void:
+	if _covers.has(node):
+		var rect: Rect2i = _covers[node][1]
+		_covers.erase(node)
+		_restamp(rect)
+
+
+## Re-stamps the cells covers have left or moved onto, and uploads the floor if any changed.
+func _update_covers(delta := COVER_EVERY) -> void:
+	if _floor == null or _covers.is_empty():
+		return
+	_cover_in -= delta
+	if _cover_in > 0.0:
+		return
+	_cover_in = COVER_EVERY
+	var region := Rect2i()
+	for node in _covers.keys():
+		var cover: Array = _covers[node]
+		if not is_instance_valid(node):
+			region = _union(region, cover[1])
+			_covers.erase(node)
+			continue
+		var shown: bool = node.is_visible_in_tree()
+		var box: AABB = node.global_transform * (cover[0] as AABB)
+		var rect := _cells_under(box) if shown else Rect2i()
+		var top := snappedf(box.end.y, COVER_STEP)
+		if rect == cover[1] and top == cover[2] and shown == cover[3]:
+			continue
+		region = _union(_union(region, cover[1]), rect)
+		cover[1] = rect
+		cover[2] = top
+		cover[3] = shown
+	_restamp(region)
+
+
+## `region` back to the baked floor, then every cover over any of it stamped on again.
+func _restamp(region: Rect2i) -> void:
+	if _floor == null or not region.has_area():
+		return
+	_floor.blit_rect(_baked, region, region.position)
+	for node in _covers:
+		var cover: Array = _covers[node]
+		var rect: Rect2i = (cover[1] as Rect2i).intersection(region)
+		if not rect.has_area():
+			continue
+		var top: float = cover[2]
+		for y in range(rect.position.y, rect.end.y):
+			for x in range(rect.position.x, rect.end.x):
+				if _floor.get_pixel(x, y).r < top:
+					_floor.set_pixel(x, y, Color(top, 0.0, 0.0))
+	_floor_tex.update(_floor)
+
+
+## The floor cells `box` overlaps on X and Z, clipped to the floor.
+func _cells_under(box: AABB) -> Rect2i:
+	var cell := Vector2(_floor_size.x / _floor.get_width(), _floor_size.y / _floor.get_height())
+	var lo := Vector2i(floori((box.position.x - _floor_origin.x) / cell.x),
+		floori((box.position.z - _floor_origin.z) / cell.y))
+	var hi := Vector2i(ceili((box.end.x - _floor_origin.x) / cell.x),
+		ceili((box.end.z - _floor_origin.z) / cell.y))
+	return Rect2i(lo, hi - lo).intersection(Rect2i(Vector2i.ZERO, _floor.get_size()))
+
+
+static func _union(a: Rect2i, b: Rect2i) -> Rect2i:
+	if not a.has_area():
+		return b
+	return a if not b.has_area() else a.merge(b)
 
 
 func _hand_floor(mat: ShaderMaterial) -> void:
@@ -464,6 +554,7 @@ func _update_drops(light: Color) -> void:
 
 
 func _process(delta: float) -> void:
+	_update_covers(delta)
 	_drops.visible = _shown > 0.0 and not underwater
 	if _rain_audio.playing:
 		_update_rain_sound(delta)

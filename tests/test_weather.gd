@@ -122,3 +122,89 @@ func test_it_brings_its_own_rain_and_thunder() -> void:
 	assert_ne(w.rain_stream, null, "its own rain")
 	assert_true(w.rain_stream != null and w.rain_stream.loop, "which loops without a gap")
 	assert_ne(w.thunder_stream, null, "and its own thunder")
+
+
+## Open ground at 0, 20 m square in 1 m cells, with a 4 m roof at 5 m over its middle.
+func _open_floor() -> Dictionary:
+	var img := Image.create_empty(20, 20, false, Image.FORMAT_RF)
+	img.fill(Color(0, 0, 0))
+	for y in range(8, 12):
+		for x in range(8, 12):
+			img.set_pixel(x, y, Color(5, 0, 0))
+	return {"image": img, "origin": Vector3(-10, 0, -10), "size": Vector2(20, 20)}
+
+
+func _platform(at: Vector3) -> Node3D:
+	var node := Node3D.new()
+	_root().add_child(node)
+	_keep(node)
+	node.global_position = at
+	return node
+
+
+func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var lift := _platform(Vector3(-6, 3, -6))
+	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))  # a 2 m deck, top at +0.1
+	w._update_covers()
+	assert_almost_eq(w.floor_at(Vector3(-6, 0, -6)), 3.1, 0.026, "rain lands on the deck")
+	assert_eq(w.floor_at(Vector3(-6, 0, -3.5)), 0.0, "beside it, on the ground")
+	lift.global_position = Vector3(6, 3, 6)
+	w._update_covers()
+	assert_eq(w.floor_at(Vector3(-6, 0, -6)), 0.0, "where it was is open again")
+	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 0.026, "and where it went is covered")
+	lift.visible = false
+	w._update_covers()
+	assert_eq(w.floor_at(Vector3(6, 0, 6)), 0.0, "hidden, it covers nothing")
+	lift.visible = true
+	w._update_covers()
+	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 0.026, "shown again, it does")
+	lift.free()
+	w._update_covers()
+	assert_eq(w.floor_at(Vector3(6, 0, 6)), 0.0, "a freed cover lets the rain back")
+	assert_eq(w._covers.size(), 0, "and is let go of")
+
+
+func test_covers_leave_roofs_and_each_other_alone() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var box := AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2))
+	var under_roof := _platform(Vector3(0, 2, 0))
+	w.add_cover(under_roof, box)
+	var a := _platform(Vector3(-5, 3, 5))
+	var b := _platform(Vector3(-4, 4, 5))
+	w.add_cover(a, box)
+	w.add_cover(b, box)
+	w._update_covers()
+	assert_eq(w.floor_at(Vector3(0, 0, 0)), 5.0, "a lift under a roof leaves the roof where rain stops")
+	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 4.1, 0.026, "where two overlap, the higher catches it")
+	b.global_position = Vector3(5, 4, -5)
+	w._update_covers()
+	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 3.1, 0.026, "the one that stayed is still stamped")
+	w.remove_cover(a)
+	assert_eq(w.floor_at(Vector3(-5, 0, 5)), 0.0, "removed by hand, open again")
+
+
+func test_covers_restamp_only_for_a_step_that_shows() -> void:
+	var w := Weather.new()
+	_keep(w)
+	_root().add_child(w)
+	w.set_rain_floor(_open_floor())
+	var lift := _platform(Vector3(-6.5, 3, -6.5))
+	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))
+	w._update_covers()
+	var uploads := [0]
+	w._floor_tex.changed.connect(func() -> void: uploads[0] += 1)
+	lift.global_position += Vector3(0.2, 0.01, 0.2)  # inside the same cells, under a step up
+	w._update_covers()
+	assert_eq(uploads[0], 0, "a nudge within a cell uploads nothing")
+	lift.global_position += Vector3(1.0, 0.0, 0.0)
+	w._update_covers(0.01)
+	assert_eq(uploads[0], 0, "and a real move waits out the interval")
+	w._update_covers(w.COVER_EVERY)
+	assert_gt(uploads[0], 0, "then lands")

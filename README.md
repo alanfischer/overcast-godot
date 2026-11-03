@@ -51,6 +51,10 @@ and go on their own.
     `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
 - **`OvercastRainFloor.bake`** raycasts down through your level once to find where rain stops:
   roofs, overhangs, the ground. Without a rain floor, rain falls everywhere.
+- **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
+  can be knocked down. `add_cover(node, box)` stamps the node's box onto the rain floor wherever
+  it goes, re-stamping only when it moves a cell or more and at most ten times a second. A hidden
+  cover keeps nothing off. Drops, haze, wet ground and rain sound all follow it.
 - **`OvercastCycle`** produces showers that build, wander and die away. The same seed gives the
   same weather.
 

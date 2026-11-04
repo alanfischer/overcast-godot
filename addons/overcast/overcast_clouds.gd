@@ -1,9 +1,10 @@
+@tool
 class_name OvercastClouds
 extends Object
 ## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc). Global, because the sky
 ## draws the clouds and everything lit under them reads the same ones for its shadows: one sky
-## at a time: whichever last claimed it with set_layer owns it, and only the owner moves or
-## releases it. The plugin declares them in the project settings; OvercastSky sets them.
+## at a time: whichever last claimed it owns it, and only the owner moves or releases it. The
+## plugin declares them in the project settings; OvercastSky sets them.
 
 ## name -> [type, default], in project-settings form.
 const GLOBALS := {
@@ -71,10 +72,9 @@ static func set_volumetric(enabled: bool) -> void:
 		_set_global("overcast_volume", volume())
 
 
-## The sky with instance id `owner` takes the layer, for a sky that has started drawing clouds: `sun_dir` toward the sun,
-## `scale` noise units per cloud height (bigger is smaller clouds), `speed` noise units per
-## second, `softness` of their edges.
-static func set_layer(owner: int, sun_dir: Vector3, scale: float, speed: float, softness: float) -> void:
+## OvercastSky's: the sky with instance id `owner` takes the layer. `sun_dir` toward the sun,
+## `scale` noise units per cloud height, `speed` noise units per second, `softness` of the edges.
+static func _claim(owner: int, sun_dir: Vector3, scale: float, speed: float, softness: float) -> void:
 	_owner = owner
 	_set_global("overcast_noise", noise())
 	if _volumetric:
@@ -85,16 +85,16 @@ static func set_layer(owner: int, sun_dir: Vector3, scale: float, speed: float, 
 	_set_global("overcast_softness", softness)
 
 
-## How much of the sky is cloud, and how much of the sun's share of the light a cloud overhead
-## takes off what is under it, if `owner` holds the layer. Every frame of a storm, so cheap.
-static func set_weather(owner: int, cover: float, shadow: float) -> void:
+## OvercastSky's: how much of the sky is cloud, and how much of the sun's share of the light a
+## cloud overhead takes off what is under it, if `owner` holds the layer. Every frame of a storm.
+static func _set_weather(owner: int, cover: float, shadow: float) -> void:
 	if owner == _owner:
 		_set_cover(cover, shadow)
 
 
-## `owner` stops drawing, if it held the layer: no clouds, so no shadows. The layer settings
-## stay for the next sky.
-static func release(owner: int) -> void:
+## OvercastSky's: `owner` stops drawing, if it held the layer: no clouds, so no shadows. The
+## layer settings stay for the next sky.
+static func _release(owner: int) -> void:
 	if owner == _owner:
 		_owner = 0
 		_set_cover(0.0, 0.0)

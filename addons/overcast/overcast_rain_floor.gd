@@ -1,28 +1,35 @@
+@tool
 class_name OvercastRainFloor
-extends Object
+extends Resource
 ## Where rain stops, per column: the height it falls to before something catches it. Baked once,
-## then the drops, haze and wet ground all read it, so rain stays out from under a roof.
-##
-## A rain floor is a Dictionary: "image" (FORMAT_RF, one height per cell, metres), "origin" (the
-## min-X/min-Z corner), "size" (Vector2, metres the image spans on X and Z) and "top" (no rain
-## above it). Hand it to OvercastWeather.set_rain_floor.
+## in the editor (OvercastWeather's Bake Rain Floor) or at runtime (bake), then the drops, haze
+## and wet ground all read it, so rain stays out from under a roof.
+
+## One height per cell, metres, FORMAT_RF, row 0 at min Z.
+@export var image: Image
+## The min-X/min-Z corner, at the bottom of the baked box.
+@export var origin := Vector3.ZERO
+## Metres the image spans on X and Z.
+@export var size := Vector2.ONE
+## No rain above this height.
+@export var top := 1e6
 
 
 ## Bake by raycasting down through `box` in the world's physics, one column every `cell` metres.
 ## Each cell takes the highest of its centre and four corners: a wall's top along a cell's edge
 ## keeps rain off the floor beside it, at the cost of a dry strip under a cell's width outdoors.
-## Colliders must exist in the physics space already (call after a physics frame).
-static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> Dictionary:
+## Colliders must exist in the physics space already (at runtime, call after a physics frame).
+static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> OvercastRainFloor:
 	var space := world.direct_space_state
 	var w := maxi(int(ceil(box.size.x / cell)), 1)
 	var h := maxi(int(ceil(box.size.z / cell)), 1)
 	var query := PhysicsRayQueryParameters3D.new()
 	query.collision_mask = mask
 	query.hit_back_faces = false
-	var top := box.end.y
+	var ceiling := box.end.y
 	var bottom := box.position.y
 	var drop := func(x: float, z: float) -> float:
-		query.from = Vector3(x, top, z)
+		query.from = Vector3(x, ceiling, z)
 		query.to = Vector3(x, bottom, z)
 		var hit := space.intersect_ray(query)
 		return hit["position"].y if hit else bottom
@@ -31,11 +38,23 @@ static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> 
 	for j in h + 1:
 		for i in w + 1:
 			corners[j * (w + 1) + i] = drop.call(box.position.x + i * cell, box.position.z + j * cell)
-	var img := Image.create_empty(w, h, false, Image.FORMAT_RF)
+	var heights := PackedFloat32Array()
+	heights.resize(w * h)
 	for j in h:
 		for i in w:
 			var y: float = drop.call(box.position.x + (i + 0.5) * cell, box.position.z + (j + 0.5) * cell)
 			for c in [j * (w + 1) + i, j * (w + 1) + i + 1, (j + 1) * (w + 1) + i, (j + 1) * (w + 1) + i + 1]:
 				y = maxf(y, corners[c])
-			img.set_pixel(i, j, Color(y, 0.0, 0.0))
-	return {"image": img, "origin": box.position, "size": Vector2(w * cell, h * cell), "top": top}
+			heights[j * w + i] = y
+	return create(Image.create_from_data(w, h, false, Image.FORMAT_RF, heights.to_byte_array()),
+		box.position, Vector2(w * cell, h * cell), ceiling)
+
+
+## A rain floor from heights of your own: `image` FORMAT_RF, row 0 at min Z.
+static func create(heights: Image, at: Vector3, span: Vector2, ceiling := 1e6) -> OvercastRainFloor:
+	var f := OvercastRainFloor.new()
+	f.image = heights
+	f.origin = at
+	f.size = span
+	f.top = ceiling
+	return f

@@ -14,7 +14,6 @@ uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 // OpenGL's NDC z is -1..1, Vulkan/Metal's 0..1.
 uniform vec2 depth_remap = vec2(1.0, 0.0);
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
-uniform float rain_top = 1e6;     // where rain falls from; none above it
 uniform float density = 0.0;  // per metre of rain-filled air
 // Rain comes through in curtains: the density swings by gust_amount either way over a noise that
 // drifts with the weather (gust_offset, in noise cells, advanced by OvercastWeather).
@@ -51,7 +50,7 @@ void vertex() {
 }
 
 bool raining_at(vec3 p) {
-	return p.y < rain_top && rain_falls_at(p);
+	return p.y < overcast_rain_top && rain_falls_at(p);
 }
 
 // pcg3d. The inputs are whole numbers in the thousands, which a float hash smears together.

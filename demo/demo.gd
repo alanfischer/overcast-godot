@@ -34,7 +34,6 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	weather.bake_rain_floor()
-	weather.add_wet_materials(self)
 
 	rain_slider.value_changed.connect(func(v: float) -> void:
 		cycle_check.button_pressed = false
@@ -74,8 +73,7 @@ func _add_hut(at: Vector3) -> void:
 
 
 func _set_time(hours: float) -> void:
-	sky.time_of_day = hours  # the weather turns the sun and colours its light
-	weather.sky_light = sky.scene_light()
+	sky.time_of_day = hours  # the weather turns the sun, and lights its rain, to match
 
 
 func _process(delta: float) -> void:

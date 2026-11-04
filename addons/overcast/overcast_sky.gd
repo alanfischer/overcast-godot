@@ -17,6 +17,9 @@ const SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
 const LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
+## saved with the sky.
+const TRANSIENT := [&"storm", &"flash_color", &"flash_dir"]
 ## What a new sky starts with where the shader's own default is not the one wanted, or where the
 ## code reads the value back.
 const DEFAULTS := {
@@ -58,6 +61,12 @@ const MOON_LIGHT := Color(0.12, 0.14, 0.24)
 @export var dusk_light := DUSK_LIGHT
 @export var moon_light := MOON_LIGHT
 @export_group("Cloud layer")
+## Metres over the scene's origin. Tuned for levels a few dozen metres across at 100; the clouds
+## and lightning scale with it, so a bigger world raises it.
+@export_range(10.0, 5000.0, 1.0, "or_greater", "suffix:m") var cloud_height := 100.0:
+	set(v):
+		cloud_height = v
+		_sync_layer()
 ## Noise units per cloud height: bigger is smaller clouds.
 @export_range(0.25, 8.0, 0.01) var cloud_scale := 2.2:
 	set(v):
@@ -95,7 +104,7 @@ var dusk: float:
 var storm := 0.0:
 	set(amount):
 		storm = amount
-		set_shader_parameter("storm", amount)
+		RenderingServer.material_set_param(get_rid(), &"storm", amount)
 		_push_weather()
 ## Direction toward the sun, world space: where it is at noon when it follows the time. Set it here
 ## or through the inspector, not with set_shader_parameter, or the clouds' shadows will not follow.
@@ -128,6 +137,9 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 	for key in DEFAULTS:
 		if get_shader_parameter(key) == null:
 			set("shader_parameter/" + key, DEFAULTS[key])
+	for key in TRANSIENT:  # saved by an older version
+		if get_shader_parameter(key) != null:
+			set_shader_parameter(key, null)
 	time_of_day = time_of_day
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
@@ -251,7 +263,7 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		Clouds._claim(_id, light_dir(), cloud_scale, cloud_speed, cloud_softness)
+		Clouds._claim(_id, light_dir(), cloud_height, cloud_scale, cloud_speed, cloud_softness)
 		_push_weather()
 	else:
 		Clouds._release(_id)
@@ -259,8 +271,8 @@ func _sync_layer() -> void:
 
 ## Light the sky from within, brightest toward `dir` (world space); black puts it out.
 func set_flash(color: Color, dir: Vector3) -> void:
-	set_shader_parameter("flash_color", Vector3(color.r, color.g, color.b))
-	set_shader_parameter("flash_dir", dir)
+	RenderingServer.material_set_param(get_rid(), &"flash_color", Vector3(color.r, color.g, color.b))
+	RenderingServer.material_set_param(get_rid(), &"flash_dir", dir)
 
 
 func _push_weather() -> void:

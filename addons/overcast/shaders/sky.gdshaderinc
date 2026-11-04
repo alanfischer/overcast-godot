@@ -61,8 +61,10 @@ uniform float storm : hint_range(0.0, 1.0) = 0.0;
 const vec3 OVERCAST_LUMA = vec3(0.299, 0.587, 0.114);
 
 // Volumetric clouds: cloud_volume_density in clouds.gdshaderinc, marched here.
-const float MARCH_MAX = 900.0;     // metres of slab a ray marches at most; past it is haze
-const float MARCH_STEP = 12.0;     // metres per step, wanted
+// metres of slab a ray marches at most; past it is haze
+#define MARCH_MAX (900.0 * CLOUD_M)
+// metres per step, wanted
+#define MARCH_STEP (12.0 * CLOUD_M)
 const int MARCH_STEPS_MIN = 16;
 const int MARCH_STEPS_MAX = 48;
 
@@ -107,7 +109,7 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		}
 		// Light march toward the sun, steps growing outward.
 		float od = 0.0;
-		float ls = 6.0;
+		float ls = 6.0 * CLOUD_M;
 		vec3 lp = p;
 		for (int j = 0; j < LIGHT_STEPS; j++) {
 			lp += sun * ls;

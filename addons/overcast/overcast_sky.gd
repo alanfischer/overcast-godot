@@ -39,13 +39,20 @@ const MOON_LIGHT := Color(0.12, 0.14, 0.24)
 		_started = true
 		_sync_layer()
 ## Hours, 0 to 24: noon is the day as the shader parameters have it, the sun sets at 18 and rises
-## at 6, and night is full from 20 to 4. The sun stays where sun_dir puts it; at night a moon
-## takes its place.
+## at 6, and night is full from 20 to 4.
 @export_range(0.0, 24.0, 0.05, "suffix:h") var time_of_day := 12.0:
 	set(hours):
 		time_of_day = fposmod(hours, 24.0) if hours != 24.0 else 24.0
 		set_shader_parameter("dusk_amount", dusk)
 		set_shader_parameter("night_amount", night)
+		_sync_light()
+## The sun crosses the sky with the time: up at 6, at sun_dir at noon, down at 18, and the moon
+## along the same arc at night. Off, both stay at sun_dir, for a sun baked into the lighting.
+## OvercastWeather turns its `sun` light to follow.
+@export var sun_follows_time := true:
+	set(on):
+		sun_follows_time = on
+		_sync_light()
 @export_group("Scene light")
 ## The light this sky puts on a scene (scene_light) at the height of dusk and at full night.
 @export var dusk_light := DUSK_LIGHT
@@ -90,8 +97,8 @@ var storm := 0.0:
 		storm = amount
 		set_shader_parameter("storm", amount)
 		_push_weather()
-## Direction toward the sun, world space. Set it here or through the inspector, not with
-## set_shader_parameter, or the clouds' shadows will not follow.
+## Direction toward the sun, world space: where it is at noon when it follows the time. Set it here
+## or through the inspector, not with set_shader_parameter, or the clouds' shadows will not follow.
 var sun_dir: Vector3:
 	get:
 		return get_shader_parameter("sun_dir")
@@ -130,7 +137,7 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 
 func _start() -> void:
 	_started = true
-	_sync_layer()
+	_sync_light()
 
 
 ## A sky must let go of the cloud layer it holds, or its clouds' shadows outlive it.
@@ -164,7 +171,7 @@ func _set(property: StringName, value: Variant) -> bool:
 	if value is Vector3:
 		value = (value as Vector3).normalized()
 	set_shader_parameter(key, value)
-	_sync_layer()
+	_sync_light()
 	return true
 
 
@@ -217,11 +224,34 @@ func make_environment() -> Environment:
 	return env
 
 
+## Where the sun is at `hours`, on an arc through `noon` (unit, toward it) that meets the horizon
+## at 6 and 18: it turns about the level line toward noon's sun, as on an equinox.
+static func sun_at(noon: Vector3, hours: float) -> Vector3:
+	var flat := Vector3(noon.x, 0.0, noon.z)
+	var axis := flat.normalized() if flat.length() > 1e-4 else Vector3.RIGHT
+	return noon.normalized().rotated(axis, TAU * (hours - 12.0) / 24.0)
+
+
+## Toward what lights the sky now: the sun by day and the moon, opposite it, by night. Both at
+## sun_dir when the sun does not follow the time.
+func light_dir() -> Vector3:
+	var noon: Vector3 = sun_dir
+	if not sun_follows_time:
+		return noon.normalized()
+	var sun := sun_at(noon, time_of_day)
+	return -sun if night > 0.5 else sun
+
+
+func _sync_light() -> void:
+	set_shader_parameter("light_dir", light_dir())
+	_sync_layer()
+
+
 func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		Clouds._claim(_id, sun_dir, cloud_scale, cloud_speed, cloud_softness)
+		Clouds._claim(_id, light_dir(), cloud_scale, cloud_speed, cloud_softness)
 		_push_weather()
 	else:
 		Clouds._release(_id)

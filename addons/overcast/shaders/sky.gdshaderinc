@@ -14,8 +14,10 @@ uniform vec3 ground_color : source_color = vec3(0.18, 0.17, 0.16);
 // How fast zenith wins over horizon. Low = a broad hazy band, high = colour only at the top.
 uniform float horizon_falloff : hint_range(0.2, 4.0) = 1.1;
 
-// Direction TO the sun, world space.
+// Direction TO the sun, world space: at noon, when OvercastSky moves it with the time of day.
 uniform vec3 sun_dir = vec3(0.0, 0.6, -0.8);
+// Toward what lights the sky now, sun or moon (OvercastSky sets it); sun_dir while unset.
+uniform vec3 light_dir = vec3(0.0);
 uniform vec3 sun_color : source_color = vec3(1.0, 0.96, 0.82);
 uniform float sun_size : hint_range(0.002, 0.5) = 0.012;   // angular radius, radians
 uniform float sun_energy : hint_range(0.0, 8.0) = 2.2;
@@ -136,7 +138,7 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 // thick. `clouds` false skips the cloud layer, for a cheap pass such as a radiance cubemap.
 vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float storm_cover,
 		out float storm_body) {
-	vec3 sun = normalize(sun_dir);
+	vec3 sun = length(light_dir) > 0.0 ? normalize(light_dir) : normalize(sun_dir);
 	float up = eye_dir.y;
 	vec2 flat_eye = normalize(eye_dir.xz + vec2(1e-5));
 	vec2 flat_sun = normalize(sun.xz + vec2(1e-5));
@@ -250,7 +252,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	// Sun last. Thin cloud dims it and thick cloud hides the disc; the glow leaks through.
 	float sd = dot(eye_dir, sun);
 	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd);
-	float sun_through = 1.0 - 0.95 * storm;
+	// The ground hides a sun or moon below the horizon.
+	float sun_through = (1.0 - 0.95 * storm) * smoothstep(-0.02, 0.01, up);
 	float disc_energy = mix(sun_energy, moon_energy, night_amount);
 	col += sun_col * disc * disc_energy * sun_through * (1.0 - smoothstep(0.15, 0.75, sun_hidden));
 	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * sun_through * (1.0 - 0.6 * sun_hidden);

@@ -432,3 +432,27 @@ func test_clearing_the_floor_lets_rain_fall_everywhere() -> void:
 	w.rain_floor = null
 	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), -INF, "no floor, no roof")
 	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "and the rain all around")
+
+
+func test_the_sun_light_turns_with_the_sky() -> void:
+	var w := _weather()
+	_keep(w)
+	var sun := DirectionalLight3D.new()
+	_keep(sun)
+	_root().add_child(sun)
+	w.sun = sun
+	var noon := Vector3(0.0, 0.8, -0.6).normalized()
+	var sky := SkyScript.new({"drawing": false, "sun_dir": noon, "time_of_day": 9.0})
+	w.sky = sky
+	_root().add_child(w)
+	w._process(0.0)
+	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), SkyScript.sun_at(noon, 9.0), 1e-4, "the light comes from the sun")
+	sky.time_of_day = 23.0
+	w._process(0.0)
+	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), sky.light_dir(), 1e-4, "and from the moon at night")
+	assert_lt(sun.light_color.get_luminance(), 0.3, "in moonlight")
+	sky.sun_follows_time = false
+	var before := sun.global_basis
+	sky.time_of_day = 9.0
+	w._process(0.0)
+	assert_true(sun.global_basis.is_equal_approx(before), "a sun that does not follow the time is left where it is")

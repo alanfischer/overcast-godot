@@ -37,7 +37,10 @@ and go on their own.
 ## What's in it
 
 - **`OvercastSky`** is a sky material, with a `time_of_day` in hours: its day colours warm into a
-  sunset at 18:00, go to moonlight and stars at night, and come back through dawn at 6:00.
+  sunset at 18:00, go to moonlight and stars at night, and come back through dawn at 6:00. The
+  sun crosses the sky with it (`sun_dir` is where it is at noon), and the weather's `sun` light
+  turns to match. For a sun baked into your lighting, turn off `sun_follows_time`: the sun and
+  moon then stay at `sun_dir`.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
   lightmap. It draws a gradient, a sun, stars, cirrus and a cumulus
   layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
@@ -101,8 +104,8 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 - One sky draws the cloud layer at a time, because the clouds' shadows are global shader
   uniforms. The sky that last started drawing owns it.
 - The sky's sun is its `sun_dir`; it does not follow a DirectionalLight3D by itself.
-- The sun does not move with `time_of_day`: it stays at `sun_dir`, and a moon takes its place at
-  night. Time of day changes the colours and the light only.
+- The sun's path is an equinox's: up at 6:00, at `sun_dir` at noon, down at 18:00, with the moon
+  on the same arc at night. There are no seasons or latitude.
 - The cloud layer is tuned for levels a few dozen metres across (see below).
 
 ## Origin

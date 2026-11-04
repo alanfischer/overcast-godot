@@ -129,7 +129,8 @@ const COVER_STEP := 0.05
 @export_tool_button("Strike", "Play") var _strike_button := func() -> void: strike(randi())
 
 @export_group("Scene light")
-## A sun to dim under the storm and light with the flash. Optional.
+## A sun to dim under the storm and light with the flash, and, while the sky's sun follows the
+## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional.
 @export var sun: DirectionalLight3D
 ## The light the sky puts on the scene, as a multiplier: white by day, dimmer at night
 ## (OvercastSky.scene_light). Lights the drops and the haze.
@@ -215,6 +216,7 @@ var _wetness := 0.0
 var _puddles := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
 var _sun_energy := -1.0
+var _sun_color := Color.WHITE
 ## Node3D -> Cover.
 var _covers := {}
 var _cover_in := 0.0
@@ -254,6 +256,7 @@ func _ready() -> void:
 		add_child(_rain_audio)
 		if sun:
 			_sun_energy = sun.light_energy
+			_sun_color = sun.light_color
 	if _floor_tex:
 		_hand_floor(_drop_material)
 	_refresh(0.0)
@@ -933,6 +936,13 @@ func _process(delta: float) -> void:
 		flash_changed.emit(k)
 		if drawn:
 			drawn.set_flash(SKY_FLASH * k * lerpf(SKY_FLASH_DAY, 1.0, drawn.night), _flash_dir)
+	if sun and _sun_energy >= 0.0 and drawn and drawn.sun_follows_time:
+		var toward := drawn.light_dir()
+		if not toward.is_equal_approx(sun.global_basis.z):
+			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
+			sun.global_basis = Basis.looking_at(-toward, up)
+		# Below the horizon it lights nothing: the ground is in the way.
+		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y)
 	if sun and _sun_energy >= 0.0:
 		var shade := drawn.storm_shadow if drawn else SUN_STORM_SHADOW
 		sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * FLASH.x

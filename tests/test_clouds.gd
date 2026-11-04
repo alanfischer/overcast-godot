@@ -143,3 +143,19 @@ func test_the_sky_follows_its_time() -> void:
 	assert_gt(h.r, h.b, "a sunset horizon is warm")
 	sky.time_of_day = 26.0
 	assert_almost_eq(sky.time_of_day, 2.0, 1e-6, "time wraps round the clock")
+
+
+func test_the_sun_crosses_the_sky_with_the_time() -> void:
+	var noon := Vector3(0.3, 0.8, -0.5).normalized()
+	assert_vec3_almost_eq(SkyScript.sun_at(noon, 12.0), noon, 1e-5, "at noon it is where sun_dir says")
+	assert_almost_eq(SkyScript.sun_at(noon, 6.0).y, 0.0, 1e-5, "it rises at six")
+	assert_almost_eq(SkyScript.sun_at(noon, 18.0).y, 0.0, 1e-5, "and sets at six")
+	assert_lt(SkyScript.sun_at(noon, 18.0).dot(SkyScript.sun_at(noon, 6.0)), 0.0, "on the other side of the sky")
+	assert_gt(SkyScript.sun_at(noon, 9.0).y, 0.0, "up all morning")
+	assert_lt(SkyScript.sun_at(noon, 0.0).y, 0.0, "and below the ground at midnight")
+	var sky := SkyScript.new({"drawing": false, "sun_dir": noon, "time_of_day": 0.0})
+	assert_gt(sky.light_dir().y, 0.0, "at night the moon is up instead")
+	assert_vec3_almost_eq(sky.get_shader_parameter("light_dir"), sky.light_dir(), 1e-5, "and the shader draws it there")
+	sky.sun_follows_time = false
+	assert_vec3_almost_eq(sky.light_dir(), noon, 1e-5, "a baked sun stays put, and so does its moon")
+	assert_vec3_almost_eq(sky.sun_dir, noon, 1e-5, "and sun_dir is never moved")

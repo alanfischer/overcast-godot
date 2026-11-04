@@ -74,10 +74,8 @@ func _add_hut(at: Vector3) -> void:
 
 
 func _set_time(hours: float) -> void:
-	sky.time_of_day = hours
-	var light := sky.scene_light()
-	sun.light_color = light
-	weather.sky_light = light
+	sky.time_of_day = hours  # the weather turns the sun and colours its light
+	weather.sky_light = sky.scene_light()
 
 
 func _process(delta: float) -> void:

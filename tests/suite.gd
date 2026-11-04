@@ -92,6 +92,10 @@ func _keep(node: Node) -> Node:
 	return node
 
 
+func _uniform_names(shader: Shader) -> Array:
+	return shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
+
+
 ## Freed immediately, not queued: a test that traces the physics space must not find the
 ## previous test's bodies still standing in it, and teardown never yields a frame.
 func _despawn_all() -> void:

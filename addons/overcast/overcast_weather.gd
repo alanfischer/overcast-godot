@@ -24,7 +24,7 @@ const Cycle = preload("res://addons/overcast/overcast_cycle.gd")
 const FLASH := Vector3(2.0, 2.1, 2.6)
 ## What it lights the sky itself with, brightest toward the bolt. A day sky is already bright, and
 ## the full flash would white it out and hide the bolt, so it takes SKY_FLASH_DAY of it, rising to
-## all of it at full `night`.
+## all of it at the sky's full night.
 const SKY_FLASH := Color(1.0, 1.05, 1.3)
 const SKY_FLASH_DAY := 0.3
 ## The light of a strike over time: a stroke, a fainter return stroke, each dying away fast.
@@ -131,11 +131,9 @@ const COVER_STEP := 0.05
 @export_group("Scene light")
 ## A sun to dim under the storm and light with the flash. Optional.
 @export var sun: DirectionalLight3D
-## The light the sky puts on the scene, as a multiplier: white by day, dimmer at night. Lights the
-## drops and the haze.
+## The light the sky puts on the scene, as a multiplier: white by day, dimmer at night
+## (OvercastSky.scene_light). Lights the drops and the haze.
 @export var sky_light := Color.WHITE
-## 0 day to 1 night: how much of the full flash the sky takes (SKY_FLASH_DAY).
-@export_range(0.0, 1.0, 0.01) var night := 0.0
 
 @export_group("Look")
 ## Rain haze: density per metre of rain-filled air at a full storm, scaled by storm² so light rain
@@ -934,7 +932,7 @@ func _process(delta: float) -> void:
 		_flash_k = k
 		flash_changed.emit(k)
 		if drawn:
-			drawn.set_flash(SKY_FLASH * k * lerpf(SKY_FLASH_DAY, 1.0, clampf(night, 0.0, 1.0)), _flash_dir)
+			drawn.set_flash(SKY_FLASH * k * lerpf(SKY_FLASH_DAY, 1.0, drawn.night), _flash_dir)
 	if sun and _sun_energy >= 0.0:
 		var shade := drawn.storm_shadow if drawn else SUN_STORM_SHADOW
 		sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * FLASH.x

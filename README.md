@@ -31,12 +31,15 @@ $OvercastWeather.rain = 0.6  # 0 dry … 1 a downpour; it finds the scene's sky 
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain and night, a lightning button, a volumetric-clouds switch, and a mode where showers come
+rain and the time of day, a lightning button, a volumetric-clouds switch, and a mode where showers come
 and go on their own.
 
 ## What's in it
 
-- **`OvercastSky`** is a sky material. It draws a gradient, a sun, stars, cirrus and a cumulus
+- **`OvercastSky`** is a sky material, with a `time_of_day` in hours: its day colours warm into a
+  sunset at 18:00, go to moonlight and stars at night, and come back through dawn at 6:00.
+  `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
+  lightmap. It draws a gradient, a sun, stars, cirrus and a cumulus
   layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
@@ -88,7 +91,8 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 
 - `flash_changed(k)` fires every frame of a strike. Add `OvercastWeather.FLASH * k` to the sky's
   light on your scene.
-- `sky_light` and `night` tell the weather how dark your scene is, so the rain dims with it.
+- `sky_light` tells the weather how your scene is lit (`OvercastSky.scene_light()`), so the rain
+  dims with it. The sky's time of day sets how bright lightning lights it.
 - `sun`, if set, is a `DirectionalLight3D` that dims under the storm and lights up with each
   flash.
 
@@ -97,7 +101,8 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 - One sky draws the cloud layer at a time, because the clouds' shadows are global shader
   uniforms. The sky that last started drawing owns it.
 - The sky's sun is its `sun_dir`; it does not follow a DirectionalLight3D by itself.
-- There is no time of day: `night`, `sky_light` and the sky's colours are yours to set.
+- The sun does not move with `time_of_day`: it stays at `sun_dir`, and a moon takes its place at
+  night. Time of day changes the colours and the light only.
 - The cloud layer is tuned for levels a few dozen metres across (see below).
 
 ## Origin

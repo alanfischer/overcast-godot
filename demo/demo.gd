@@ -17,8 +17,6 @@ const FIELD := 120.0
 
 ## The sky in the scene's WorldEnvironment, which the weather finds by itself.
 var sky: SkyScript
-var _day_zenith: Color
-var _day_horizon: Color
 var _yaw := 0.0
 var _pitch := 0.15
 
@@ -26,8 +24,6 @@ var _pitch := 0.15
 func _ready() -> void:
 	sky = $WorldEnvironment.environment.sky.sky_material
 	sky.sun_dir = SkyScript.sun_dir_of(sun)
-	_day_zenith = sky.param("zenith_color")
-	_day_horizon = sky.param("horizon_color")
 
 	_add_box(Vector3(FIELD, 1, FIELD), Vector3(0, -0.5, 0), Color(0.36, 0.45, 0.26))
 	for hut in [Vector3(0, 0, -12), Vector3(14, 0, -6), Vector3(-12, 0, -20)]:
@@ -45,7 +41,7 @@ func _ready() -> void:
 		weather.rain = v)
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
-	%Night.value_changed.connect(_set_night)
+	%Time.value_changed.connect(_set_time)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
 
 
@@ -77,14 +73,11 @@ func _add_hut(at: Vector3) -> void:
 	_add_box(Vector3(7.0, 0.3, 6.0), at + Vector3(0, 3.15, 0), Color(0.55, 0.3, 0.25))
 
 
-func _set_night(n: float) -> void:
-	var light := Color(1, 1, 1).lerp(Color(0.12, 0.14, 0.24), n)
-	weather.night = n
-	weather.sky_light = light
+func _set_time(hours: float) -> void:
+	sky.time_of_day = hours
+	var light := sky.scene_light()
 	sun.light_color = light
-	sky.set_shader_parameter("star_amount", n * 0.8)
-	sky.set_shader_parameter("zenith_color", _day_zenith.lerp(Color(0.02, 0.03, 0.07), n))
-	sky.set_shader_parameter("horizon_color", _day_horizon.lerp(Color(0.06, 0.07, 0.12), n))
+	weather.sky_light = light
 
 
 func _process(delta: float) -> void:

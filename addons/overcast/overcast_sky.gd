@@ -3,8 +3,9 @@ class_name OvercastSky
 extends ShaderMaterial
 ## The Overcast sky, as a material: put it on a Sky in a WorldEnvironment (New OvercastSky), and
 ## give it a shader built on sky.gdshaderinc to draw it on something else. Its look is the
-## shader's parameters; the cloud layer's are the properties below. The layer's globals follow
-## whichever sky last started drawing. Storm and lightning come in from an OvercastWeather.
+## shader's parameters, as they are by day; time_of_day takes them through dusk to night. The
+## cloud layer's settings are the properties below, and its globals follow whichever sky last
+## started drawing. Storm and lightning come in from an OvercastWeather.
 ##
 ##     var sky := OvercastSky.new({"cloud_amount": 0.4, "sun_dir": OvercastSky.sun_dir_of($Sun)})
 ##     $WorldEnvironment.environment = sky.make_environment()
@@ -22,7 +23,13 @@ const DEFAULTS := {
 	"sun_dir": Vector3(0.45, 0.55, -0.70),
 	"cloud_amount": 0.45,
 	"horizon_color": Color(0.62, 0.70, 0.82),
+	"dusk_color": Color(1.0, 0.48, 0.24),
+	"night_horizon_color": Color(0.06, 0.07, 0.12),
 }
+## The light the sky puts on a scene (scene_light) at the height of dusk and at full night, as a
+## linear multiplier on daylight.
+const DUSK_LIGHT := Color(0.95, 0.55, 0.32)
+const MOON_LIGHT := Color(0.12, 0.14, 0.24)
 
 ## Whether this sky draws the cloud layer, and so shades the ground under its clouds. Only one sky
 ## does at a time: turning one on takes the layer, turning the owner off clears the shadows.
@@ -31,6 +38,18 @@ const DEFAULTS := {
 		drawing = on
 		_started = true
 		_sync_layer()
+## Hours, 0 to 24: noon is the day as the shader parameters have it, the sun sets at 18 and rises
+## at 6, and night is full from 20 to 4. The sun stays where sun_dir puts it; at night a moon
+## takes its place.
+@export_range(0.0, 24.0, 0.05, "suffix:h") var time_of_day := 12.0:
+	set(hours):
+		time_of_day = fposmod(hours, 24.0) if hours != 24.0 else 24.0
+		set_shader_parameter("dusk_amount", dusk)
+		set_shader_parameter("night_amount", night)
+@export_group("Scene light")
+## The light this sky puts on a scene (scene_light) at the height of dusk and at full night.
+@export var dusk_light := DUSK_LIGHT
+@export var moon_light := MOON_LIGHT
 @export_group("Cloud layer")
 ## Noise units per cloud height: bigger is smaller clouds.
 @export_range(0.25, 8.0, 0.01) var cloud_scale := 2.2:
@@ -57,6 +76,14 @@ const DEFAULTS := {
 		storm_shadow = v
 		_push_weather()
 
+## 0 by day to 1 at full night, at time_of_day.
+var night: float:
+	get:
+		return night_at(time_of_day)
+## How far into the warm light of a sunset or sunrise, 0 to 1, at time_of_day.
+var dusk: float:
+	get:
+		return dusk_at(time_of_day)
 ## How far the sky has closed over for rain, 0 to 1. OvercastWeather drives it.
 var storm := 0.0:
 	set(amount):
@@ -94,6 +121,7 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 	for key in DEFAULTS:
 		if get_shader_parameter(key) == null:
 			set("shader_parameter/" + key, DEFAULTS[key])
+	time_of_day = time_of_day
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
 	# before it ever draws.
@@ -148,6 +176,30 @@ func param(key: StringName) -> Variant:
 	return v
 
 
+## How high the sun would be at `hours`, -1 at midnight to 1 at noon.
+static func _elevation(hours: float) -> float:
+	return -cos(TAU * hours / 24.0)
+
+
+static func night_at(hours: float) -> float:
+	return 1.0 - smoothstep(-0.45, 0.05, _elevation(hours))
+
+
+static func dusk_at(hours: float) -> float:
+	return 1.0 - smoothstep(0.0, 0.35, absf(_elevation(hours) + 0.05))
+
+
+## The light the sky puts on a scene now, as a linear multiplier on daylight: white by day, warm
+## at dusk, moonlight at night. For a sun's light_color, a lightmap's sky share, the weather's
+## sky_light.
+func scene_light() -> Color:
+	return scene_light_at(time_of_day, dusk_light, moon_light)
+
+
+static func scene_light_at(hours: float, dusk_tint := DUSK_LIGHT, moon := MOON_LIGHT) -> Color:
+	return Color.WHITE.lerp(dusk_tint, dusk_at(hours)).lerp(moon, night_at(hours))
+
+
 ## Sun direction (unit, toward the sun) for a DirectionalLight3D, which shines along its -Z.
 static func sun_dir_of(light: DirectionalLight3D) -> Vector3:
 	return light.global_basis.z.normalized()
@@ -193,12 +245,19 @@ func _push_weather() -> void:
 ## The colour the sky draws at the horizon right now, linear, flash aside: what rain haze fades
 ## into. Follows the shader's storm greying, in the space that shader works in on this renderer.
 func horizon_now() -> Color:
-	var art: Color = param("horizon_color")
 	var linear := renderer_is_linear()
-	var h := art.srgb_to_linear() if linear else art
+	var h := _shader_space(param("horizon_color"), linear)
+	# As the shader's, at a glow halfway round from the sun.
+	h = h.lerp(_shader_space(param("dusk_color"), linear), dusk * 0.725 * 0.8)
+	h = h.lerp(_shader_space(param("night_horizon_color"), linear), night)
 	var grey := luma(h) * 0.55
 	var col := h.lerp(Color(grey, grey, grey), storm)
 	return col if linear else col.srgb_to_linear()
+
+
+## A source_color as the shader sees it on this renderer.
+static func _shader_space(c: Color, linear: bool) -> Color:
+	return c.srgb_to_linear() if linear else c
 
 
 static func luma(c: Color) -> float:

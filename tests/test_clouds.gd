@@ -103,13 +103,43 @@ func test_the_layer_follows_its_settings_and_the_inspector() -> void:
 
 
 func test_a_saved_sky_loads_with_its_settings() -> void:
-	var sky := SkyScript.new({"cloud_amount": 0.25, "cloud_scale": 3.0, "drawing": false})
+	var sky := SkyScript.new({"cloud_amount": 0.25, "cloud_scale": 3.0, "drawing": false, "time_of_day": 19.5})
 	var path := "user://overcast_test_sky.tres"
 	assert_eq(ResourceSaver.save(sky, path), OK, "it saves")
 	var loaded: SkyScript = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
 	assert_almost_eq(loaded.cloud_amount, 0.25, 1e-6, "its look")
 	assert_almost_eq(loaded.cloud_scale, 3.0, 1e-6, "its layer")
-	assert_false(loaded.drawing, "and whether it draws")
+	assert_false(loaded.drawing, "whether it draws")
+	assert_almost_eq(loaded.time_of_day, 19.5, 1e-6, "and its time of day")
+	assert_almost_eq(loaded.get_shader_parameter("night_amount"), SkyScript.night_at(19.5), 1e-6, "which the shader is told")
 	assert_eq(loaded.shader, SkyScript.SkyShader, "on the sky shader")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
+
+
+func test_the_day_runs_noon_to_dusk_to_night() -> void:
+	assert_eq(SkyScript.night_at(12.0), 0.0, "noon is day")
+	assert_eq(SkyScript.dusk_at(12.0), 0.0, "with no sunset in it")
+	assert_almost_eq(SkyScript.night_at(0.0), 1.0, 1e-6, "midnight is full night")
+	assert_almost_eq(SkyScript.night_at(21.0), 1.0, 1e-6, "and so is nine")
+	assert_gt(SkyScript.dusk_at(18.0), 0.9, "six is sunset")
+	assert_gt(SkyScript.dusk_at(6.0), 0.9, "as six in the morning is sunrise")
+	assert_lt(SkyScript.night_at(18.0), 0.1, "and it is not dark yet")
+	assert_eq(SkyScript.scene_light_at(12.0), Color.WHITE, "daylight is the scene as lit")
+	assert_true(SkyScript.scene_light_at(0.0).is_equal_approx(SkyScript.MOON_LIGHT), "midnight is moonlight")
+	var dusk := SkyScript.scene_light_at(18.0)
+	assert_gt(dusk.r, dusk.b, "sunset light is warm")
+
+
+func test_the_sky_follows_its_time() -> void:
+	var sky := SkyScript.new({"drawing": false, "time_of_day": 22.0})
+	assert_almost_eq(sky.get_shader_parameter("night_amount"), 1.0, 1e-6, "the shader is told it is night")
+	assert_lt(SkyScript.luma(sky.horizon_now()), 0.05, "and the horizon haze fades into is dark")
+	sky.time_of_day = 12.0
+	assert_eq(sky.get_shader_parameter("night_amount"), 0.0, "noon again")
+	assert_gt(SkyScript.luma(sky.horizon_now()), 0.3, "and a bright horizon")
+	sky.time_of_day = 18.0
+	var h := sky.horizon_now()
+	assert_gt(h.r, h.b, "a sunset horizon is warm")
+	sky.time_of_day = 26.0
+	assert_almost_eq(sky.time_of_day, 2.0, 1e-6, "time wraps round the clock")

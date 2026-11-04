@@ -72,12 +72,13 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Volumetric clouds"
 
-[node name="NightLabel" type="Label" parent="UI/Panel/Box"]
+[node name="TimeLabel" type="Label" parent="UI/Panel/Box"]
 layout_mode = 2
-text = "Night"
+text = "Time of day"
 
-[node name="Night" type="HSlider" parent="UI/Panel/Box"]
+[node name="Time" type="HSlider" parent="UI/Panel/Box"]
 unique_name_in_owner = true
 layout_mode = 2
-max_value = 1.0
-step = 0.01
+max_value = 24.0
+step = 0.05
+value = 12.0

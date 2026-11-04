@@ -20,7 +20,10 @@ const UNSUPPORTED := ["rim_enabled", "clearcoat_enabled", "anisotropy_enabled", 
 	"ao_on_uv2", "albedo_texture_msdf", "use_point_size", "fixed_size", "proximity_fade_enabled",
 	"shadow_to_opacity", "use_particle_trails", "use_z_clip_scale", "use_fov_override"]
 
-## Source material -> its conversion, held weakly on the source side; and shader code -> Shader.
+const SOURCE := &"overcast_source"
+
+## Source material id -> [source, twin], both held weakly: a twin lives as long as something draws
+## with it. And shader code -> Shader.
 static var _converted := {}
 static var _shaders := {}
 
@@ -60,14 +63,16 @@ static func _swap(node: Object, property: StringName, puddle_scale: float) -> in
 
 ## The Overcast twin of a BaseMaterial3D; anything else, or one it cannot draw, comes back as it
 ## is. The same material converts to the same twin, so one shared by many meshes stays shared.
+## To change a converted material, change source_of(twin) and convert that again.
 static func convert_material(mat: Material, puddle_scale := 1.0) -> Material:
 	if not mat is BaseMaterial3D or not unsupported(mat).is_empty():
 		return mat
 	var key := mat.get_instance_id()
-	if _converted.has(key):
-		var pair: Array = _converted[key]
-		if (pair[0] as WeakRef).get_ref() == mat and pair[1].get_shader_parameter("puddle_scale") == puddle_scale:
-			return pair[1]
+	var pair: Array = _converted.get(key, [])
+	if not pair.is_empty() and pair[0].get_ref() == mat:
+		var twin: ShaderMaterial = pair[1].get_ref()
+		if twin and twin.get_shader_parameter("puddle_scale") == puddle_scale:
+			return twin
 	var src := mat as BaseMaterial3D
 	var to := ShaderMaterial.new()
 	to.shader = _shader(src)
@@ -76,8 +81,19 @@ static func convert_material(mat: Material, puddle_scale := 1.0) -> Material:
 	to.render_priority = src.render_priority
 	to.next_pass = convert_material(src.next_pass, puddle_scale) if src.next_pass else null
 	to.resource_name = src.resource_name
-	_converted[key] = [weakref(src), to]
+	to.set_meta(SOURCE, src)
+	if _converted.size() >= 64 and not _converted.has(key):
+		for k in _converted.keys():
+			if _converted[k][1].get_ref() == null:
+				_converted.erase(k)
+	_converted[key] = [weakref(src), weakref(to)]
 	return to
+
+
+## The material a twin was converted from, for code that edits materials; `mat` itself if it is
+## not a twin.
+static func source_of(mat: Material) -> Material:
+	return mat.get_meta(SOURCE, mat) if mat else null
 
 
 ## Why `mat` cannot be converted: the first feature it uses that the shader lacks, or "".

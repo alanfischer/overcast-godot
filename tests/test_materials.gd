@@ -134,3 +134,23 @@ func test_the_include_compiles_on_its_own() -> void:
 	shader.code = 'shader_type spatial;\n#define OV_FILTER filter_linear\n#define OV_REPEAT repeat_enable\n#include "%s"\n' % Materials.INCLUDE
 	var names := shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
 	assert_true(names.has("albedo"), "compiles: %s" % [names])
+
+
+func test_a_twin_leads_back_to_its_source() -> void:
+	var src := StandardMaterial3D.new()
+	var to := Materials.convert_material(src)
+	assert_eq(Materials.source_of(to), src)
+	assert_eq(Materials.source_of(src), src, "not a twin: itself")
+	assert_eq(Materials.source_of(null), null)
+	# The way to change one: edit the source's copy, convert that.
+	var faded := Materials.source_of(to).duplicate() as StandardMaterial3D
+	faded.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var again := Materials.convert_material(faded) as ShaderMaterial
+	assert_true("#define OV_ALPHA\n" in again.shader.code, "the change shows")
+
+
+func test_a_twin_nothing_draws_with_is_let_go() -> void:
+	var src := StandardMaterial3D.new()
+	var id := Materials.convert_material(src).get_instance_id()
+	assert_eq(instance_from_id(id), null, "freed with its last user")
+	assert_ne(Materials.convert_material(src), null, "and made again on asking")

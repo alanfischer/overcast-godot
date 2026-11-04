@@ -62,7 +62,9 @@ and go on their own.
   levels on rough metals. It covers albedo, metallic, roughness, specular, normal, emission and
   occlusion maps, ORM textures, vertex colour, transparency, cull and blend modes. A material
   using anything else (rim, clearcoat, triplanar, billboards, unshaded…) is left as it is.
-  Anything added to the scene later needs its own `apply`.
+  Anything added to the scene later needs its own `apply`. Code that edits a material at runtime
+  edits `OvercastMaterials.source_of(mat)`, or a copy of it, and converts that again with
+  `convert_material`.
 - **Cloud shadows.** Include `shaders/clouds.gdshaderinc` and multiply your sun light by
   `cloud_sunlight(world_pos)`. The shadow comes from the same cloud the sky draws in front of
   the sun, so what's on the ground matches what's overhead. `demo/ground.gdshader` shows how in

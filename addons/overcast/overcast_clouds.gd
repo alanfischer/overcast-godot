@@ -1,24 +1,12 @@
 @tool
 class_name OvercastClouds
 extends Object
-## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc). Global, because the sky
-## draws the clouds and everything lit under them reads the same ones for its shadows: one sky
-## at a time: whichever last claimed it owns it, and only the owner moves it. When the owner lets
-## go, the sky that claimed it before, if it is still drawing, takes it back. The plugin declares
-## them in the project settings; OvercastSky sets them.
+## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc, OvercastGlobals). Global,
+## because the sky draws the clouds and everything lit under them reads the same ones for its
+## shadows: one sky at a time. Whichever last claimed it owns it, and only the owner moves it; when
+## it lets go, the sky that claimed it before, if still drawing, takes it back.
 
-## name -> [type, default], in project-settings form.
-const GLOBALS := {
-	"overcast_noise": ["sampler2D", ""],
-	"overcast_scale": ["float", 2.2],
-	"overcast_speed": ["float", 0.035],
-	"overcast_softness": ["float", 0.1],
-	"overcast_cover": ["float", 0.0],
-	"overcast_shadow": ["float", 0.0],
-	"overcast_sun_dir": ["vec3", Vector3(0, 1, 0)],
-	"overcast_volumetric": ["float", 0.0],
-	"overcast_volume": ["sampler3D", ""],
-}
+const Globals = preload("res://addons/overcast/overcast_globals.gd")
 
 ## Tiling cloud noise, made once: sampling it costs a fraction of computing the octaves per pixel,
 ## which pays for the extra samples the cloud shading takes.
@@ -29,40 +17,10 @@ static var _volumetric := false
 static var _owner := 0
 ## Instance ids of the skies that want the layer, oldest claim first.
 static var _drawing: Array[int] = []
-static var _values := {}
-
-
-## A global's value as last set here. RenderingServer only reads them back in the editor.
-static func value(key: String) -> Variant:
-	return _values.get(key)
 
 
 static func _set_global(key: String, v: Variant) -> void:
-	_values[key] = v
-	RenderingServer.global_shader_parameter_set(key, v)
-
-
-## Whether the shaders' globals are declared. A shader that reads an undeclared global fails to
-## compile, so a project without the plugin enabled finds out here rather than from a grey sky.
-static func declared() -> bool:
-	var have := RenderingServer.global_shader_parameter_get_list()
-	for key in GLOBALS:
-		if not have.has(StringName(key)):
-			return false
-	return true
-
-
-## Declare the globals at runtime: for a project that has not enabled the plugin, and for tests.
-## Must run before any shader that includes clouds.gdshaderinc is loaded.
-static func declare() -> void:
-	var have := RenderingServer.global_shader_parameter_get_list()
-	var types := {"float": RenderingServer.GLOBAL_VAR_TYPE_FLOAT, "vec3": RenderingServer.GLOBAL_VAR_TYPE_VEC3,
-		"sampler2D": RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, "sampler3D": RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D}
-	for key in GLOBALS:
-		if not have.has(StringName(key)):
-			var value = GLOBALS[key][1]
-			RenderingServer.global_shader_parameter_add(key, types[GLOBALS[key][0]],
-				null if value is String else value)
+	Globals.set_value(key, v)
 
 
 ## Ray-march the clouds through 3D noise rather than shading one flat layer; the ground's cloud
@@ -76,8 +34,10 @@ static func set_volumetric(enabled: bool) -> void:
 
 
 ## OvercastSky's: the sky with instance id `owner` takes the layer. `sun_dir` toward the sun,
-## `scale` noise units per cloud height, `speed` noise units per second, `softness` of the edges.
-static func _claim(owner: int, sun_dir: Vector3, scale: float, speed: float, softness: float) -> void:
+## `height` metres over the origin, `scale` noise units per height, `speed` noise units per
+## second, `softness` of the edges.
+static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, speed: float,
+		softness: float) -> void:
 	if _owner != owner:
 		_drawing.erase(owner)
 		_drawing.append(owner)
@@ -86,6 +46,7 @@ static func _claim(owner: int, sun_dir: Vector3, scale: float, speed: float, sof
 	if _volumetric:
 		_set_global("overcast_volume", volume())
 	_set_global("overcast_sun_dir", sun_dir.normalized())
+	_set_global("overcast_height", height)
 	_set_global("overcast_scale", scale)
 	_set_global("overcast_speed", speed)
 	_set_global("overcast_softness", softness)

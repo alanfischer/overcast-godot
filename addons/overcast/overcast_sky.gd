@@ -61,6 +61,12 @@ const MOON_LIGHT := Color(0.12, 0.14, 0.24)
 @export var dusk_light := DUSK_LIGHT
 @export var moon_light := MOON_LIGHT
 @export_group("Cloud layer")
+## Metres over the scene's origin. Tuned for levels a few dozen metres across at 100; the clouds
+## and lightning scale with it, so a bigger world raises it.
+@export_range(10.0, 5000.0, 1.0, "or_greater", "suffix:m") var cloud_height := 100.0:
+	set(v):
+		cloud_height = v
+		_sync_layer()
 ## Noise units per cloud height: bigger is smaller clouds.
 @export_range(0.25, 8.0, 0.01) var cloud_scale := 2.2:
 	set(v):
@@ -257,7 +263,7 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		Clouds._claim(_id, light_dir(), cloud_scale, cloud_speed, cloud_softness)
+		Clouds._claim(_id, light_dir(), cloud_height, cloud_scale, cloud_speed, cloud_softness)
 		_push_weather()
 	else:
 		Clouds._release(_id)

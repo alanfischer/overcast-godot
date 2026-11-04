@@ -2,16 +2,17 @@ extends "res://tests/suite.gd"
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
+const Globals = preload("res://addons/overcast/overcast_globals.gd")
 
 
 func _global(name: String) -> Variant:
-	return Clouds.value(name)
+	return Globals.value(name)
 
 
 func test_the_project_declares_every_global() -> void:
-	assert_true(Clouds.declared(), "project.godot carries OvercastClouds.GLOBALS")
-	Clouds.declare()  # declared already: must not complain or add twice
-	assert_true(Clouds.declared(), "still declared")
+	assert_true(Globals.declared(), "project.godot carries OvercastGlobals.GLOBALS")
+	Globals.declare()  # declared already: must not complain or add twice
+	assert_true(Globals.declared(), "still declared")
 
 
 func test_noise_tiles_in_two_channels() -> void:
@@ -133,6 +134,14 @@ func test_a_storm_and_a_flash_are_not_saved_with_the_sky() -> void:
 	assert_eq(loaded.get_shader_parameter("storm"), null, "and loads with its stale storm dropped")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
+
+func test_the_layer_takes_its_height() -> void:
+	var sky := SkyScript.new()
+	sky.drawing = true
+	assert_eq(_global("overcast_height"), 100.0, "100 m by default")
+	sky.cloud_height = 400.0
+	assert_eq(_global("overcast_height"), 400.0, "and the shaders follow a higher layer")
+	sky.drawing = false
 
 func test_a_passing_sky_gives_the_layer_back() -> void:
 	var sky := SkyScript.new({"cloud_amount": 0.3})

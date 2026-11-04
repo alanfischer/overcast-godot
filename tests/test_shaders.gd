@@ -4,8 +4,8 @@ extends "res://tests/suite.gd"
 
 const SHADERS := {
 	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "flash_color", "cloud_amount"],
-	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "has_floor", "rain_floor"],
-	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "rain_top", "has_floor", "gust_noise"],
+	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "velocity", "haze_density"],
+	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output"],
 }
 
 
@@ -35,9 +35,12 @@ void fragment() {
 	vec3 lit = vec3(0.5) * cloud_sunlight(world_pos);
 	vec3 albedo = vec3(0.5);
 	overcast_wet(lit, albedo, world_pos, vec3(0.0, 1.0, 0.0), NORMAL, VIEW);
-	ALBEDO = lit;
+	float roughness = 0.8;
+	float specular = 0.5;
+	vec2 wet = overcast_wet_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
+	ALBEDO = lit + albedo * wet.x;
+	ROUGHNESS = roughness;
 }
 """
 	var names := shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
-	for name in ["wetness", "puddles", "rain_sky", "rain_floor", "has_floor"]:
-		assert_true(name in names, "a surface shader with wet.gdshaderinc takes %s" % name)
+	assert_eq(names, ["puddle_scale"], "it compiles, and all it takes of its own is how readily it pools")

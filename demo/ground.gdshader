@@ -16,11 +16,12 @@ void vertex() {
 
 void fragment() {
 	vec3 albedo = color;
-	vec3 reflection = vec3(0.0);
-	overcast_wet(reflection, albedo, world_pos, world_normal, NORMAL, VIEW);
+	float roughness = 0.9;
+	float specular = 0.5;
+	overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal);
 	ALBEDO = albedo;
-	EMISSION = reflection * 0.5;
-	ROUGHNESS = mix(0.9, 0.2, wetness);
+	ROUGHNESS = roughness;
+	SPECULAR = specular;
 }
 
 void light() {

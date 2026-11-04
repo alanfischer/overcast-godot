@@ -1,6 +1,6 @@
 #ifndef OVERCAST_CLOUDS_GDSHADERINC
 #define OVERCAST_CLOUDS_GDSHADERINC
-// The cloud layer, in the world: a shell CLOUD_HEIGHT over the scene's origin. The sky traces the
+// The cloud layer, in the world: a shell overcast_height over the scene's origin. The sky traces the
 // view ray to it (sky.gdshaderinc) and anything lit includes this and traces toward the sun
 // (cloud_sunlight), so the cloud in front of the sun is the one whose shadow you are standing in.
 // Global uniforms, one sky at a time: OvercastClouds sets them, and the plugin declares them.
@@ -8,7 +8,8 @@
 // Tiling noise (OvercastClouds.noise): perlin fbm in r, worley fbm in g (distance: 0 at a cell's
 // centre). One tile spans CLOUD_TILE noise units.
 global uniform sampler2D overcast_noise : filter_linear_mipmap, repeat_enable;
-global uniform float overcast_scale;     // noise units per CLOUD_HEIGHT
+global uniform float overcast_height;    // metres over the origin
+global uniform float overcast_scale;     // noise units per overcast_height
 global uniform float overcast_speed;     // noise units per second
 global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
@@ -16,7 +17,10 @@ global uniform float overcast_shadow;    // how much of the sky's share a cloud 
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
 global uniform float overcast_volumetric; // 1 when the sky ray-marches its clouds
 const float CLOUD_TILE = 12.0;
-const float CLOUD_HEIGHT = 100.0;  // metres over the origin
+// Every length below is tuned at a height of 100 m and scales with it, so a higher layer looks
+// the same, only bigger.
+#define CLOUD_HEIGHT overcast_height
+#define CLOUD_M (overcast_height / 100.0)
 // The shell curves like a planet this many times its height across, so it meets the horizon at a
 // finite distance instead of smearing out to infinity like a flat plane.
 const float CLOUD_EARTH = 12.0;
@@ -115,11 +119,13 @@ float cloud_weather(vec2 cp, float field) {
 // Volumetric clouds (OvercastClouds.set_volumetric): a slab CLOUD_THICK deep over the
 // shell, carved from 3D noise — perlin-worley in r, finer worley in g (OvercastClouds.volume).
 global uniform sampler3D overcast_volume : filter_linear, repeat_enable;
-const float CLOUD_THICK = 60.0;
-const float VOLUME_TILE = 360.0;   // metres one tile of overcast_volume spans
-const float DETAIL_TILE = 70.0;
+#define CLOUD_THICK (60.0 * CLOUD_M)
+// metres one tile of overcast_volume spans
+#define VOLUME_TILE (360.0 * CLOUD_M)
+#define DETAIL_TILE (70.0 * CLOUD_M)
 const int LIGHT_STEPS = 4;
-const float EXTINCTION = 0.3;      // per metre at full density
+// per metre at full density
+#define EXTINCTION (0.3 / CLOUD_M)
 
 // How far up the slab p is, 0 at its base and 1 at its top, seen from `viewer`: on the curve
 // cloud_distance_to puts the shells on, a planet under the viewer. Measured flat, a distant cloud

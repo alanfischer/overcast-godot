@@ -3,8 +3,9 @@ class_name OvercastClouds
 extends Object
 ## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc). Global, because the sky
 ## draws the clouds and everything lit under them reads the same ones for its shadows: one sky
-## at a time: whichever last claimed it owns it, and only the owner moves or releases it. The
-## plugin declares them in the project settings; OvercastSky sets them.
+## at a time: whichever last claimed it owns it, and only the owner moves it. When the owner lets
+## go, the sky that claimed it before, if it is still drawing, takes it back. The plugin declares
+## them in the project settings; OvercastSky sets them.
 
 ## name -> [type, default], in project-settings form.
 const GLOBALS := {
@@ -26,6 +27,8 @@ static var _volume: Texture3D
 static var _volumetric := false
 ## The instance id of the sky drawing the layer; 0 for none.
 static var _owner := 0
+## Instance ids of the skies that want the layer, oldest claim first.
+static var _drawing: Array[int] = []
 static var _values := {}
 
 
@@ -75,6 +78,9 @@ static func set_volumetric(enabled: bool) -> void:
 ## OvercastSky's: the sky with instance id `owner` takes the layer. `sun_dir` toward the sun,
 ## `scale` noise units per cloud height, `speed` noise units per second, `softness` of the edges.
 static func _claim(owner: int, sun_dir: Vector3, scale: float, speed: float, softness: float) -> void:
+	if _owner != owner:
+		_drawing.erase(owner)
+		_drawing.append(owner)
 	_owner = owner
 	_set_global("overcast_noise", noise())
 	if _volumetric:
@@ -92,12 +98,20 @@ static func _set_weather(owner: int, cover: float, shadow: float) -> void:
 		_set_cover(cover, shadow)
 
 
-## OvercastSky's: `owner` stops drawing, if it held the layer: no clouds, so no shadows. The
-## layer settings stay for the next sky.
+## OvercastSky's: `owner` stops drawing. If it held the layer, the previous sky still drawing
+## takes it back; with none, no clouds, so no shadows.
 static func _release(owner: int) -> void:
-	if owner == _owner:
-		_owner = 0
-		_set_cover(0.0, 0.0)
+	_drawing.erase(owner)
+	if owner != _owner:
+		return
+	_owner = 0
+	_set_cover(0.0, 0.0)
+	while not _drawing.is_empty():
+		var sky = instance_from_id(_drawing[-1])
+		if sky and sky.drawing:
+			sky._sync_layer()
+			return
+		_drawing.pop_back()
 
 
 static func _set_cover(cover: float, shadow: float) -> void:

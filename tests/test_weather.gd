@@ -3,6 +3,7 @@ extends "res://tests/suite.gd"
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
 const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
 const RainFloor = preload("res://addons/overcast/overcast_rain_floor.gd")
+const Cycle = preload("res://addons/overcast/overcast_cycle.gd")
 
 
 ## A weather that draws and plays as on a client, though the suite runs headless.
@@ -195,6 +196,71 @@ func test_covers_leave_roofs_and_each_other_alone() -> void:
 	assert_almost_eq(w.floor_at(Vector3(-4.5, 0, 5)), 3.1, 1e-4, "the one that stayed is still stamped")
 	w.remove_cover(a)
 	assert_eq(w.floor_at(Vector3(-5, 0, 5)), 0.0, "removed by hand, open again")
+
+
+func test_adding_a_cover_again_lets_go_of_its_old_stamp() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _open_floor()
+	var box := AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2))
+	var lift := _platform(Vector3(-6, 3, -6))
+	w.add_cover(lift, box)
+	w._update_covers()
+	lift.global_position = Vector3(6, 3, 6)
+	w.add_cover(lift, box)
+	w._update_covers()
+	assert_eq(w.floor_at(Vector3(-6, 0, -6)), 0.0, "where it was is open again")
+	assert_almost_eq(w.floor_at(Vector3(6, 0, 6)), 3.1, 1e-4, "and it covers where it is")
+	assert_true(w.has_cover(lift), "still one cover")
+
+
+func test_the_sun_is_let_go_of_as_it_was() -> void:
+	var first := DirectionalLight3D.new()
+	first.light_energy = 2.0
+	first.rotation = Vector3(-0.5, 0.3, 0.0)
+	var basis := first.basis
+	_keep(first)
+	_root().add_child(first)
+	var second := DirectionalLight3D.new()
+	_keep(second)
+	_root().add_child(second)
+	var w := _weather()
+	_keep(w)
+	w.sky = FakeSky.new({"drawing": false})
+	w.sun = first
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	assert_lt(first.light_energy, 2.0, "the storm dims the sun")
+	assert_false(first.basis.is_equal_approx(basis), "and it turns with the time")
+	w.sun = second
+	assert_almost_eq(first.light_energy, 2.0, 1e-6, "replaced, it gets its own light back")
+	assert_true(first.basis.is_equal_approx(basis), "and its own direction")
+	w._process(0.1)
+	assert_lt(second.light_energy, 1.0, "the new sun is dimmed from its own light")
+	_root().remove_child(w)
+	assert_almost_eq(second.light_energy, 1.0, 1e-6, "and let go of when the weather leaves")
+	_root().add_child(w)
+
+
+func test_setting_the_cycle_back_plans_it_afresh() -> void:
+	var reference := Cycle.new(77)
+	var t := 0.0
+	while reference.rain_at(t) <= 0.05:
+		t += 5.0
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.cycle = true
+	w.cycle_seed = 77
+	w.cycle_time = t + 5000.0
+	w._process(0.0)
+	w.cycle_time = t
+	w._process(0.0)
+	assert_almost_eq(w.rain, Cycle.new(77).rain_at(t), 1e-6, "back in time, the shower that was there")
+	assert_gt(w.rain, 0.0, "is raining")
 
 
 func test_covers_restamp_only_for_a_step_that_shows() -> void:

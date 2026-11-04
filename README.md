@@ -102,7 +102,7 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 ## Limits
 
 - One sky draws the cloud layer at a time, because the clouds' shadows are global shader
-  uniforms. The sky that last started drawing owns it.
+  uniforms. The sky that last started drawing owns it; when it stops, the one before takes it back.
 - The sky's sun is its `sun_dir`; it does not follow a DirectionalLight3D by itself.
 - The sun's path is an equinox's: up at 6:00, at `sun_dir` at noon, down at 18:00, with the moon
   on the same arc at night. There are no seasons or latitude.

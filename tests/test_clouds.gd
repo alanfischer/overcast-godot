@@ -41,7 +41,7 @@ func test_a_storm_closes_the_sky_and_deepens_the_shadow() -> void:
 	sky.storm = 1.0
 	assert_almost_eq(_global("overcast_cover"), SkyScript.STORM_COVER, 1e-6, "a storm closes it over")
 	assert_almost_eq(_global("overcast_shadow"), sky.storm_shadow, 1e-6, "and shades harder")
-	assert_eq(sky.get_shader_parameter("storm"), 1.0, "the sky draws the storm")
+	assert_eq(sky.storm, 1.0, "the sky draws the storm")
 	sky.drawing = false
 	assert_eq(_global("overcast_shadow"), 0.0, "a sky off screen casts no shadow")
 
@@ -115,6 +115,41 @@ func test_a_saved_sky_loads_with_its_settings() -> void:
 	assert_eq(loaded.shader, SkyScript.SkyShader, "on the sky shader")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
+
+
+func test_a_storm_and_a_flash_are_not_saved_with_the_sky() -> void:
+	var sky := SkyScript.new({"drawing": false})
+	sky.storm = 0.8
+	sky.set_flash(Color.WHITE, Vector3.UP)
+	var path := "user://overcast_test_storm.tres"
+	assert_eq(ResourceSaver.save(sky, path), OK, "it saves")
+	var text := FileAccess.get_file_as_string(path)
+	var set_by_weather := RegEx.create_from_string("(storm|flash_\\w+) = (?!null)")
+	assert_eq(set_by_weather.search(text), null, "without the weather's storm or flash")
+	var old := SkyScript.new({"drawing": false})
+	old.set_shader_parameter("storm", 0.8)  # as an older version saved it
+	assert_eq(ResourceSaver.save(old, path), OK, "an old sky saves")
+	var loaded: SkyScript = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
+	assert_eq(loaded.get_shader_parameter("storm"), null, "and loads with its stale storm dropped")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func test_a_passing_sky_gives_the_layer_back() -> void:
+	var sky := SkyScript.new({"cloud_amount": 0.3})
+	sky.drawing = true
+	var passing := SkyScript.new({"cloud_amount": 0.7})
+	passing.drawing = true
+	assert_almost_eq(_global("overcast_cover"), 0.7, 1e-6, "the newer sky takes the layer")
+	passing = null
+	assert_eq(Clouds._owner, sky.get_instance_id(), "freed, it hands the layer back")
+	assert_almost_eq(_global("overcast_cover"), 0.3, 1e-6, "with the older sky's clouds")
+	var off := SkyScript.new({"cloud_amount": 0.5})
+	off.drawing = true
+	off.drawing = false
+	assert_almost_eq(_global("overcast_cover"), 0.3, 1e-6, "and so does one turned off")
+	sky.drawing = false
+	assert_eq(Clouds._owner, 0, "with none left drawing, nobody holds it")
+	assert_eq(_global("overcast_shadow"), 0.0, "and nothing casts a shadow")
 
 
 func test_the_day_runs_noon_to_dusk_to_night() -> void:

@@ -17,6 +17,9 @@ const SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
 const LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
+## saved with the sky.
+const TRANSIENT := [&"storm", &"flash_color", &"flash_dir"]
 ## What a new sky starts with where the shader's own default is not the one wanted, or where the
 ## code reads the value back.
 const DEFAULTS := {
@@ -95,7 +98,7 @@ var dusk: float:
 var storm := 0.0:
 	set(amount):
 		storm = amount
-		set_shader_parameter("storm", amount)
+		RenderingServer.material_set_param(get_rid(), &"storm", amount)
 		_push_weather()
 ## Direction toward the sun, world space: where it is at noon when it follows the time. Set it here
 ## or through the inspector, not with set_shader_parameter, or the clouds' shadows will not follow.
@@ -128,6 +131,9 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 	for key in DEFAULTS:
 		if get_shader_parameter(key) == null:
 			set("shader_parameter/" + key, DEFAULTS[key])
+	for key in TRANSIENT:  # saved by an older version
+		if get_shader_parameter(key) != null:
+			set_shader_parameter(key, null)
 	time_of_day = time_of_day
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
@@ -259,8 +265,8 @@ func _sync_layer() -> void:
 
 ## Light the sky from within, brightest toward `dir` (world space); black puts it out.
 func set_flash(color: Color, dir: Vector3) -> void:
-	set_shader_parameter("flash_color", Vector3(color.r, color.g, color.b))
-	set_shader_parameter("flash_dir", dir)
+	RenderingServer.material_set_param(get_rid(), &"flash_color", Vector3(color.r, color.g, color.b))
+	RenderingServer.material_set_param(get_rid(), &"flash_dir", dir)
 
 
 func _push_weather() -> void:

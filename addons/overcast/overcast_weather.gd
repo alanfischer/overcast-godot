@@ -130,8 +130,15 @@ const COVER_STEP := 0.05
 
 @export_group("Scene light")
 ## A sun to dim under the storm and light with the flash, and, while the sky's sun follows the
-## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional.
-@export var sun: DirectionalLight3D
+## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional. Let go
+## of, as it was, when replaced or when the weather leaves the tree.
+@export var sun: DirectionalLight3D:
+	set(light):
+		if light == sun:
+			return
+		_let_sun_go()
+		sun = light
+		_take_sun()
 ## The light the sky puts on the scene, as a multiplier: white by day, dimmer at night
 ## (OvercastSky.scene_light). Lights the drops and the haze.
 @export var sky_light := Color.WHITE
@@ -175,8 +182,13 @@ var bolt_drawer: Callable
 
 ## How far the sky has closed over, 0 to 1: follows the rain at STORM_RATE.
 var storm := 0.0
-## Seconds into the showers (cycle). Peers that share cycle_seed and this agree on the rain.
-var cycle_time := 0.0
+## Seconds into the showers (cycle). Peers that share cycle_seed and this agree on the rain; set
+## back, the showers are planned afresh from the start.
+var cycle_time := 0.0:
+	set(t):
+		if t < cycle_time:
+			_cycle = null
+		cycle_time = t
 var _cycle: Cycle
 var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
 var _sky_storm := NAN
@@ -215,8 +227,9 @@ var _wet_mats: Array[ShaderMaterial] = []
 var _wetness := 0.0
 var _puddles := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
-var _sun_energy := -1.0
+var _sun_energy := -1.0  # the sun's own light while taken; -1 when not
 var _sun_color := Color.WHITE
+var _sun_basis := Basis()
 ## Node3D -> Cover.
 var _covers := {}
 var _cover_in := 0.0
@@ -254,12 +267,32 @@ func _ready() -> void:
 		_rain_audio.stream = rain_stream if rain_stream else _sound("rain")
 		_rain_audio.finished.connect(_on_rain_finished)
 		add_child(_rain_audio)
-		if sun:
-			_sun_energy = sun.light_energy
-			_sun_color = sun.light_color
 	if _floor_tex:
 		_hand_floor(_drop_material)
 	_refresh(0.0)
+
+
+func _enter_tree() -> void:
+	_take_sun()
+
+
+func _exit_tree() -> void:
+	_let_sun_go()
+
+
+func _take_sun() -> void:
+	if sun and _sun_energy < 0.0 and _presenting and not _editor and is_inside_tree():
+		_sun_energy = sun.light_energy
+		_sun_color = sun.light_color
+		_sun_basis = sun.basis
+
+
+func _let_sun_go() -> void:
+	if _sun_energy >= 0.0 and is_instance_valid(sun):
+		sun.light_energy = _sun_energy
+		sun.light_color = _sun_color
+		sun.basis = _sun_basis
+	_sun_energy = -1.0
 
 
 ## One of sounds/.
@@ -354,6 +387,7 @@ func _storm_target() -> float:
 ## moves (COVER_EVERY, COVER_STEP); it covers nothing while hidden, and a freed node is let go of
 ## by itself.
 func add_cover(node: Node3D, shape: Variant = null) -> void:
+	remove_cover(node)
 	var tris: PackedVector3Array
 	if shape is AABB:
 		tris = _box_triangles(shape)
@@ -372,6 +406,10 @@ func add_cover(node: Node3D, shape: Variant = null) -> void:
 		cover.corners.append(bounds.get_endpoint(i))
 	_covers[node] = cover
 	_cover_in = 0.0
+
+
+func has_cover(node: Node3D) -> bool:
+	return _covers.has(node)
 
 
 func remove_cover(node: Node3D) -> void:

@@ -118,11 +118,12 @@ float ov_schlick(float u) {
 
 // Godot's light_compute (scene.glsl, scene_forward_lights_inc.glsl), the clouds aside.
 void light() {
+	float cNdotL = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
 	vec3 light = LIGHT_COLOR * ATTENUATION;
-	if (LIGHT_IS_DIRECTIONAL) {
+	// Where the sun lights nothing, there is nothing for a cloud to take.
+	if (LIGHT_IS_DIRECTIONAL && cNdotL > 0.0) {
 		light *= cloud_sunlight(ov_world_pos);
 	}
-	float cNdotL = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
 	float cNdotV = max(dot(NORMAL, VIEW), 1e-4);
 	vec3 H = normalize(VIEW + LIGHT);
 	float cLdotH = clamp(dot(LIGHT, H), 0.0, 1.0);

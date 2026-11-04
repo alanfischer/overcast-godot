@@ -5,10 +5,6 @@ extends "res://tests/suite.gd"
 const Materials = preload("res://addons/overcast/overcast_materials.gd")
 
 
-func _names(mat: ShaderMaterial) -> Array:
-	return mat.shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
-
-
 func test_a_plain_material_converts_and_compiles() -> void:
 	var src := StandardMaterial3D.new()
 	src.albedo_color = Color(0.2, 0.4, 0.6)
@@ -17,7 +13,7 @@ func test_a_plain_material_converts_and_compiles() -> void:
 	src.metallic_specular = 0.7
 	var to := Materials.convert_material(src) as ShaderMaterial
 	assert_ne(to, null, "a ShaderMaterial")
-	var names := _names(to)
+	var names := _uniform_names(to.shader)
 	assert_true(names.has("albedo") and names.has("puddle_scale"), "it compiles: %s" % [names])
 	assert_false(names.has("texture_albedo"), "no texture, no sampler")
 	assert_eq(to.get_shader_parameter("albedo"), src.albedo_color)
@@ -48,7 +44,7 @@ func test_every_supported_feature_compiles_together() -> void:
 	src.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	src.uv1_scale = Vector3(2, 3, 1)
 	var to := Materials.convert_material(src) as ShaderMaterial
-	var names := _names(to)
+	var names := _uniform_names(to.shader)
 	for name in ["texture_albedo", "texture_metallic", "texture_roughness", "texture_normal",
 			"texture_emission", "texture_ambient_occlusion", "alpha_scissor_threshold", "uv1_scale"]:
 		assert_true(names.has(name), "declares %s" % name)
@@ -132,7 +128,7 @@ func test_apply_overrides_surfaces_and_leaves_the_mesh() -> void:
 func test_the_include_compiles_on_its_own() -> void:
 	var shader := Shader.new()
 	shader.code = 'shader_type spatial;\n#define OV_FILTER filter_linear\n#define OV_REPEAT repeat_enable\n#include "%s"\n' % Materials.INCLUDE
-	var names := shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
+	var names := _uniform_names(shader)
 	assert_true(names.has("albedo"), "compiles: %s" % [names])
 
 
@@ -154,3 +150,29 @@ func test_a_twin_nothing_draws_with_is_let_go() -> void:
 	var id := Materials.convert_material(src).get_instance_id()
 	assert_eq(instance_from_id(id), null, "freed with its last user")
 	assert_ne(Materials.convert_material(src), null, "and made again on asking")
+
+
+func test_watch_converts_what_spawns_after_its_ready() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var root := _keep(Node3D.new()) as Node3D
+	tree.root.add_child(root)
+	Materials.watch(root)
+	var mi := MeshInstance3D.new()
+	mi.mesh = BoxMesh.new()
+	mi.material_override = StandardMaterial3D.new()
+	root.add_child(mi)
+	# As a spawn's _ready would: the game sets its material after it enters the tree.
+	var skin := StandardMaterial3D.new()
+	mi.material_override = skin
+	assert_eq(mi.material_override, skin, "not yet: the frame is not over")
+	await tree.process_frame
+	assert_eq(Materials.source_of(mi.material_override), skin, "converted, from what the game set")
+	root.remove_child(mi)
+	tree.root.remove_child(root)
+	var later := MeshInstance3D.new()
+	later.material_override = StandardMaterial3D.new()
+	tree.root.add_child(later)
+	await tree.process_frame
+	assert_true(later.material_override is StandardMaterial3D, "a root that has left stops watching")
+	later.free()
+	mi.free()

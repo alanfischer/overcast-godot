@@ -20,8 +20,8 @@ global shader uniforms, which every Overcast shader needs to compile.
 2. Add an **OvercastWeather** node. Drag its box (`area`) to cover your level and press
    **Bake Rain Floor**. Then drag `rain` up. The rain, the storm closing over, wet ground and the
    lightning (**Strike**) all show in the editor. The node warns you if it has no sky or rain floor.
-3. For wet ground and cloud shadows, call `OvercastMaterials.apply($Level)` once the level is
-   loaded: it converts its StandardMaterial3Ds. Your own shaders take two includes instead (below).
+3. For wet ground and cloud shadows, call `OvercastMaterials.watch($Level)` once the level is
+   loaded: it converts its StandardMaterial3Ds, and those of what spawns into it. Your own shaders take two includes instead (below).
 
 The same from code:
 
@@ -62,8 +62,9 @@ and go on their own.
   levels on rough metals. It covers albedo, metallic, roughness, specular, normal, emission and
   occlusion maps, ORM textures, vertex colour, transparency, cull and blend modes. A material
   using anything else (rim, clearcoat, triplanar, billboards, unshaded…) is left as it is.
-  Anything added to the scene later needs its own `apply`. Code that edits a material at runtime
-  edits `OvercastMaterials.source_of(mat)`, or a copy of it, and converts that again with
+  `watch(root)` does the same, then converts what is added under `root` later, at the end of
+  the frame it was added in, after its `_ready`. Code that edits a material after that edits
+  `OvercastMaterials.source_of(mat)`, or a copy of it, and converts that again with
   `convert_material`.
 - **Cloud shadows.** Include `shaders/clouds.gdshaderinc` and multiply your sun light by
   `cloud_sunlight(world_pos)`. The shadow comes from the same cloud the sky draws in front of

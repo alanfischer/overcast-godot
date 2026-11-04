@@ -42,5 +42,5 @@ void fragment() {
 	ROUGHNESS = roughness;
 }
 """
-	var names := shader.get_shader_uniform_list().map(func(u: Dictionary) -> String: return u["name"])
+	var names := _uniform_names(shader)
 	assert_eq(names, ["puddle_scale"], "it compiles, and all it takes of its own is how readily it pools")

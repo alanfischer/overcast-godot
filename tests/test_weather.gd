@@ -1,6 +1,8 @@
 extends "res://tests/suite.gd"
 
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
+const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
+const RainFloor = preload("res://addons/overcast/overcast_rain_floor.gd")
 
 
 ## A weather that draws and plays as on a client, though the suite runs headless.
@@ -10,42 +12,38 @@ func _weather() -> Weather:
 	return w
 
 
-class FakeSky:
-	var storm := 0.0
+class FakeSky extends SkyScript:
 	var flashes := 0
 
-	func set_storm(amount: float) -> void:
-		storm = amount
-
-	func set_flash(_color: Color, _dir: Vector3) -> void:
+	func set_flash(color: Color, dir: Vector3) -> void:
+		super(color, dir)
 		flashes += 1
-
-	func horizon_color() -> Color:
-		return Color(0.5, 0.5, 0.5)
 
 
 ## A floor 4 m by 2 m from (-2, -1): the west half roofed at 3 m, the east half open to 0.
-func _roofed_floor() -> Dictionary:
+func _roofed_floor() -> RainFloor:
 	var img := Image.create_empty(4, 2, false, Image.FORMAT_RF)
 	for y in 2:
 		for x in 4:
 			img.set_pixel(x, y, Color(3.0 if x < 2 else 0.0, 0, 0))
-	return {"image": img, "origin": Vector3(-2, 0, -1), "size": Vector2(4, 2), "top": 10.0}
+	return RainFloor.create(img, Vector3(-2, 0, -1), Vector2(4, 2), 10.0)
 
 
 func test_rain_past_a_downpour_only_adds_drops() -> void:
+	var w := _weather()
 	for rain in [1.0, 2.0, 6.0]:
 		assert_almost_eq(Weather.heaviness(rain), 1.0, 1e-6, "rain %s is a downpour" % rain)
 		for i in 20:
-			var gap := Weather.strike_gap(rain)
-			assert_true(gap >= Weather.STRIKE_GAP_HEAVY.x and gap <= Weather.STRIKE_GAP_HEAVY.y,
+			var gap := w.strike_gap(rain)
+			assert_true(gap >= w.strike_gap_heavy.x and gap <= w.strike_gap_heavy.y,
 				"rain %s waits a downpour's gap between strikes (got %.1f)" % [rain, gap])
 	assert_eq(Weather.heaviness(0.0), 0.0, "dry is dry")
+	w.free()
 
 
 func test_the_floor_is_read_from_its_min_corner() -> void:
 	var w := _weather()
-	w.set_rain_floor(_roofed_floor())
+	w.rain_floor = _roofed_floor()
 	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), 3.0, "the min corner's cell is the roof")
 	assert_eq(w.floor_at(Vector3(1.5, 0, 0.5)), 0.0, "the far cell is open")
 	assert_eq(w.floor_at(Vector3(2.5, 0, 0.0)), INF, "off the floor, no rain at any height")
@@ -60,7 +58,7 @@ func test_rain_sounds_muffled_under_the_roof() -> void:
 	for y in range(28, 36):
 		for x in range(28, 36):
 			img.set_pixel(x, y, Color(3, 0, 0))  # an 8 m roof at 3 m in the middle of 64 m
-	w.set_rain_floor({"image": img, "origin": Vector3(-32, 0, -32), "size": Vector2(64, 64)})
+	w.rain_floor = RainFloor.create(img, Vector3(-32, 0, -32), Vector2(64, 64))
 	var under := w.rain_exposure(Vector3(0, 1.5, 0))
 	var open := w.rain_exposure(Vector3(-14, 1.5, -14))
 	assert_lt(under, 0.6, "under the roof most of the rain is out of reach (%.2f)" % under)
@@ -71,7 +69,7 @@ func test_rain_sounds_muffled_under_the_roof() -> void:
 func test_rain_closes_the_sky_over_and_times_strikes() -> void:
 	var w := _weather()
 	_keep(w)
-	var sky := FakeSky.new()
+	var sky := FakeSky.new({"drawing": false})
 	w.sky = sky
 	_root().add_child(w)
 	var seeds: Array[int] = []
@@ -126,19 +124,21 @@ func test_it_brings_its_own_rain_and_thunder() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	assert_ne(w.rain_stream, null, "its own rain")
-	assert_true(w.rain_stream != null and w.rain_stream.loop, "which loops without a gap")
-	assert_ne(w.thunder_stream, null, "and its own thunder")
+	var stream: AudioStream = w._rain_audio.stream
+	assert_ne(stream, null, "its own rain")
+	assert_true(stream != null and stream.loop, "which loops without a gap")
+	assert_ne(Weather._sound("thunder"), null, "and its own thunder")
+	assert_eq(w.rain_stream, null, "left unset, so a scene saved in the editor keeps none")
 
 
 ## Open ground at 0, 20 m square in 1 m cells, with a 4 m roof at 5 m over its middle.
-func _open_floor() -> Dictionary:
+func _open_floor() -> RainFloor:
 	var img := Image.create_empty(20, 20, false, Image.FORMAT_RF)
 	img.fill(Color(0, 0, 0))
 	for y in range(8, 12):
 		for x in range(8, 12):
 			img.set_pixel(x, y, Color(5, 0, 0))
-	return {"image": img, "origin": Vector3(-10, 0, -10), "size": Vector2(20, 20)}
+	return RainFloor.create(img, Vector3(-10, 0, -10), Vector2(20, 20))
 
 
 func _platform(at: Vector3) -> Node3D:
@@ -153,7 +153,7 @@ func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var lift := _platform(Vector3(-6, 3, -6))
 	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))  # a 2 m deck, top at +0.1
 	w._update_covers()
@@ -179,7 +179,7 @@ func test_covers_leave_roofs_and_each_other_alone() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var box := AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2))
 	var under_roof := _platform(Vector3(0, 2, 0))
 	w.add_cover(under_roof, box)
@@ -201,7 +201,7 @@ func test_covers_restamp_only_for_a_step_that_shows() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var lift := _platform(Vector3(-6.5, 3, -6.5))
 	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))
 	w._update_covers()
@@ -235,7 +235,7 @@ func test_a_turned_beam_covers_its_diagonal_not_its_bounds() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var beam := _platform(Vector3(-5, 3, 5))
 	beam.rotation.y = PI / 4
 	w.add_cover(beam, _quad(Vector2(-4, -0.25), Vector2(4, 0.25), 0.0))  # 8 m by 0.5 m
@@ -250,7 +250,7 @@ func test_an_l_shape_leaves_its_corner_open() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var roof := _platform(Vector3(-5, 3, -5))
 	var tris := _quad(Vector2(-3, -3), Vector2(3, -1), 0.0)  # along the top
 	tris.append_array(_quad(Vector2(-3, -1), Vector2(-1, 3), 0.0))  # down the left
@@ -264,7 +264,7 @@ func test_a_pitched_roof_stops_rain_at_its_slope() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var shed := _platform(Vector3(5, 3, -5))
 	# Eaves at 3 m along x = -3, rising to 5 m along x = +3.
 	var a := Vector3(-3, 0, -3)
@@ -283,7 +283,7 @@ func test_a_cover_defaults_to_its_own_meshes() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var body := AnimatableBody3D.new()
 	body.sync_to_physics = false  # moved by hand here, not by a physics step
 	_root().add_child(body)
@@ -309,7 +309,7 @@ func test_a_cover_that_only_slides_reuses_its_raster() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var train := _platform(Vector3(-12, 3, 5))  # starts half off the floor's west edge
 	w.add_cover(train, _quad(Vector2(-2, -0.5), Vector2(2, 0.5), 0.0))
 	w._update_covers()
@@ -332,7 +332,7 @@ func test_turning_covers_share_out_the_work() -> void:
 	var w := _weather()
 	_keep(w)
 	_root().add_child(w)
-	w.set_rain_floor(_open_floor())
+	w.rain_floor = _open_floor()
 	var spinners: Array[Node3D] = []
 	for i in 6:
 		var s := _platform(Vector3(-7.5 + i * 3, 3, -7.5))
@@ -383,3 +383,52 @@ func test_a_dedicated_server_times_strikes_and_draws_nothing() -> void:
 		w._process(0.1)
 	assert_gt(seeds.size(), 2, "strikes are still timed (%d), for the peers that draw them" % seeds.size())
 	assert_eq(w.get_child_count(), 0, "and nothing is built to draw or play them here")
+
+
+func test_it_finds_the_scene_sky_by_itself() -> void:
+	var w := _weather()
+	_keep(w)
+	var sky := SkyScript.new({"drawing": false})
+	var holder := _keep(WorldEnvironment.new())
+	holder.environment = sky.make_environment()
+	sky.drawing = false
+	_root().add_child(holder)
+	_root().add_child(w)
+	assert_eq(w.current_sky(), sky, "the environment's sky, with none set")
+	w.rain = 1.0
+	w.settle()
+	w._process(0.0)
+	assert_almost_eq(sky.storm, 1.0, 1e-6, "and storms it")
+	var own := SkyScript.new({"drawing": false})
+	w.sky = own
+	assert_eq(w.current_sky(), own, "a sky set by hand wins")
+	w._process(0.0)
+	assert_almost_eq(own.storm, 1.0, 1e-6, "and is brought up to the storm at once")
+
+
+func test_showers_drive_the_rain() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.cycle_seed = 1234
+	w.cycle = true
+	w.cycle_speed = 60.0
+	var wet := 0
+	for i in 600:
+		w._process(0.5)
+		if w.rain > 0.0:
+			wet += 1
+	var reference := preload("res://addons/overcast/overcast_cycle.gd").new(1234)
+	assert_almost_eq(w.rain, reference.rain_at(w.cycle_time), 1e-6, "the cycle's rain on its seed")
+	assert_gt(wet, 0, "it rains some of the time (%d of 600)" % wet)
+	assert_lt(wet, 600, "and not all of it")
+
+
+func test_clearing_the_floor_lets_rain_fall_everywhere() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _roofed_floor()
+	w.rain_floor = null
+	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), -INF, "no floor, no roof")
+	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "and the rain all around")

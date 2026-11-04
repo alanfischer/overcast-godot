@@ -20,7 +20,8 @@ global shader uniforms, which every Overcast shader needs to compile.
 2. Add an **OvercastWeather** node. Drag its box (`area`) to cover your level and press
    **Bake Rain Floor**. Then drag `rain` up. The rain, the storm closing over, wet ground and the
    lightning (**Strike**) all show in the editor. The node warns you if it has no sky or rain floor.
-3. For wet ground and cloud shadows, your materials' shaders take two includes (below).
+3. For wet ground and cloud shadows, call `OvercastMaterials.apply($Level)` once the level is
+   loaded: it converts its StandardMaterial3Ds. Your own shaders take two includes instead (below).
 
 The same from code:
 
@@ -52,6 +53,16 @@ and go on their own.
 - **Volumetric clouds**: `OvercastClouds.set_volumetric(true)` ray-marches the clouds through 3D
   noise. That costs about a millisecond at 720p on an M1 on Compatibility. The radiance cubemap
   pass skips the clouds, so ambient light stays cheap.
+- **`OvercastMaterials`** gives StandardMaterial3Ds cloud shadows and wet ground.
+  `apply(root, puddle_scale)` swaps each one under `root` for a ShaderMaterial
+  (`shaders/standard.gdshaderinc`) that draws it the same way and adds the clouds and rain. The
+  meshes keep their own materials: the swaps go on as surface overrides. Godot gives scripts no
+  way to add code to a StandardMaterial3D's shader, so the converted shader redoes Godot's
+  lighting: on Compatibility it matches pixel for pixel, on Forward+ and Mobile to within a few
+  levels on rough metals. It covers albedo, metallic, roughness, specular, normal, emission and
+  occlusion maps, ORM textures, vertex colour, transparency, cull and blend modes. A material
+  using anything else (rim, clearcoat, triplanar, billboards, unshaded…) is left as it is.
+  Anything added to the scene later needs its own `apply`.
 - **Cloud shadows.** Include `shaders/clouds.gdshaderinc` and multiply your sun light by
   `cloud_sunlight(world_pos)`. The shadow comes from the same cloud the sky draws in front of
   the sun, so what's on the ground matches what's overhead. `demo/ground.gdshader` shows how in

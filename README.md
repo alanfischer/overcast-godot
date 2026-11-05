@@ -9,7 +9,7 @@ renderer, including Compatibility and Mobile.
 
 ![Fair weather, with cloud shadows on the ground](docs/clear.png)
 ![A downpour: haze, far rain, puddles](docs/rain.png)
-![Snow: lying everywhere but under the roofs](docs/snow.png)
+![Snow: flakes, a pale sky, and snow lying everywhere but under the roofs](docs/snow.png)
 
 ## Quick start
 
@@ -77,7 +77,8 @@ and go on their own.
   instead.
 - **`OvercastWeather`** handles the rain and snow:
   - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow
-  - haze and far rain only through air that rain is actually falling in; snow hazes it bright
+  - haze and far rain only through air that rain is actually falling in; snow turns the storm
+    sky a pale grey, and hazes less
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc` and calls
     `overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal)` from `fragment()`:
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's

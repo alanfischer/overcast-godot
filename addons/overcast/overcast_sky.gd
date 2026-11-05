@@ -19,7 +19,7 @@ const STORM_COVER := 0.97
 const LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
 ## saved with the sky.
-const TRANSIENT := [&"storm", &"flash_color", &"flash_dir"]
+const TRANSIENT := [&"storm", &"snowy", &"flash_color", &"flash_dir"]
 ## What a new sky starts with where the shader's own default is not the one wanted, or where the
 ## code reads the value back.
 const DEFAULTS := {
@@ -106,6 +106,12 @@ var storm := 0.0:
 		storm = amount
 		RenderingServer.material_set_param(get_rid(), &"storm", amount)
 		_push_weather()
+## How much of the storm is snow, 0 to 1: a pale sky rather than a dark one. OvercastWeather drives
+## it.
+var snowy := 0.0:
+	set(amount):
+		snowy = amount
+		RenderingServer.material_set_param(get_rid(), &"snowy", amount)
 ## Direction toward the sun, world space: where it is at noon when it follows the time. Set it here
 ## or through the inspector, not with set_shader_parameter, or the clouds' shadows will not follow.
 var sun_dir: Vector3:
@@ -292,7 +298,7 @@ func horizon_now() -> Color:
 	# As the shader's, at a glow halfway round from the sun.
 	h = h.lerp(_shader_space(param("dusk_color"), linear), dusk * 0.725 * 0.8)
 	h = h.lerp(_shader_space(param("night_horizon_color"), linear), night)
-	var grey := luma(h) * 0.55
+	var grey := luma(h) * lerpf(0.55, 1.0, snowy)
 	var col := h.lerp(Color(grey, grey, grey), storm)
 	return col if linear else col.srgb_to_linear()
 

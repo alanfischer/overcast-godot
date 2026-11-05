@@ -11,9 +11,13 @@ uniform vec3 velocity = vec3(0.0, -1.0, 0.0);
 uniform float sway = 0.35;
 uniform float sway_rate = 1.3;
 uniform float flake_size = 0.025;
+// The darkest flake, as a share of `color`: a flake turned edge-on, or against a bright sky,
+// reads grey.
+uniform float dim = 0.45;
 #include "res://addons/overcast/shaders/falling.gdshaderinc"
 
 varying float fade;
+varying float shade;
 
 void vertex() {
 	vec4 h = overcast_fall_hash(uint(INSTANCE_ID) + 1u);
@@ -23,6 +27,8 @@ void vertex() {
 	float t = TIME * sway_rate * mix(0.6, 1.4, g.x);
 	p.xz += sway * mix(0.4, 1.0, g.y) * vec2(sin(t + g.z * TAU), cos(t * 0.73 + g.w * TAU));
 	fade = overcast_fall_fade(p, cam, p);
+	float k = fract(g.z * 13.0);
+	shade = mix(dim, 1.0, k * k);
 	if (fade <= 0.0) {
 		VERTEX = vec3(0.0);
 	} else {
@@ -37,6 +43,6 @@ void vertex() {
 
 void fragment() {
 	float r = length(UV * 2.0 - 1.0);
-	ALBEDO = color;
+	ALBEDO = color * shade;
 	ALPHA = min(opacity * (1.0 + flash) * fade * smoothstep(1.0, 0.2, r), 1.0);
 }

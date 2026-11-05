@@ -167,6 +167,24 @@ func test_snow_falls_as_flakes_and_lies() -> void:
 	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "and gone, it leaves none behind")
 
 
+func test_a_snow_storm_greys_the_sky_pale() -> void:
+	var w := _weather()
+	_keep(w)
+	var sky := FakeSky.new({"drawing": false})
+	w.sky = sky
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	var dark := SkyScript.luma(sky.horizon_now())
+	w.snow = 1.0
+	for i in 100:
+		w._process(0.1)
+	assert_eq(sky.snowy, 1.0, "the sky follows the snow")
+	assert_gt(SkyScript.luma(sky.horizon_now()), dark * 1.5, "paler at the horizon than a rain storm's")
+	assert_eq(w._haze_base(sky, Color.WHITE), sky.horizon_now(), "and the haze fades into it")
+
+
 func test_sleet_is_some_of_each() -> void:
 	var w := _weather()
 	_keep(w)

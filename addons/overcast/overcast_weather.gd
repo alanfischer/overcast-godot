@@ -73,9 +73,12 @@ const DROP_COLOR := Color(0.75, 0.8, 0.9)
 ## full daylight.
 const FLAKE_BOX := Vector3(24.0, 16.0, 24.0)
 const FLAKE_COLOR := Color(0.95, 0.96, 1.0)
-## Snow hazes the distance bright: the light the flakes scatter, SNOW_HAZE_COLOR in the scene's
-## light, rather than the sky at the horizon.
+## Snow hazes the distance less than rain, into the pale sky a snow storm draws; with no sky, into
+## SNOW_HAZE_COLOR in the scene's light. Flakes range from FLAKE_DIM of their light to all of it,
+## so some show dark against that haze and some light against the ground.
+const SNOW_HAZE := 0.6
 const SNOW_HAZE_COLOR := Color(0.72, 0.74, 0.78)
+const FLAKE_DIM := 0.45
 ## Opacity of the far rain's streaks at a downpour.
 const FAR_OPACITY := 0.6
 ## Bolts: segments, height over the top of `area` in cloud heights, and the speed thunder travels at.
@@ -189,7 +192,7 @@ const SUN_STORM_SHADOW := 0.88
 ## Snow covers every material that includes shaders/snow.gdshaderinc.
 @export var lying_snow := true
 ## Flakes around the camera at the lightest snow and at a blizzard.
-@export_range(0, 100000, 100) var flakes_light := 2000
+@export_range(0, 100000, 100) var flakes_light := 5000
 @export_range(0, 100000, 100) var flakes_heavy := 25000
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
@@ -251,7 +254,9 @@ var cycle_time := 0.0:
 		cycle_time = t
 var _cycle: Cycle
 var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
-var _sky_storm := NAN
+var _sky_storm := Vector2(NAN, NAN)
+## How much of the storm is snow: follows `snow` at STORM_RATE, as the sky turns pale.
+var snowy := 0.0
 ## In the editor it draws, for a preview, but makes no sound, times no strikes and leaves the
 ## scene's own nodes (the sun) as they are saved.
 var _editor := Engine.is_editor_hint()
@@ -439,6 +444,7 @@ func _push_floor() -> void:
 ## goes, the ground soaked or snowed over. For a scene that starts mid-shower, and for screenshots.
 func settle() -> void:
 	storm = _storm_target()
+	snowy = snow
 	_soak()
 
 
@@ -597,7 +603,8 @@ func _refresh_flakes() -> void:
 	# Flakes drift down at about a metre a second; a blizzard's are bigger and wetter, and faster.
 	_flake_material.set_shader_parameter("velocity", Vector3(0.0, -lerpf(0.8, 1.5, heavy), 0.0))
 	_flake_material.set_shader_parameter("flake_size", lerpf(0.018, 0.03, heavy))
-	_flake_material.set_shader_parameter("opacity", lerpf(0.7, 0.9, heavy))
+	_flake_material.set_shader_parameter("opacity", lerpf(0.8, 0.95, heavy))
+	_flake_material.set_shader_parameter("dim", FLAKE_DIM)
 
 
 func _build_haze() -> void:
@@ -691,19 +698,17 @@ func scene_light(drawn: OvercastSky) -> Color:
 	return drawn.scene_light() if drawn and light_from_sky else sky_light
 
 
-## What the haze fades to before lightning: the sky at the horizon, or lit haze where there is none,
-## and, as it turns to snow, the light the flakes scatter.
+## What the haze fades to before lightning: the sky at the horizon, or lit haze where there is none.
 func _haze_base(drawn: OvercastSky, light: Color) -> Color:
 	var horizon: Color = drawn.horizon_now() if drawn else Color.BLACK
-	var lit := HAZE_COLOR * light
+	var lit := HAZE_COLOR.lerp(SNOW_HAZE_COLOR, snowy) * light
 	var least := lit * HAZE_FLOOR
-	var base := lit if horizon == Color.BLACK else \
+	return lit if horizon == Color.BLACK else \
 		Color(maxf(horizon.r, least.r), maxf(horizon.g, least.g), maxf(horizon.b, least.b))
-	return base.lerp(SNOW_HAZE_COLOR * light, snow)
 
 
 func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
-	var density := haze_density * storm * storm
+	var density := haze_density * storm * storm * lerpf(1.0, SNOW_HAZE, snowy)
 	_haze.visible = (density > 0.0005 or rain > 0.0) and not underwater
 	if not _haze.visible:
 		return
@@ -806,10 +811,12 @@ func _process(delta: float) -> void:
 	if not presenting:
 		return
 	var drawn := current_sky()
-	if drawn and (drawn.get_instance_id() != _sky_told or storm != _sky_storm):
+	snowy = move_toward(snowy, snow, STORM_RATE * delta)
+	if drawn and (drawn.get_instance_id() != _sky_told or Vector2(storm, snowy) != _sky_storm):
 		drawn.storm = storm
+		drawn.snowy = snowy
 		_sky_told = drawn.get_instance_id()
-		_sky_storm = storm
+		_sky_storm = Vector2(storm, snowy)
 	_live.update(delta)
 	_drops.visible = rainfall() > 0.0 and not underwater
 	_flakes.visible = snowfall() > 0.0 and not underwater

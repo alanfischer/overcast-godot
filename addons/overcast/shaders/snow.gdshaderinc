@@ -13,11 +13,13 @@ const vec3 OVERCAST_SNOW_ALBEDO = vec3(0.9, 0.92, 0.95);
 
 // How much of the surface at world_pos is under snow, 0 to 1.
 float overcast_snow_amount(vec3 world_pos, vec3 world_normal) {
-	if (overcast_snow_cover <= 0.0 || world_normal.y < 0.5) {
+	if (overcast_snow_cover <= 0.0 || world_normal.y < 0.4) {
 		return 0.0;
 	}
-	float s = overcast_snow_cover * snow_scale * smoothstep(0.5, 0.85, world_normal.y)
-		* rain_reaches(world_pos + world_normal * 0.02);
+	// Steeper holds less, but only gently past the cutoff, so the noise and not the mesh's facets
+	// draws the edges of the patches.
+	float slope = smoothstep(0.4, 0.55, world_normal.y) * mix(0.8, 1.0, smoothstep(0.55, 0.9, world_normal.y));
+	float s = overcast_snow_cover * snow_scale * slope * rain_reaches(world_pos + world_normal * 0.02);
 	if (s <= 0.0) {
 		return 0.0;
 	}

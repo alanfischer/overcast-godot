@@ -53,6 +53,8 @@ uniform float night_stars : hint_range(0.0, 1.0) = 0.7;
 // heavy, the sky behind them greys, and sun, moon and stars are lost. Everything is relative to
 // the sky's own colours, so a storm at night stays a night sky.
 uniform float storm : hint_range(0.0, 1.0) = 0.0;
+// How much of the storm is snow: a snow sky is a pale, flat grey, not a dark one.
+uniform float snowy : hint_range(0.0, 1.0) = 0.0;
 
 #include "res://addons/overcast/shaders/flash.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
@@ -162,7 +164,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	// What a storm cloud is measured against: the sky it covers, not the cloud colour, which on a
 	// moonlit sky is pale and would light the deck up at night.
 	float sky_lum = dot(col, OVERCAST_LUMA);
-	col = mix(col, vec3(sky_lum) * 0.55, storm);
+	col = mix(col, vec3(sky_lum) * mix(0.55, 1.0, snowy), storm);
 
 	// Stars before clouds and sun, so both occlude them.
 	if (stars > 0.0) {
@@ -240,6 +242,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		}
 		// Storm cloud: grey, darker than the sky it closes over.
 		vec3 heavy = vec3(sky_lum) * mix(0.6, 1.1, toward * toward) * storm_body * mix(0.8, 1.0, shade);
+		heavy = mix(heavy, vec3(sky_lum) * mix(0.9, 1.1, storm_body - 0.4), snowy);
 		lit = mix(lit, heavy, storm);
 		// Silver lining: thin cloud near the sun scatters it forward (Henyey-Greenstein, g 0.8,
 		// scaled to 1 looking straight at the sun).

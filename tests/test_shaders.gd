@@ -3,9 +3,10 @@ extends "res://tests/suite.gd"
 ## or nothing, and says so only in the log.
 
 const SHADERS := {
-	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "flash_color", "cloud_amount"],
+	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "snowy", "flash_color", "cloud_amount"],
 	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "velocity", "haze_density"],
-	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output"],
+	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "velocity", "haze_density", "flake_size", "opacity", "flash"],
+	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap"],
 }
 
 
@@ -29,6 +30,7 @@ func test_includes_compile_into_a_surface_shader() -> void:
 shader_type spatial;
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 #include "res://addons/overcast/shaders/wet.gdshaderinc"
+#include "res://addons/overcast/shaders/snow.gdshaderinc"
 varying vec3 world_pos;
 void vertex() { world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
@@ -38,9 +40,15 @@ void fragment() {
 	float roughness = 0.8;
 	float specular = 0.5;
 	vec2 wet = overcast_wet_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
+	overcast_snow(lit, albedo, world_pos, vec3(0.0, 1.0, 0.0), NORMAL, VIEW);
+	float snow = overcast_snow_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
+	NORMAL = overcast_snow_normal(NORMAL, vec3(0.0, 1.0, 0.0), snow);
+	float glint = overcast_snow_glint(world_pos, snow, overcast_snow_footprint(world_pos), NORMAL, VIEW, NORMAL);
+	ALBEDO += vec3(glint);
 	ALBEDO = lit + albedo * wet.x;
 	ROUGHNESS = roughness;
 }
 """
 	var names := _uniform_names(shader)
-	assert_eq(names, ["puddle_scale"], "it compiles, and all it takes of its own is how readily it pools")
+	assert_eq(names, ["puddle_scale", "snow_scale"],
+		"it compiles, and all it takes of its own is how readily it pools and holds snow")

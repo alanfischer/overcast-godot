@@ -2,9 +2,9 @@
 class_name OvercastGlobals
 extends Object
 ## The global shader uniforms every Overcast shader reads: the cloud layer (OvercastClouds) and the
-## rain (OvercastWeather). Global, so any shader that includes clouds.gdshaderinc or
-## wet.gdshaderinc follows the weather with nothing to register. The plugin declares them in the
-## project settings.
+## rain and snow (OvercastWeather). Global, so any shader that includes clouds.gdshaderinc,
+## wet.gdshaderinc or snow.gdshaderinc follows the weather with nothing to register. The plugin
+## declares them in the project settings.
 
 ## name -> [type, default], in project-settings form.
 const GLOBALS := {
@@ -20,12 +20,14 @@ const GLOBALS := {
 	"overcast_volume": ["sampler3D", ""],
 	"overcast_rain_floor": ["sampler2D", ""],
 	"overcast_has_rain_floor": ["bool", false],
+	"overcast_rain_beyond_floor": ["bool", false],
 	"overcast_rain_floor_origin": ["vec3", Vector3.ZERO],
 	"overcast_rain_floor_size": ["vec2", Vector2.ONE],
 	"overcast_rain_top": ["float", 1e6],
 	"overcast_wetness": ["float", 0.0],
 	"overcast_puddles": ["float", 0.0],
 	"overcast_rain_sky": ["vec3", Vector3.ZERO],
+	"overcast_snow_cover": ["float", 0.0],
 }
 
 const _TYPES := {

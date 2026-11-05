@@ -1,10 +1,10 @@
 @tool
 class_name OvercastMaterials
 extends Object
-## Puts cloud shadows and wet ground on StandardMaterial3Ds, which cannot take Overcast's
+## Puts cloud shadows, wet ground and snow on StandardMaterial3Ds, which cannot take Overcast's
 ## includes: each is swapped for a ShaderMaterial that draws it the same way (shaders/
-## standard.gdshaderinc) with the clouds and rain added. A material using a feature that shader
-## does not have is left as it is.
+## standard.gdshaderinc) with the clouds, rain and snow added. A material using a feature that
+## shader does not have is left as it is.
 ##
 ##     OvercastMaterials.apply($Level)
 

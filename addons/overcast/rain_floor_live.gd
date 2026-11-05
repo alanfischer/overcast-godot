@@ -20,6 +20,8 @@ var origin := Vector3.ZERO
 var size := Vector2.ONE
 var cell := Vector2.ONE
 var top := 1e6
+## Whether rain falls off the floor's edges (OvercastWeather.rain_beyond_floor).
+var beyond := false
 ## Node3D -> Cover.
 var covers := {}
 ## Microseconds a tick may spend rasterizing covers that turned (at least one is, whatever the
@@ -315,12 +317,13 @@ func _restamp(rects: Array[Rect2i]) -> void:
 		texture.update(image)
 
 
-## Where rain stops at world XZ `q`: INF off the floor, where no rain falls; -INF with no floor.
+## Where rain stops at world XZ `q`: off the floor INF, where no rain falls, or -INF with `beyond`;
+## -INF with no floor.
 func floor_at(q: Vector3) -> float:
 	if image == null:
 		return -INF
 	var x := floori((q.x - origin.x) / cell.x)
 	var z := floori((q.z - origin.z) / cell.y)
 	if x < 0 or z < 0 or x >= dims.x or z >= dims.y:
-		return INF
+		return -INF if beyond else INF
 	return heights[z * dims.x + x]

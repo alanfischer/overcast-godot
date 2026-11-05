@@ -1,5 +1,5 @@
 extends SceneTree
-## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 VOL=1 TIME=18.5 to vary it.
+## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=1 VOL=1 TIME=18.5 to vary it.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -19,6 +19,8 @@ func _run() -> void:
 		demo.get_node("%Time").value = float(OS.get_environment("TIME"))
 	var rain := float(OS.get_environment("RAIN")) if OS.get_environment("RAIN") != "" else 0.0
 	demo.get_node("%Rain").value = rain
+	if OS.get_environment("SNOW") != "":
+		demo.get_node("%Snow").value = float(OS.get_environment("SNOW"))
 	for i in 20:
 		await physics_frame
 	var weather = demo.get_node("Weather")

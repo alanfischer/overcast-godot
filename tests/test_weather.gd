@@ -53,6 +53,20 @@ func test_the_floor_is_read_from_its_min_corner() -> void:
 	w.free()
 
 
+func test_rain_can_fall_past_the_floors_edges() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _roofed_floor()
+	_root().add_child(w)
+	assert_eq(Globals.value("overcast_rain_beyond_floor"), false, "by default no rain falls off the floor")
+	w.rain_beyond_floor = true
+	assert_eq(w.floor_at(Vector3(2.5, 0, 0.0)), -INF, "on, it falls all the way down there")
+	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), 3.0, "and the roof still keeps it off")
+	assert_eq(Globals.value("overcast_rain_beyond_floor"), true, "so the shaders say")
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_rain_beyond_floor"), false, "and gone, it leaves the default")
+
+
 func test_rain_sounds_muffled_under_the_roof() -> void:
 	var w := _weather()
 	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "no floor: in the open everywhere")
@@ -120,6 +134,57 @@ func test_the_rain_reaches_wet_ground_through_the_globals() -> void:
 	_root().remove_child(w)
 	assert_eq(Globals.value("overcast_has_rain_floor"), false, "gone, it leaves no floor behind")
 	assert_eq(Globals.value("overcast_wetness"), 0.0, "and no wet ground")
+
+
+func test_snow_falls_as_flakes_and_lies() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	var seeds: Array[int] = []
+	w.struck.connect(func(s: int) -> void: seeds.append(s))
+	w.rain = 1.0
+	w.snow = 1.0
+	assert_eq(w.rainfall(), 0.0, "all of it falls as snow")
+	assert_eq(w._drops.multimesh.visible_instance_count, 0, "no drops")
+	assert_eq(w._flakes.multimesh.visible_instance_count, w.flakes_heavy, "a blizzard's flakes")
+	for i in int(w.snow_time * 10.0) + 10:
+		w._process(0.1)
+	assert_true(w._flakes.visible and not w._drops.visible, "the flakes are drawn, the drops not")
+	assert_almost_eq(w.storm, 1.0, 1e-6, "a blizzard closes the sky over as a downpour does")
+	assert_eq(seeds.size(), 0, "and does not thunder")
+	assert_eq(Globals.value("overcast_snow_cover"), 1.0, "in snow_time it has covered the ground")
+	assert_eq(Globals.value("overcast_wetness"), 0.0, "which stays dry under it")
+	assert_false(w._rain_audio.playing, "and quiet")
+	w.rain = 0.0
+	w._process(w.melt_time * 0.5)
+	assert_almost_eq(Globals.value("overcast_snow_cover"), 0.5, 0.01, "once it stops, it melts")
+	assert_gt(Globals.value("overcast_wetness"), 0.0, "and wets the ground it lay on")
+	w.rain = 1.0
+	w.snow = 0.0
+	w._process(w.melt_time / 8.0)
+	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "rain washes the rest away fast")
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "and gone, it leaves none behind")
+
+
+func test_sleet_is_some_of_each() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 0.25
+	assert_almost_eq(w.rainfall(), 0.75, 1e-6, "three quarters rain")
+	assert_almost_eq(w.snowfall(), 0.25, 1e-6, "a quarter snow")
+	assert_gt(w._drops.multimesh.visible_instance_count, 0, "drops")
+	assert_gt(w._flakes.multimesh.visible_instance_count, 0, "and flakes")
+	w.settle()
+	assert_eq(w._snow_lying, 0.0, "mostly rain, so it does not lie")
+	w.snow = 0.75
+	w.settle()
+	assert_eq(w._snow_lying, 1.0, "mostly snow, so it does")
+	w.lying_snow = false
+	w._process(w.melt_time)
+	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "unless lying snow is off")
 
 
 func test_a_headless_peer_answers_with_its_covers() -> void:

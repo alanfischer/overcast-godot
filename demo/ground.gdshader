@@ -1,9 +1,10 @@
-// The demo's ground and buildings: lit by the sun, shaded by the clouds overhead, and wet in the
-// rain. Your own shaders take the same two includes.
+// The demo's ground and buildings: lit by the sun, shaded by the clouds overhead, wet in the rain
+// and white in the snow. Your own shaders take the same includes.
 shader_type spatial;
 
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 #include "res://addons/overcast/shaders/wet.gdshaderinc"
+#include "res://addons/overcast/shaders/snow.gdshaderinc"
 
 uniform vec3 color : source_color = vec3(0.4, 0.5, 0.3);
 varying vec3 world_pos;
@@ -19,6 +20,7 @@ void fragment() {
 	float roughness = 0.9;
 	float specular = 0.5;
 	overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal);
+	overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal);
 	ALBEDO = albedo;
 	ROUGHNESS = roughness;
 	SPECULAR = specular;

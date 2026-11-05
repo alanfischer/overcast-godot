@@ -1,10 +1,12 @@
 #ifndef OVERCAST_STANDARD_GDSHADERINC
 #define OVERCAST_STANDARD_GDSHADERINC
-// A StandardMaterial3D's look, shaded by the clouds and wetted by the rain: what OvercastMaterials
-// converts one to. Godot's own lighting, redone in light() so the clouds can take their share off
-// the sun. OvercastMaterials writes the render_mode and the OV_ switches above the include.
+// A StandardMaterial3D's look, shaded by the clouds, wetted by the rain and covered by the snow:
+// what OvercastMaterials converts one to. Godot's own lighting, redone in light() so the clouds can
+// take their share off the sun. OvercastMaterials writes the render_mode and the OV_ switches
+// above the include.
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 #include "res://addons/overcast/shaders/wet.gdshaderinc"
+#include "res://addons/overcast/shaders/snow.gdshaderinc"
 
 uniform vec4 albedo : source_color = vec4(1.0);
 #ifdef OV_ALBEDO_TEXTURE
@@ -77,7 +79,10 @@ void fragment() {
 	rough *= dot(texture(texture_roughness, UV), roughness_texture_channel);
 #endif
 	float spec = specular;
-	overcast_wet_pbr(alb, rough, spec, ov_world_pos, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz));
+	vec3 world_normal = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	overcast_wet_pbr(alb, rough, spec, ov_world_pos, world_normal);
+	float snow = overcast_snow_pbr(alb, rough, spec, ov_world_pos, world_normal);
+	metal *= 1.0 - snow;
 	ALBEDO = alb;
 	METALLIC = metal;
 	ROUGHNESS = rough;

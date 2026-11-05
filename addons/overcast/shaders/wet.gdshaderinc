@@ -10,29 +10,6 @@ uniform float puddle_scale : hint_range(0.0, 1.0) = 1.0;  // how readily this su
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
 
-// 1 where rain reaches world point p, 0 under cover. The floor's four cells around p are blended,
-// so a roof's shadow on the ground is not drawn as a staircase. Everywhere, with no floor.
-float rain_reaches(vec3 p) {
-	if (!overcast_has_rain_floor) {
-		return 1.0;
-	}
-	vec2 uv = rain_floor_uv(p);
-	if (!rain_floor_covers(uv)) {
-		return 0.0;
-	}
-	ivec2 res = textureSize(overcast_rain_floor, 0);
-	vec2 texel = uv * vec2(res) - 0.5;
-	ivec2 cell = ivec2(floor(texel));
-	vec2 f = fract(texel);
-	vec4 reach;
-	for (int i = 0; i < 4; i++) {
-		ivec2 c = clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1);
-		// Fully wet at the height rain stops, drying over the quarter metre below it.
-		reach[i] = clamp((p.y - texelFetch(overcast_rain_floor, c, 0).r) * 4.0 + 1.0, 0.0, 1.0);
-	}
-	return mix(mix(reach.x, reach.y, f.x), mix(reach.z, reach.w, f.x), f.y);
-}
-
 // How wet the surface at world_pos is (x), and how much of it is puddle (y). A ceiling stays dry;
 // a wall asks about the air half a metre out from it, and takes less.
 vec2 overcast_wet_amount(vec3 world_pos, vec3 world_normal) {

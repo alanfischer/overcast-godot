@@ -86,15 +86,26 @@ void fragment() {
 	float depth = textureLod(depth_tex, SCREEN_UV, 0.0).r;
 	vec4 upos = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth * depth_remap.x + depth_remap.y, 1.0);
 	vec3 view_pos = upos.xyz / upos.w;
-	float dist = min(length(view_pos), MAX_DIST);
 	vec3 cam = INV_VIEW_MATRIX[3].xyz;
 	vec3 dir = normalize((INV_VIEW_MATRIX * vec4(view_pos, 0.0)).xyz);
-	float step_len = dist / float(STEPS);
+	// Marched over the part of the ray under the rain's top, at most MAX_DIST of it: a step
+	// straddling the top would count all or none of itself by the jitter, and grain the sky.
+	float above = cam.y - overcast_rain_top;
+	float t0 = above > 0.0 && dir.y < -1e-4 ? above / -dir.y : 0.0;
+	float dist = min(length(view_pos), t0 + MAX_DIST);
+	if (dir.y > 1e-4) {
+		dist = min(dist, max(-above / dir.y, 0.0));
+	}
+	if (above > 0.0 && dir.y >= -1e-4) {
+		dist = 0.0;  // above the rain looking out over it
+	}
+	float march = max(dist - t0, 0.0);
+	float step_len = march / float(STEPS);
 	// Per-pixel offset into the steps, so a wall edge across a step boundary does not band.
 	float jitter = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
 	float rainy = 0.0;
 	for (int i = 0; i < STEPS; i++) {
-		vec3 p = cam + dir * (float(i) + jitter) * step_len;
+		vec3 p = cam + dir * (t0 + (float(i) + jitter) * step_len);
 		if (raining_at(p)) {
 			float gust = textureLod(gust_noise, p / GUST_CELL + gust_offset, 0.0).r;
 			rainy += step_len * (1.0 + gust_amount * (gust * 2.0 - 1.0));

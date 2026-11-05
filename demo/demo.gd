@@ -1,6 +1,6 @@
 extends Node3D
 ## A field, a few huts and the weather over them. Drag to look, WASD to walk, and the panel on the
-## left drives the rain.
+## left drives the rain and snow.
 
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
 const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
@@ -38,6 +38,7 @@ func _ready() -> void:
 	rain_slider.value_changed.connect(func(v: float) -> void:
 		cycle_check.button_pressed = false
 		weather.rain = v)
+	%Snow.value_changed.connect(func(v: float) -> void: weather.snow = v)
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)

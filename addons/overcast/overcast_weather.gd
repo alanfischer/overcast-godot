@@ -1,15 +1,17 @@
 @tool
 class_name OvercastWeather
 extends Node3D
-## Rain and lightning: drops around the camera, haze and far rain where rain is falling, wet ground,
-## rain sound that muffles under a roof, and a storm that closes the sky over. Set `rain` and it
-## does the rest, over the scene's OvercastSky (or `sky`). Rain and lightning show in the editor.
+## Rain, snow and lightning: drops or flakes around the camera, haze and far rain where they are
+## falling, wet ground, lying snow, rain sound that muffles under a roof, and a storm that closes the
+## sky over. Set `rain` (and `snow`) and it does the rest, over the scene's OvercastSky (or `sky`).
+## It all shows in the editor.
 ##
 ## Roofs are a rain floor: press Bake Rain Floor in the inspector, or bake one at runtime
 ## (bake_rain_floor). Without one, rain falls everywhere.
 ##
-## Any material whose shader includes shaders/wet.gdshaderinc gets wet: the rain reaches it through
-## global uniforms (OvercastGlobals), so one weather drives a scene at a time.
+## Any material whose shader includes shaders/wet.gdshaderinc gets wet, and one that includes
+## shaders/snow.gdshaderinc gets snowed on: the weather reaches it through global uniforms
+## (OvercastGlobals), so one weather drives a scene at a time.
 ##
 ## Networked games: let one peer time the strikes (times_strikes), send the seed `struck` hands
 ## you, and call strike(seed) with it on the others. Everything about a strike comes from its
@@ -67,6 +69,13 @@ const DROP_LIGHT := 0.85
 const DROP_FLASH := 1.5
 const DROP_FLASH_OPACITY := 2.5
 const DROP_COLOR := Color(0.75, 0.8, 0.9)
+## Flakes fill a smaller box: they are slow, and far off too small to see. FLAKE_COLOR is theirs in
+## full daylight.
+const FLAKE_BOX := Vector3(24.0, 16.0, 24.0)
+const FLAKE_COLOR := Color(0.95, 0.96, 1.0)
+## Snow hazes the distance bright: the light the flakes scatter, SNOW_HAZE_COLOR in the scene's
+## light, rather than the sky at the horizon.
+const SNOW_HAZE_COLOR := Color(0.72, 0.74, 0.78)
 ## Opacity of the far rain's streaks at a downpour.
 const FAR_OPACITY := 0.6
 ## Bolts: segments, height over the top of `area` in cloud heights, and the speed thunder travels at.
@@ -84,6 +93,13 @@ const SUN_STORM_SHADOW := 0.88
 		rain = maxf(value, 0.0)
 		if is_node_ready():
 			_refresh(was)
+## How much of what falls is snow: 0 all rain, 1 all snow, sleet between. `rain` is how much
+## falls either way.
+@export_range(0.0, 1.0, 0.01) var snow := 0.0:
+	set(value):
+		snow = clampf(value, 0.0, 1.0)
+		if is_node_ready():
+			_refresh(rain)
 ## The sky the storm closes over and the lightning lights: the scene's own OvercastSky (its
 ## WorldEnvironment's) when unset.
 @export var sky: OvercastSky:
@@ -108,6 +124,14 @@ const SUN_STORM_SHADOW := 0.88
 @export_range(0.1, 4.0, 0.05, "or_greater") var rain_floor_cell := 0.5
 ## Physics layers that catch rain.
 @export_flags_3d_physics var rain_floor_mask := 0xFFFFFFFF
+## Whether rain falls past the floor's edges: on for an open world (an island in the sea), off for
+## a map with nothing past them.
+@export var rain_beyond_floor := false:
+	set(on):
+		rain_beyond_floor = on
+		_live.beyond = on
+		if is_node_ready():
+			_push_floor()
 ## Traces the scene's colliders down through `area`, and saves the floor beside the scene.
 @export_tool_button("Bake Rain Floor", "Bake") var _bake_button := _bake_in_editor
 
@@ -162,12 +186,21 @@ const SUN_STORM_SHADOW := 0.88
 ## Drops around the camera at the lightest rain and at a downpour.
 @export_range(0, 100000, 100) var drops_light := 3000
 @export_range(0, 100000, 100) var drops_heavy := 40000
+## Snow covers every material that includes shaders/snow.gdshaderinc.
+@export var lying_snow := true
+## Flakes around the camera at the lightest snow and at a blizzard.
+@export_range(0, 100000, 100) var flakes_light := 2000
+@export_range(0, 100000, 100) var flakes_heavy := 25000
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var soak_time := 20.0
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var dry_time := 120.0
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var puddle_time := 90.0
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var puddle_dry_time := 240.0
+## Lying snow: seconds to cover the ground in a blizzard (longer in light snow), and to melt once
+## it stops (rain melts it four times as fast).
+@export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var snow_time := 90.0
+@export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var melt_time := 600.0
 
 @export_group("Sound")
 ## Who hears the rain and is lit by the flash's direction: the current camera when unset.
@@ -228,6 +261,8 @@ var _flash_dir := Vector3.UP
 var _next_strike := 0.0
 var _drops: MultiMeshInstance3D
 var _drop_material: ShaderMaterial
+var _flakes: MultiMeshInstance3D
+var _flake_material: ShaderMaterial
 var _haze: MeshInstance3D
 var _haze_material: ShaderMaterial
 var _rain_audio: AudioStreamPlayer
@@ -240,7 +275,9 @@ var _sample_in := 0.0
 var _gust_offset := Vector3.ZERO
 var _wetness := 0.0
 var _puddles := 0.0
+var _snow_lying := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
+var _snow_pushed := -1.0
 var _sun_energy := -1.0  # the sun's own light while taken; -1 when not
 var _sun_color := Color.WHITE
 var _sun_basis := Basis()
@@ -256,24 +293,10 @@ func _ready() -> void:
 	if not presenting:
 		return
 	_linear_output = OvercastSky.renderer_is_linear()
-	# The shader places every drop itself; the instances carry no transforms.
-	_drop_material = ShaderMaterial.new()
-	_drop_material.shader = preload("res://addons/overcast/shaders/rain.gdshader")
-	_drop_material.set_shader_parameter("box", DROP_BOX)
-	_drop_material.render_priority = Material.RENDER_PRIORITY_MAX
-	var quad := QuadMesh.new()
-	quad.size = Vector2.ONE
-	quad.material = _drop_material
-	var multimesh := MultiMesh.new()
-	multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	multimesh.mesh = quad
-	_drops = MultiMeshInstance3D.new()
-	_drops.name = "RainDrops"
-	_drops.multimesh = multimesh
-	_drops.custom_aabb = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
-	_drops.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_drops.visible = false
-	add_child(_drops)
+	_drop_material = _falling_material(preload("res://addons/overcast/shaders/rain.gdshader"), DROP_BOX)
+	_drops = _falling("RainDrops", _drop_material)
+	_flake_material = _falling_material(preload("res://addons/overcast/shaders/snow.gdshader"), FLAKE_BOX)
+	_flakes = _falling("SnowFlakes", _flake_material)
 
 	if not _editor:
 		_rain_audio = AudioStreamPlayer.new()
@@ -286,6 +309,32 @@ func _ready() -> void:
 	_refresh(0.0)
 
 
+func _falling_material(shader: Shader, box: Vector3) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("box", box)
+	mat.render_priority = Material.RENDER_PRIORITY_MAX
+	return mat
+
+
+## The drops or the flakes. The shader places every one itself; the instances carry no transforms.
+func _falling(node_name: String, mat: ShaderMaterial) -> MultiMeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	quad.material = mat
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = quad
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = node_name
+	mmi.multimesh = multimesh
+	mmi.custom_aabb = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visible = false
+	add_child(mmi)
+	return mmi
+
+
 func _enter_tree() -> void:
 	_take_sun()
 	if is_node_ready():
@@ -296,9 +345,9 @@ func _exit_tree() -> void:
 	_let_sun_go()
 	if _globals_owner == get_instance_id():
 		_globals_owner = 0
-		for key in ["overcast_has_rain_floor", "overcast_rain_floor", "overcast_rain_floor_origin",
+		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor", "overcast_rain_floor_origin",
 				"overcast_rain_floor_size", "overcast_rain_top", "overcast_wetness", "overcast_puddles",
-				"overcast_rain_sky"]:
+				"overcast_rain_sky", "overcast_snow_cover"]:
 			Globals.reset(key)
 
 
@@ -379,6 +428,7 @@ func _push_floor() -> void:
 	_globals_owner = get_instance_id()
 	_wet_pushed = Vector4(-1, -1, -1, -1)
 	Globals.set_value("overcast_has_rain_floor", _live.texture != null)
+	Globals.set_value("overcast_rain_beyond_floor", rain_beyond_floor)
 	Globals.set_value("overcast_rain_floor", _live.texture)
 	Globals.set_value("overcast_rain_floor_origin", _live.origin)
 	Globals.set_value("overcast_rain_floor_size", _live.size)
@@ -386,15 +436,30 @@ func _push_floor() -> void:
 
 
 ## Straight to the weather the current rain is heading for: the storm closed over as far as it
-## goes, the ground soaked. For a scene that starts mid-shower, and for screenshots.
+## goes, the ground soaked or snowed over. For a scene that starts mid-shower, and for screenshots.
 func settle() -> void:
 	storm = _storm_target()
 	_soak()
 
 
 func _soak() -> void:
-	_wetness = 1.0 if rain > 0.0 else 0.0
-	_puddles = heaviness(rain)
+	_wetness = 1.0 if rainfall() > 0.0 else 0.0
+	_puddles = heaviness(rainfall())
+	_snow_lying = 1.0 if _settling() else 0.0
+
+
+## How much of `rain` falls as rain, and how much as snow.
+func rainfall() -> float:
+	return rain * (1.0 - snow)
+
+
+func snowfall() -> float:
+	return rain * snow
+
+
+## Snow lies while more of it falls than rain.
+func _settling() -> bool:
+	return snow > 0.5 and rain > 0.0
 
 
 func _storm_target() -> float:
@@ -474,21 +539,19 @@ func _refresh(was: float) -> void:
 		_next_strike = minf(_next_strike, lerpf(strike_gap_light.y, strike_gap_heavy.y, heaviness(rain)))
 	if not presenting:
 		return
-	if rain <= 0.0:
+	if rain > 0.0 and _haze == null:
+		_build_haze()
+	_refresh_flakes()
+	var wet := rainfall()
+	var count := _fill(_drops, drops_light, drops_heavy, wet)
+	if wet <= 0.0:
 		if _haze_material:
 			_haze_material.set_shader_parameter("streak_opacity", 0.0)
 		if _rain_audio and _rain_audio.playing:
 			_rain_audio.stop()
 		return
-	if _haze == null:
-		_build_haze()
 
-	var heavy := heaviness(rain)
-	var count := int(lerpf(drops_light, drops_heavy, rain))
-	var multimesh := _drops.multimesh
-	if multimesh.instance_count < count:
-		multimesh.instance_count = maxi(count, drops_heavy)
-	multimesh.visible_instance_count = count
+	var heavy := heaviness(wet)
 	# Rain falls at its terminal speed, a few m/s for drizzle and ~9 for a downpour's big drops.
 	var fall_speed := lerpf(6.0, 9.5, heavy)
 	var streak_length := lerpf(0.3, 0.55, heavy)
@@ -512,6 +575,29 @@ func _refresh(was: float) -> void:
 		_apply_rain_volume()
 		if not _rain_audio.playing and _rain_audio.stream:
 			_rain_audio.play()
+
+
+## Shows `amount` worth of drops or flakes: `light` at the least, `heavy` at a downpour, and more
+## past it. Returns how many.
+static func _fill(mmi: MultiMeshInstance3D, light: int, heavy: int, amount: float) -> int:
+	var count := int(lerpf(light, heavy, amount)) if amount > 0.0 else 0
+	var multimesh := mmi.multimesh
+	if multimesh.instance_count < count:
+		multimesh.instance_count = maxi(count, heavy)
+	multimesh.visible_instance_count = count
+	return count
+
+
+func _refresh_flakes() -> void:
+	var amount := snowfall()
+	_fill(_flakes, flakes_light, flakes_heavy, amount)
+	if amount <= 0.0:
+		return
+	var heavy := heaviness(amount)
+	# Flakes drift down at about a metre a second; a blizzard's are bigger and wetter, and faster.
+	_flake_material.set_shader_parameter("velocity", Vector3(0.0, -lerpf(0.8, 1.5, heavy), 0.0))
+	_flake_material.set_shader_parameter("flake_size", lerpf(0.018, 0.03, heavy))
+	_flake_material.set_shader_parameter("opacity", lerpf(0.7, 0.9, heavy))
 
 
 func _build_haze() -> void:
@@ -546,7 +632,7 @@ func _build_haze() -> void:
 
 
 func _on_rain_finished() -> void:
-	if rain > 0.0:
+	if rainfall() > 0.0:
 		_rain_audio.play()
 
 
@@ -576,8 +662,8 @@ func rain_exposure(ears: Vector3) -> float:
 	return hit / total
 
 
-## Where rain stops at world XZ `q`, covers included: INF off the floor, where no rain falls;
-## -INF with no floor.
+## Where rain stops at world XZ `q`, covers included: off the floor INF, where no rain falls, or
+## -INF with rain_beyond_floor; -INF with no floor.
 func floor_at(q: Vector3) -> float:
 	if not presenting:
 		_live.sync()
@@ -605,13 +691,15 @@ func scene_light(drawn: OvercastSky) -> Color:
 	return drawn.scene_light() if drawn and light_from_sky else sky_light
 
 
-## What the haze fades to before lightning: the sky at the horizon, or lit haze where there is none.
+## What the haze fades to before lightning: the sky at the horizon, or lit haze where there is none,
+## and, as it turns to snow, the light the flakes scatter.
 func _haze_base(drawn: OvercastSky, light: Color) -> Color:
 	var horizon: Color = drawn.horizon_now() if drawn else Color.BLACK
 	var lit := HAZE_COLOR * light
 	var least := lit * HAZE_FLOOR
-	return lit if horizon == Color.BLACK else \
+	var base := lit if horizon == Color.BLACK else \
 		Color(maxf(horizon.r, least.r), maxf(horizon.g, least.g), maxf(horizon.b, least.b))
+	return base.lerp(SNOW_HAZE_COLOR * light, snow)
 
 
 func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
@@ -624,17 +712,21 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	_haze_material.set_shader_parameter("gust_offset", _gust_offset)
 	_haze_material.set_shader_parameter("density", density)
 	_drop_material.set_shader_parameter("haze_density", density)
+	_flake_material.set_shader_parameter("haze_density", density)
 	_haze_material.set_shader_parameter("haze_color", Vector3(haze_color.r, haze_color.g, haze_color.b))
 	var streak := DROP_COLOR * drop_light
 	_haze_material.set_shader_parameter("streak_color", Vector3(streak.r, streak.g, streak.b))
 	_haze_material.set_shader_parameter("flash", _flash_k * DROP_FLASH_OPACITY)
 
 
-## Soaks and dries the ground, and hands wet surfaces the sky they reflect, lightning included.
-## Pushed only when the state moves by a step the screen can show.
+## Soaks and dries the ground, settles and melts the snow, and hands wet surfaces the sky they
+## reflect, lightning included. Pushed only when the state moves by a step the screen can show.
 func _update_wet(delta: float, reflected: Color) -> void:
-	var wet_target := 1.0 if rain > 0.0 and wet_ground else 0.0
-	var puddle_target := heaviness(rain) if wet_ground else 0.0
+	_update_snow(delta)
+	# Melting snow keeps the ground under it wet.
+	var melting := _snow_lying > 0.0 and not _settling()
+	var wet_target := 1.0 if (rainfall() > 0.0 or melting) and wet_ground else 0.0
+	var puddle_target := heaviness(rainfall()) if wet_ground else 0.0
 	_wetness = move_toward(_wetness, wet_target,
 		(lerpf(0.35, 1.0, puddle_target) / soak_time if wet_target > _wetness else 1.0 / dry_time) * delta)
 	_puddles = move_toward(_puddles, puddle_target,
@@ -645,9 +737,22 @@ func _update_wet(delta: float, reflected: Color) -> void:
 	_wet_pushed = state
 	var srgb := reflected.linear_to_srgb()
 	_globals_owner = get_instance_id()
-	Globals.set_value("overcast_wetness", _wetness)
-	Globals.set_value("overcast_puddles", _puddles)
+	Globals.set_value("overcast_wetness", state.x)
+	Globals.set_value("overcast_puddles", state.y)
 	Globals.set_value("overcast_rain_sky", Vector3(srgb.r, srgb.g, srgb.b))
+
+
+func _update_snow(delta: float) -> void:
+	if _settling() and lying_snow:
+		_snow_lying = move_toward(_snow_lying, 1.0, lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time * delta)
+	else:
+		_snow_lying = move_toward(_snow_lying, 0.0, (1.0 + 3.0 * heaviness(rainfall())) / melt_time * delta)
+	var lying := snappedf(_snow_lying, 1.0 / 255.0)
+	if lying == _snow_pushed:
+		return
+	_snow_pushed = lying
+	_globals_owner = get_instance_id()
+	Globals.set_value("overcast_snow_cover", lying)
 
 
 ## Drops are only seen by the light on them: dim under a storm sky, dimmer at night, and lit up
@@ -660,6 +765,14 @@ func _update_drops(light: Color) -> void:
 		color = color.linear_to_srgb()
 	_drop_material.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
 	_drop_material.set_shader_parameter("flash", _flash_k * DROP_FLASH_OPACITY)
+
+
+func _update_flakes(light: Color) -> void:
+	if not _flakes.visible:
+		return
+	var color := light if _linear_output else light.linear_to_srgb()
+	_flake_material.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+	_flake_material.set_shader_parameter("flash", _flash_k)
 
 
 ## The sky in use: `sky`, else the one the scene's environment draws.
@@ -682,10 +795,11 @@ func _process(delta: float) -> void:
 		cycle_time += delta * cycle_speed
 		rain = _cycle.rain_at(cycle_time)
 	storm = move_toward(storm, _storm_target(), STORM_RATE * delta)
-	if rain > 0.0 and lightning and times_strikes and not _editor:
+	# Snow hardly ever thunders: strikes come with the rain in it.
+	if rainfall() > 0.0 and lightning and times_strikes and not _editor:
 		_next_strike -= delta
 		if _next_strike <= 0.0:
-			_next_strike = strike_gap(rain)
+			_next_strike = strike_gap(rainfall())
 			var strike_seed := randi()
 			strike(strike_seed)
 			struck.emit(strike_seed)
@@ -697,7 +811,8 @@ func _process(delta: float) -> void:
 		_sky_told = drawn.get_instance_id()
 		_sky_storm = storm
 	_live.update(delta)
-	_drops.visible = rain > 0.0 and not underwater
+	_drops.visible = rainfall() > 0.0 and not underwater
+	_flakes.visible = snowfall() > 0.0 and not underwater
 	if _rain_audio and _rain_audio.playing:
 		_update_rain_sound(delta)
 
@@ -727,7 +842,8 @@ func _process(delta: float) -> void:
 	var light := scene_light(drawn)
 	var drop_light := light * DROP_LIGHT + SKY_FLASH * _flash_k * DROP_FLASH
 	_update_drops(drop_light)
-	if _haze or rain > 0.0 or _wetness > 0.0:
+	_update_flakes(light * FLAKE_COLOR + SKY_FLASH * _flash_k * DROP_FLASH)
+	if _haze or rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0:
 		var haze_color := _haze_base(drawn, light) + SKY_FLASH * _flash_k * HAZE_FLASH
 		if _haze:
 			_update_haze(delta, haze_color, drop_light)

@@ -121,11 +121,14 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 			ls *= 1.8;
 		}
 		od *= EXTINCTION;
-		// Beer's law, plus a long, weak tail standing in for light scattered many times over.
-		float light = exp(-od) + 0.35 * exp(-od * 0.1);
+		// Beer's law, plus a long, weak tail standing in for light scattered many times over. Only
+		// the light scattered once keeps the sun's direction, so only it takes the phase: into the
+		// sun, a thick cloud's body is lit by the even, many-times-scattered glow, and its thin
+		// edges blaze.
+		float light = exp(-od) * phase + 0.35 * exp(-od * 0.1);
 		float powder = 1.0 - exp(-d * dt * EXTINCTION * 2.0);
 		vec3 amb = mix(base_col, top_col, clamp(cloud_height_frac(p, cam), 0.0, 1.0));
-		vec3 radiance = sun_col * light * phase * mix(0.5, 1.0, powder) + amb;
+		vec3 radiance = sun_col * light * mix(0.5, 1.0, powder) + amb;
 		float absorbed = 1.0 - exp(-d * EXTINCTION * dt);
 		scattered += trans * radiance * absorbed;
 		weight += trans * absorbed * d;
@@ -224,8 +227,14 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		} else {
 			float n = cloud_density(cp);
 			float edge = cloud_edge(amount);
-			cover = cloud_coverage(n, amount);
-			cover *= smoothstep(-0.02, 0.12, up) * (1.0 - 0.5 * far);
+			// Far off, the noise blurs toward its mean, which sits under the edge: thresholded as
+			// it is overhead, the distant clouds would all vanish. Widened with the distance, a
+			// blurred patch covers about what its clouds would have. And toward the horizon a line
+			// of sight crosses more of the layer, so they bank up there rather than thin out.
+			float spread = overcast_softness + far * 0.35;
+			cover = smoothstep(edge - spread * 0.6 - far * 0.15, edge + spread * 1.2, n);
+			cover = mix(cover, 1.0 - (1.0 - cover) * (1.0 - cover), far * 0.6);
+			cover *= smoothstep(-0.01, 0.05, up);
 			// Light from the sun loses itself in the cloud it crosses on the way (Beer's law: two
 			// steps sunward through the layer) and in the cloud above us, so thick bases go grey.
 			vec2 sun_step = normalize(sun.xz + vec2(1e-4));
@@ -236,7 +245,15 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			// Powder: a thin edge has had little chance to scatter light toward us, so with the sun
 			// behind us a cloud's rim reads darker than its body.
 			shade *= mix(1.0 - exp(-thick * 12.0 - 0.15), 1.0, toward);
-			lit = mix(shadow_col, lit_col, shade * mix(0.6, 1.0, toward));
+			shade *= mix(0.6, 1.0, toward);
+			// A flat layer only has undersides; low in the sky, though, a cloud is seen from the
+			// side. Its face toward the sun is lit however deep it is: bright with the sun behind
+			// us, grey into it. Its top (the far edge, seen this low) catches more than its base.
+			float side = (1.0 - smoothstep(0.08, 0.5, up)) * smoothstep(-0.1, 0.15, sun.y);
+			float top = clamp((n - cloud_shape(cp + flat_eye * 0.2)) * 3.0, -1.0, 1.0);
+			float face = clamp(mix(1.0, 0.45, toward) + top * 0.3, 0.0, 1.0);
+			shade = mix(shade, max(shade, face), side);
+			lit = mix(shadow_col, lit_col, shade);
 			// Mottled by the same noise that shaped it, so a full storm deck still has bodies to it
 			// rather than one flat lid.
 			storm_body = clamp(0.55 + 0.7 * n, 0.4, 1.3);

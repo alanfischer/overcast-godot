@@ -8,6 +8,8 @@ const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const GroundShader = preload("res://demo/ground.gdshader")
 
 const FIELD := 120.0
+## The field's ground maps (textures/CREDITS.md).
+const GROUND := "res://demo/textures/forrest_ground_01_%s_1k.jpg"
 
 @onready var sun: DirectionalLight3D = $Sun
 @onready var camera: Camera3D = $Camera3D
@@ -25,7 +27,10 @@ func _ready() -> void:
 	sky = $WorldEnvironment.environment.sky.sky_material
 	sky.sun_dir = SkyScript.sun_dir_of(sun)
 
-	_add_box(Vector3(FIELD, 1, FIELD), Vector3(0, -0.5, 0), Color(0.36, 0.45, 0.26))
+	var field := _add_box(Vector3(FIELD, 1, FIELD), Vector3(0, -0.5, 0), Color.WHITE)
+	field.set_shader_parameter("textured", true)
+	for map: Array in [["albedo", "diff"], ["normal", "nor_gl"], ["roughness", "rough"]]:
+		field.set_shader_parameter("ground_" + map[0], load(GROUND % map[1]))
 	for hut in [Vector3(0, 0, -12), Vector3(14, 0, -6), Vector3(-12, 0, -20)]:
 		_add_hut(hut)
 
@@ -46,7 +51,8 @@ func _ready() -> void:
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
 
 
-func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
+## Returns the box's material.
+func _add_box(size: Vector3, pos: Vector3, color: Color) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = GroundShader
 	mat.set_shader_parameter("color", color)
@@ -63,6 +69,7 @@ func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
 	body.add_child(mi)
 	body.position = pos
 	add_child(body)
+	return mat
 
 
 ## Four posts and a roof: open sides, so you can watch the rain stop at its edge.

@@ -8,8 +8,10 @@ const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const GroundShader = preload("res://demo/ground.gdshader")
 
 const FIELD := 120.0
-## The field's ground maps (textures/CREDITS.md).
-const GROUND := "res://demo/textures/forrest_ground_01_%s_1k.jpg"
+## Photographed surfaces (textures/CREDITS.md): the maps' name, and metres one spans.
+const GROUND := ["forrest_ground_01", 2.0]
+const POSTS := ["rough_wood", 0.6]
+const ROOF := ["weathered_brown_planks", 1.8]
 
 @onready var sun: DirectionalLight3D = $Sun
 @onready var camera: Camera3D = $Camera3D
@@ -19,6 +21,7 @@ const GROUND := "res://demo/textures/forrest_ground_01_%s_1k.jpg"
 
 ## The sky in the scene's WorldEnvironment, which the weather finds by itself.
 var sky: SkyScript
+var _surfaces := {}
 var _yaw := 0.0
 var _pitch := 0.15
 
@@ -27,10 +30,8 @@ func _ready() -> void:
 	sky = $WorldEnvironment.environment.sky.sky_material
 	sky.sun_dir = SkyScript.sun_dir_of(sun)
 
-	var field := _add_box(Vector3(FIELD, 1, FIELD), Vector3(0, -0.5, 0), Color.WHITE)
-	field.set_shader_parameter("textured", true)
-	for map: Array in [["albedo", "diff"], ["normal", "nor_gl"], ["roughness", "rough"]]:
-		field.set_shader_parameter("ground_" + map[0], load(GROUND % map[1]))
+	var field := _add_box(Vector3(FIELD, 1, FIELD), Vector3(0, -0.5, 0), _surface(GROUND))
+	field.set_shader_parameter("vary", true)
 	for hut in [Vector3(0, 0, -12), Vector3(14, 0, -6), Vector3(-12, 0, -20)]:
 		_add_hut(hut)
 
@@ -52,10 +53,7 @@ func _ready() -> void:
 
 
 ## Returns the box's material.
-func _add_box(size: Vector3, pos: Vector3, color: Color) -> ShaderMaterial:
-	var mat := ShaderMaterial.new()
-	mat.shader = GroundShader
-	mat.set_shader_parameter("color", color)
+func _add_box(size: Vector3, pos: Vector3, mat: ShaderMaterial) -> ShaderMaterial:
 	var mesh := BoxMesh.new()
 	mesh.size = size
 	mesh.material = mat
@@ -72,13 +70,28 @@ func _add_box(size: Vector3, pos: Vector3, color: Color) -> ShaderMaterial:
 	return mat
 
 
+## A material of GroundShader drawing `surface` (name, metres), one per surface, shared.
+func _surface(surface: Array) -> ShaderMaterial:
+	if _surfaces.has(surface[0]):
+		return _surfaces[surface[0]]
+	var mat := ShaderMaterial.new()
+	mat.shader = GroundShader
+	mat.set_shader_parameter("color", Color.WHITE)
+	mat.set_shader_parameter("textured", true)
+	mat.set_shader_parameter("tile", surface[1])
+	for map: Array in [["albedo", "diff"], ["normal", "nor_gl"], ["roughness", "rough"]]:
+		mat.set_shader_parameter(map[0] + "_map",
+			load("res://demo/textures/%s_%s_1k.jpg" % [surface[0], map[1]]))
+	_surfaces[surface[0]] = mat
+	return mat
+
+
 ## Four posts and a roof: open sides, so you can watch the rain stop at its edge.
 func _add_hut(at: Vector3) -> void:
-	var wood := Color(0.45, 0.33, 0.22)
 	for x in [-3.0, 3.0]:
 		for z in [-2.5, 2.5]:
-			_add_box(Vector3(0.3, 3.0, 0.3), at + Vector3(x, 1.5, z), wood)
-	_add_box(Vector3(7.0, 0.3, 6.0), at + Vector3(0, 3.15, 0), Color(0.55, 0.3, 0.25))
+			_add_box(Vector3(0.3, 3.0, 0.3), at + Vector3(x, 1.5, z), _surface(POSTS))
+	_add_box(Vector3(7.0, 0.3, 6.0), at + Vector3(0, 3.15, 0), _surface(ROOF))
 
 
 func _set_time(hours: float) -> void:

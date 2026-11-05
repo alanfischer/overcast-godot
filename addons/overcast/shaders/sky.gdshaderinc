@@ -16,8 +16,10 @@ uniform float horizon_falloff : hint_range(0.2, 4.0) = 1.1;
 
 // Direction TO the sun, world space: at noon, when OvercastSky moves it with the time of day.
 uniform vec3 sun_dir = vec3(0.0, 0.6, -0.8);
-// Toward what lights the sky now, sun or moon (OvercastSky sets it); sun_dir while unset.
+// Toward what lights the sky now, sun or moon, and how strongly (OvercastSky sets both); sun_dir
+// while unset.
 uniform vec3 light_dir = vec3(0.0);
+uniform float light_strength = 1.0;
 uniform vec3 sun_color : source_color = vec3(1.0, 0.96, 0.82);
 uniform float sun_size : hint_range(0.002, 0.5) = 0.012;   // angular radius, radians
 uniform float sun_energy : hint_range(0.0, 8.0) = 2.2;
@@ -246,7 +248,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		lit = mix(lit, heavy, storm);
 		// Silver lining: thin cloud near the sun scatters it forward (Henyey-Greenstein, g 0.8,
 		// scaled to 1 looking straight at the sun).
-		lit += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * rim * 1.2 * (1.0 - storm);
+		lit += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * rim * 1.2 * (1.0 - storm) * light_strength;
 		// Distant cloud sinks into the horizon haze.
 		lit = mix(lit, col, far * 0.5);
 		storm_cover = cover * storm;
@@ -259,14 +261,15 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd);
 	// The ground hides a sun or moon below the horizon.
 	float sun_through = (1.0 - 0.95 * storm) * smoothstep(-0.02, 0.01, up);
-	float disc_energy = mix(sun_energy, moon_energy, night_amount);
+	float disc_energy = mix(sun_energy, moon_energy, night_amount) * light_strength;
 	col += sun_col * disc * disc_energy * sun_through * (1.0 - smoothstep(0.15, 0.75, sun_hidden));
-	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * sun_through * (1.0 - 0.6 * sun_hidden);
+	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * light_strength * sun_through
+		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon
 	// lights little of it.
 	float horizon_band = pow(1.0 - abs(up), 8.0) * pow(sun_side, 3.0);
 	vec3 halo_color = mix(sun_col, vec3(1.0), 0.4);
-	col += halo_color * sun_halo_energy * mix(1.0, 0.25, night_amount) * sun_through
+	col += halo_color * sun_halo_energy * mix(1.0, 0.25, night_amount) * light_strength * sun_through
 		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band);
 	return col;
 }

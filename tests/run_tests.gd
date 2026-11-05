@@ -60,7 +60,11 @@ func _run_all() -> void:
 		await instance._run()
 		_total_pass += instance._pass_count
 		_total_fail += instance._fail_count
+		instance.free()  # a SceneTree, so not reference counted: its root window would outlive the run
 
+	# The audio server lets go of the stopped players' playbacks on its own thread: give it time.
+	for i in 10:
+		await process_frame
 	var total := _total_pass + _total_fail
 	print("====== TOTAL: %d/%d passed ======" % [_total_pass, total])
 	if _total_fail > 0:

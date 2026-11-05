@@ -110,6 +110,8 @@ const SUN_STORM_SHADOW := 0.88
 ## WorldEnvironment's) when unset.
 @export var sky: OvercastSky:
 	set(v):
+		if v != sky:
+			_let_sky_go()
 		sky = v
 		update_configuration_warnings()
 ## The weather's extent, in this node's space: the rain floor is baked over this box, and lightning
@@ -356,6 +358,11 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	_let_sun_go()
+	_let_sky_go()
+	if _flash_t >= 0.0:  # a flash ends on 0, whatever cuts it short
+		_flash_t = -1.0
+		_flash_k = 0.0
+		flash_changed.emit(0.0)
 	if _globals_owner == get_instance_id():
 		_globals_owner = 0
 		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor", "overcast_rain_floor_origin",
@@ -377,6 +384,16 @@ func _let_sun_go() -> void:
 		sun.light_color = _sun_color
 		sun.basis = _sun_basis
 	_sun_energy = -1.0
+
+
+## The sky this has been closing over, back to clear: no storm, no snow, no flash.
+func _let_sky_go() -> void:
+	var told := instance_from_id(_sky_told) as OvercastSky
+	if told:
+		told.storm = 0.0
+		told.snowy = 0.0
+		told.set_flash(Color.BLACK, Vector3.UP)
+	_sky_told = 0
 
 
 func _get_configuration_warnings() -> PackedStringArray:
@@ -440,6 +457,7 @@ func _push_floor() -> void:
 		return
 	_globals_owner = get_instance_id()
 	_wet_pushed = Vector4(-1, -1, -1, -1)
+	_snow_pushed = -1.0
 	Globals.set_value("overcast_has_rain_floor", _live.texture != null)
 	Globals.set_value("overcast_rain_beyond_floor", rain_beyond_floor)
 	Globals.set_value("overcast_rain_floor", _live.texture)
@@ -868,7 +886,8 @@ func _process(delta: float) -> void:
 			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
 			sun.global_basis = Basis.looking_at(-toward, up)
 		# Below the horizon it lights nothing: the ground is in the way.
-		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y)
+		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
+			* drawn.light_strength()
 	if sun and _sun_energy >= 0.0:
 		var shade := drawn.storm_shadow if drawn else SUN_STORM_SHADOW
 		sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * FLASH.x
@@ -886,7 +905,7 @@ func _process(delta: float) -> void:
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes
 ## from the seed, so the bolt, its flash and its thunder agree on every peer that is handed it.
 func strike(strike_seed: int) -> void:
-	if not presenting:
+	if not presenting or not is_inside_tree():
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = strike_seed
@@ -922,9 +941,8 @@ func strike(strike_seed: int) -> void:
 		thunder.pitch_scale = rng.randf_range(0.85, 1.1)
 		add_child(thunder)
 		thunder.finished.connect(thunder.queue_free)
-		get_tree().create_timer(dist / SOUND_SPEED).timeout.connect(func() -> void:
-			if is_instance_valid(thunder):
-				thunder.play())
+		# Bound to the player, so a weather freed before the thunder arrives takes it along.
+		thunder.create_tween().tween_callback(thunder.play).set_delay(dist / SOUND_SPEED)
 
 
 ## A jagged line from `from` to `to`: each point wanders off the one before, which is what makes
@@ -939,10 +957,8 @@ func _bolt(from: Vector3, to: Vector3, width_scale: float, rng: RandomNumberGene
 		walk += Vector3(rng.randf_range(-jitter, jitter), 0.0, rng.randf_range(-jitter, jitter))
 		walk *= 0.85
 	for stroke in STROKES:
-		get_tree().create_timer(stroke[0]).timeout.connect(func() -> void:
-			if not is_inside_tree():
-				return
-			bolt_drawer.call(points, 2.2 * width_scale, stroke[1], 0.25))
+		create_tween().tween_callback(bolt_drawer.bind(points, 2.2 * width_scale, stroke[1], 0.25)) \
+			.set_delay(stroke[0])
 
 
 ## The built-in bolt (shaders/bolt.gdshader): one camera-facing strip along the points, faded out

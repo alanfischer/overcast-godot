@@ -17,10 +17,12 @@ func _weather() -> Weather:
 
 class FakeSky extends SkyScript:
 	var flashes := 0
+	var flash := Color.BLACK
 
 	func set_flash(color: Color, dir: Vector3) -> void:
 		super(color, dir)
 		flashes += 1
+		flash = color
 
 
 ## A floor 4 m by 2 m from (-2, -1): the west half roofed at 3 m, the east half open to 0.
@@ -653,3 +655,91 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	sky.time_of_day = 9.0
 	w._process(0.0)
 	assert_true(sun.global_basis.is_equal_approx(before), "a sun that does not follow the time is left where it is")
+
+
+func test_lying_snow_comes_back_with_the_weather() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.settle()
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_snow_cover"), 1.0, "settled snow lies")
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "gone, it takes its snow")
+	_root().add_child(w)
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_snow_cover"), 1.0, "back, it brings it again")
+
+
+func test_a_strike_dies_with_the_weather() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var drawn := [0]
+	var w := _weather()
+	w.bolt_drawer = func(_p: PackedVector3Array, _w: float, _b: float, _f: float) -> void: drawn[0] += 1
+	_root().add_child(w)
+	w.strike(7)
+	await tree.create_timer(0.3).timeout
+	var strokes: int = drawn[0]
+	assert_gt(strokes, 0, "its strokes are drawn in turn")
+	assert_eq(w.get_children().filter(func(n: Node) -> bool: return n is AudioStreamPlayer and n != w._rain_audio).size(), 1,
+		"and its thunder is on the way")
+	drawn[0] = 0
+	w.strike(7)
+	w.free()
+	await tree.create_timer(0.3).timeout
+	assert_eq(drawn[0], 0, "freed, nothing of the strike is left to fire")
+
+
+func test_a_sky_is_let_go_of_clear() -> void:
+	var w := _weather()
+	_keep(w)
+	var sky := FakeSky.new({"drawing": false})
+	var flashes: Array[float] = []
+	w.flash_changed.connect(func(k: float) -> void: flashes.append(k))
+	w.sky = sky
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 0.4
+	w.settle()
+	w.strike(3)
+	w._process(0.01)
+	assert_gt(sky.storm, 0.9, "the storm is on the sky")
+	assert_ne(sky.flash, Color.BLACK, "and so is the flash")
+	_root().remove_child(w)
+	assert_eq(sky.storm, 0.0, "gone, the weather takes its storm")
+	assert_eq(sky.snowy, 0.0, "and its snow")
+	assert_eq(sky.flash, Color.BLACK, "and its flash")
+	assert_eq(flashes[-1], 0.0, "which ends on 0 for the scene's light too")
+	_root().add_child(w)
+	w._process(0.01)
+	assert_gt(sky.storm, 0.9, "back, it brings them again")
+	var other := FakeSky.new({"drawing": false})
+	w.sky = other
+	w._process(0.01)
+	assert_eq(sky.storm, 0.0, "a sky swapped out is let go of clear")
+	assert_gt(other.storm, 0.9, "and the new one takes the storm")
+
+
+func test_the_moon_comes_up_from_nothing() -> void:
+	var w := _weather()
+	_keep(w)
+	var sun := DirectionalLight3D.new()
+	_keep(sun)
+	_root().add_child(sun)
+	w.sun = sun
+	var sky := SkyScript.new({"drawing": false})
+	w.sky = sky
+	_root().add_child(w)
+	for from in [17.0, 4.0]:
+		var worst := 0.0
+		var last := -1.0
+		for i in 241:
+			sky.time_of_day = from + i * 3.0 / 240.0  # a step under a minute of game time
+			w._process(0.0)
+			var light := sun.light_color.get_luminance()
+			if last >= 0.0:
+				worst = maxf(worst, absf(light - last))
+			last = light
+		assert_lt(worst, 0.03, "the sun's light never jumps between %d:00 and %d:00 (%.3f)" % [from, from + 3, worst])

@@ -48,8 +48,9 @@ and go on their own.
   turns to match. For a sun baked into your lighting, turn off `sun_follows_time`: the sun and
   moon then stay at `sun_dir`.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
-  lightmap. It draws a gradient, a sun, stars, cirrus and a cumulus
-  layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
+  lightmap; `light_dir()` and `light_strength()` are where the sun or moon is and how strongly it
+  shines, as the moon comes up from nothing once it takes over at dusk. It draws a gradient, a
+  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that

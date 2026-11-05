@@ -46,9 +46,10 @@ static var _shaders := {}
 ## mesh shared with something not converted stays as it is. `puddle_scale` is how readily they
 ## pool (see wet.gdshaderinc). Returns how many surfaces it converted.
 static func apply(root: Node, puddle_scale := 1.0) -> int:
-	var count := _convert_node(root, puddle_scale)
+	var synced := {}
+	var count := _convert_node(root, puddle_scale, synced)
 	for node in root.find_children("*", "GeometryInstance3D", true, false):
-		count += _convert_node(node, puddle_scale)
+		count += _convert_node(node, puddle_scale, synced)
 	return count
 
 
@@ -70,15 +71,16 @@ static func _on_added(node: Node, root: Node, puddle_scale: float) -> void:
 
 static func _convert_later(node: Node, puddle_scale: float) -> void:
 	if is_instance_valid(node):
-		_convert_node(node, puddle_scale)
+		_convert_node(node, puddle_scale, {})
 
 
-static func _convert_node(node: Node, puddle_scale: float) -> int:
+## `synced`: sources already brought up to date in this walk, which a shared one need not be again.
+static func _convert_node(node: Node, puddle_scale: float, synced: Dictionary) -> int:
 	var gi := node as GeometryInstance3D
 	if gi == null:
 		return 0
 	if gi.material_override:
-		var to := convert_material(gi.material_override, puddle_scale)
+		var to := _convert(gi.material_override, puddle_scale, synced)
 		if to == gi.material_override:
 			return 0
 		gi.material_override = to
@@ -87,7 +89,7 @@ static func _convert_node(node: Node, puddle_scale: float) -> int:
 	if gi is MeshInstance3D:
 		for i in gi.get_surface_override_material_count():
 			var mat: Material = gi.get_active_material(i)
-			var to := convert_material(mat, puddle_scale)
+			var to := _convert(mat, puddle_scale, synced)
 			if to != mat:
 				gi.set_surface_override_material(i, to)
 				count += 1
@@ -95,35 +97,42 @@ static func _convert_node(node: Node, puddle_scale: float) -> int:
 
 
 ## The Overcast twin of a BaseMaterial3D; anything else, or one it cannot draw, comes back as it
-## is. The same material converts to the same twin, so one shared by many meshes stays shared.
-## To change a converted material, change source_of(twin) and convert that again.
+## is. The same material converts to the same twin, so one shared by many meshes stays shared, and
+## converting it again after editing it brings the twin up to date.
 static func convert_material(mat: Material, puddle_scale := 1.0) -> Material:
+	return _convert(mat, puddle_scale, {})
+
+
+static func _convert(mat: Material, puddle_scale: float, synced: Dictionary) -> Material:
 	if not mat is BaseMaterial3D:
 		return mat
-	var key := mat.get_instance_id()
-	var twin: ShaderMaterial = _converted[key].get_ref() if _converted.has(key) else null
-	if twin and twin.get_shader_parameter("puddle_scale") == puddle_scale:
-		return twin
-	if not unsupported(mat).is_empty():
-		return mat
 	var src := mat as BaseMaterial3D
-	var to := ShaderMaterial.new()
-	to.shader = _shader(src)
+	var key := src.get_instance_id()
+	var twin: ShaderMaterial = _converted[key].get_ref() if _converted.has(key) else null
+	var current: bool = twin != null and twin.get_shader_parameter("puddle_scale") == puddle_scale
+	if current and synced.has(key):
+		return twin
+	if not unsupported(src).is_empty():
+		return mat
+	synced[key] = true
+	if not current:
+		twin = ShaderMaterial.new()
+		twin.set_meta(SOURCE, src)
+		if _converted.size() >= _prune_at:
+			for k in _converted.keys():
+				if _converted[k].get_ref() == null:
+					_converted.erase(k)
+			_prune_at = maxi(64, _converted.size() * 2)
+		_converted[key] = weakref(twin)
 	var params := _params(src)
+	twin.shader = _shader(src, params)
 	params["puddle_scale"] = puddle_scale
 	for name in params:
-		to.set_shader_parameter(name, params[name])
-	to.render_priority = src.render_priority
-	to.next_pass = convert_material(src.next_pass, puddle_scale)
-	to.resource_name = src.resource_name
-	to.set_meta(SOURCE, src)
-	if _converted.size() >= _prune_at:
-		for k in _converted.keys():
-			if _converted[k].get_ref() == null:
-				_converted.erase(k)
-		_prune_at = maxi(64, _converted.size() * 2)
-	_converted[key] = weakref(to)
-	return to
+		twin.set_shader_parameter(name, params[name])
+	twin.render_priority = src.render_priority
+	twin.next_pass = _convert(src.next_pass, puddle_scale, synced)
+	twin.resource_name = src.resource_name
+	return twin
 
 
 ## The material a twin was converted from, for code that edits materials; `mat` itself if it is
@@ -143,8 +152,8 @@ static func unsupported(mat: BaseMaterial3D) -> String:
 	return ""
 
 
-static func _shader(mat: BaseMaterial3D) -> Shader:
-	var code := _code(mat)
+static func _shader(mat: BaseMaterial3D, params: Dictionary) -> Shader:
+	var code := _code(mat, params)
 	if not _shaders.has(code):
 		var shader := Shader.new()
 		shader.code = code
@@ -152,7 +161,7 @@ static func _shader(mat: BaseMaterial3D) -> Shader:
 	return _shaders[code]
 
 
-static func _code(mat: BaseMaterial3D) -> String:
+static func _code(mat: BaseMaterial3D, params: Dictionary) -> String:
 	var modes: PackedStringArray = [
 		["blend_mix", "blend_add", "blend_sub", "blend_mul"][mat.blend_mode],
 		["depth_draw_opaque", "depth_draw_always", "depth_draw_never"][mat.depth_draw_mode],
@@ -169,7 +178,6 @@ static func _code(mat: BaseMaterial3D) -> String:
 	for mode in optional:
 		if optional[mode]:
 			modes.append(mode)
-	var params := _params(mat)
 	var flags := {
 		"OV_ALBEDO_TEXTURE": params["texture_albedo"] != null,
 		"OV_METALLIC_TEXTURE": params["texture_metallic"] != null,

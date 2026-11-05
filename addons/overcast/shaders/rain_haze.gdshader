@@ -104,7 +104,9 @@ void fragment() {
 	float march = max(dist - t0, 0.0);
 	float step_len = march / float(STEPS);
 	// Per-pixel offset into the steps, so a wall edge across a step boundary does not band.
-	float jitter = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
+	// Interleaved gradient noise, as the sky's march: a sin() hash breaks into patterns on mobile
+	// GPUs.
+	float jitter = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 	float rainy = 0.0;
 	for (int i = 0; i < STEPS; i++) {
 		vec3 p = cam + dir * (t0 + (float(i) + jitter) * step_len);

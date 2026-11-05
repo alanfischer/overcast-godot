@@ -28,6 +28,8 @@ const GLOBALS := {
 	"overcast_puddles": ["float", 0.0],
 	"overcast_rain_sky": ["vec3", Vector3.ZERO],
 	"overcast_snow_cover": ["float", 0.0],
+	"overcast_rainfall": ["float", 0.0],
+	"overcast_rain_slant": ["vec2", Vector2.ZERO],
 }
 
 const _TYPES := {

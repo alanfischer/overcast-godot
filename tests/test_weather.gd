@@ -743,3 +743,61 @@ func test_the_moon_comes_up_from_nothing() -> void:
 				worst = maxf(worst, absf(light - last))
 			last = light
 		assert_lt(worst, 0.03, "the sun's light never jumps between %d:00 and %d:00 (%.3f)" % [from, from + 3, worst])
+
+
+func test_the_wind_carries_the_rain_and_gusts() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.wind = Vector3(6.0, 3.0, 0.0)
+	w.gustiness = 0.0
+	w._process(0.5)
+	assert_vec3_almost_eq(w.wind_now(), Vector3(6.0, 0.0, 0.0), 1e-4, "steady, it blows as set, along the ground")
+	assert_vec3_almost_eq(w._drop_material.get_shader_parameter("drift"), Vector3(3.0, 0.0, 0.0), 1e-4,
+		"and carries the drops with it")
+	for i in 100:
+		w._process(0.1)
+	var drift: Vector3 = w._drop_material.get_shader_parameter("drift")
+	assert_true(drift.x >= 0.0 and drift.x < Weather.DROP_BOX.x, "wrapped into their box (%s)" % drift)
+	w.gustiness = 1.0
+	var speeds: Array[float] = []
+	for i in 200:
+		w._process(0.05)
+		speeds.append(w.wind_now().length())
+	assert_lt(speeds.min(), 4.0, "gusts drop it (%.1f)" % speeds.min())
+	assert_gt(speeds.max(), 8.0, "and raise it (%.1f)" % speeds.max())
+
+
+func test_splashes_land_on_the_floor_while_it_rains() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w._process(0.1)
+	assert_eq(w._splashes.multimesh.visible_instance_count, w.splashes_heavy, "a downpour's splashes")
+	assert_false(w._splashes.visible, "but with no floor, nowhere to land")
+	w.rain_floor = _roofed_floor()
+	w._process(0.1)
+	assert_true(w._splashes.visible, "on a floor they show")
+	w.snow = 1.0
+	w._process(0.1)
+	assert_false(w._splashes.visible, "snow does not splash")
+	assert_eq(w._splashes.multimesh.visible_instance_count, 0)
+
+
+func test_the_rainfall_ripples_puddles_through_a_global() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _roofed_floor()
+	_root().add_child(w)
+	w.rain = 0.5
+	w._process(0.1)
+	assert_almost_eq(Globals.value("overcast_rainfall"), 0.5, 0.01, "as hard as it is raining now")
+	w.rain = 0.0
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_rainfall"), 0.0, "and stopping at once with it")
+	w.rain = 1.0
+	w._process(0.1)
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_rainfall"), 0.0, "gone, it leaves no ripples")

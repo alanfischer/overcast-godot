@@ -98,6 +98,14 @@ overcast_snow_cover={
 "type": "float",
 "value": 0.0
 }
+overcast_rainfall={
+"type": "float",
+"value": 0.0
+}
+overcast_rain_slant={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
 overcast_rain_beyond_floor={
 "type": "bool",
 "value": false

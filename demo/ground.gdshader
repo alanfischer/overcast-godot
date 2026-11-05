@@ -20,7 +20,8 @@ void fragment() {
 	vec3 albedo = color;
 	float roughness = 0.9;
 	float specular = 0.5;
-	overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal);
+	vec2 wet = overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal);
+	NORMAL = overcast_wet_normal(NORMAL, mat3(VIEW_MATRIX), world_pos, wet);
 	float snow = overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal);
 	glint = vec2(snow, overcast_snow_footprint(world_pos));
 	NORMAL = overcast_snow_normal(NORMAL, (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz, snow);

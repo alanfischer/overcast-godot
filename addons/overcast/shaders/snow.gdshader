@@ -6,7 +6,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled, skip_ve
 uniform vec3 color = vec3(0.95, 0.96, 1.0);
 uniform float opacity = 0.8;
 uniform float flash = 0.0;
-uniform vec3 velocity = vec3(0.0, -1.0, 0.0);
+uniform float fall_speed = 1.0;
 // Metres each flake wanders either side of its line, and how fast (radians per second).
 uniform float sway = 0.35;
 uniform float sway_rate = 1.3;
@@ -23,7 +23,7 @@ void vertex() {
 	vec4 h = overcast_fall_hash(uint(INSTANCE_ID) + 1u);
 	vec4 g = overcast_fall_hash(uint(INSTANCE_ID) + 0x9e3779b9u);
 	vec3 cam = INV_VIEW_MATRIX[3].xyz;
-	vec3 p = overcast_fall_place(h.xyz, velocity * mix(0.7, 1.3, h.w) * TIME, cam);
+	vec3 p = overcast_fall_place(h.xyz, fall_speed * mix(0.7, 1.3, h.w) * TIME, cam);
 	float t = TIME * sway_rate * mix(0.6, 1.4, g.x);
 	p.xz += sway * mix(0.4, 1.0, g.y) * vec2(sin(t + g.z * TAU), cos(t * 0.73 + g.w * TAU));
 	fade = overcast_fall_fade(p, cam, p);

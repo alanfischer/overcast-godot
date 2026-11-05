@@ -6,9 +6,45 @@
 global uniform float overcast_wetness;  // 0 dry, 1 soaked
 global uniform float overcast_puddles;  // how far flat ground has pooled
 global uniform vec3 overcast_rain_sky;  // the sky colour wet surfaces reflect, sRGB
+global uniform float overcast_rainfall;  // how hard it is raining now, 0 to 1: what ripples puddles
 uniform float puddle_scale : hint_range(0.0, 1.0) = 1.0;  // how readily this surface pools: earth does, planks drain
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
+
+// Ripples: rings spreading where drops land on standing water. One ring at a time per cell of a
+// grid this many per metre, in a few offset layers, each ring OVERCAST_RIPPLE_LIFE seconds.
+const float OVERCAST_RIPPLE_CELLS = 3.0;
+const int OVERCAST_RIPPLE_LAYERS = 3;
+const float OVERCAST_RIPPLE_LIFE = 0.7;
+// Wavelength of the rings and how far they tilt the water, and the radius (in cells) they reach.
+const float OVERCAST_RIPPLE_WAVE = 40.0;
+const float OVERCAST_RIPPLE_TILT = 0.35;
+const float OVERCAST_RIPPLE_REACH = 0.32;
+
+// The slope rain's ripples put on standing water at world xz: d(height)/dx, d(height)/dz.
+vec2 overcast_ripple_slope(vec2 xz) {
+	vec2 slope = vec2(0.0);
+	for (int layer = 0; layer < OVERCAST_RIPPLE_LAYERS; layer++) {
+		float fl = float(layer);
+		vec2 q = xz * OVERCAST_RIPPLE_CELLS + fl * vec2(0.37, 0.61);
+		vec2 cell = floor(q);
+		float t = TIME / OVERCAST_RIPPLE_LIFE + overcast_hash12(cell + fl * 17.31);
+		float cycle = floor(t);
+		float age = fract(t);
+		// Each turn of the cell may or may not have a drop land in it, by how hard it is raining.
+		vec2 k = cell + vec2(mod(cycle, 997.0) * 0.731, fl * 5.17);
+		if (overcast_hash12(k) > overcast_rainfall) {
+			continue;
+		}
+		vec2 centre = 0.35 + 0.3 * vec2(overcast_hash12(k + 3.1), overcast_hash12(k + 7.7));
+		vec2 d = fract(q) - centre;
+		float r = length(d);
+		float x = (r - age * OVERCAST_RIPPLE_REACH) * OVERCAST_RIPPLE_WAVE;
+		float env = exp(-x * x * 0.3) * (1.0 - age) * (1.0 - age);
+		slope += d / max(r, 1e-3) * cos(x) * env;
+	}
+	return slope;
+}
 
 // How wet the surface at world_pos is (x), and how much of it is puddle (y). A ceiling stays dry;
 // a wall asks about the air half a metre out from it, and takes less.
@@ -28,17 +64,46 @@ vec2 overcast_wet_amount(vec3 world_pos, vec3 world_normal) {
 	return vec2(wet, pool);
 }
 
+// How much rain's ripples brighten (over 1) or dim the reflection on standing water at world_pos,
+// `pool` deep; `footprint` is length(fwidth(world_pos.xz)), taken outside any branch. The rings'
+// slopes catch more of the sky on one side and less on the other, whatever sky it is.
+float overcast_ripple_shine(vec3 world_pos, float pool, float footprint) {
+	if (overcast_rainfall <= 0.0 || pool <= 0.0) {
+		return 1.0;
+	}
+	vec2 s = overcast_ripple_slope(world_pos.xz) * pool
+		* smoothstep(0.15, 0.05, footprint * OVERCAST_RIPPLE_CELLS);
+	return clamp(1.0 + (s.x + s.y) * 1.2, 0.2, 2.5);
+}
+
 // For Godot's own lighting: darker albedo and a smoother surface, so the scene's reflections (the
-// sky's radiance) give the sheen and a puddle its mirror. Call after setting all three (SPECULAR
-// is 0.5 by default). A puddle reflects more than water's Fresnel would, as overcast_wet does: the
-// sky is far brighter than the ground. Returns overcast_wet_amount.
+// sky's radiance) give the sheen and a puddle its mirror, rippled while it rains. Call from
+// fragment(), outside any branch (it takes derivatives), after setting all three (SPECULAR is 0.5
+// by default). A puddle reflects more than water's Fresnel would, as overcast_wet does: the sky is
+// far brighter than the ground. Returns overcast_wet_amount.
 vec2 overcast_wet_pbr(inout vec3 albedo, inout float roughness, inout float specular, vec3 world_pos,
 		vec3 world_normal) {
+	float footprint = length(fwidth(world_pos.xz));
 	vec2 w = overcast_wet_amount(world_pos, world_normal);
 	albedo *= mix(1.0, 0.6, w.x) * mix(1.0, 0.6, w.y);
 	roughness = mix(mix(roughness, min(roughness, 0.3), w.x), 0.02, w.y);
-	specular = mix(specular, 0.8, w.y);
+	specular = clamp(mix(specular, 1.0, w.y) * overcast_ripple_shine(world_pos, w.y, footprint), 0.0, 1.0);
 	return w;
+}
+
+// Bends `normal` by the ripples rain makes on the puddles, for Godot's own lighting to catch in its
+// reflections. Call from fragment(), outside any branch (it takes derivatives), with `wet` as
+// overcast_wet_pbr returned it; `world_to_normal` takes world directions into the space `normal`
+// is in: mat3(VIEW_MATRIX) for NORMAL.
+vec3 overcast_wet_normal(vec3 normal, mat3 world_to_normal, vec3 world_pos, vec2 wet) {
+	// Too small to see from here, the rings would only shimmer.
+	float footprint = length(fwidth(world_pos.xz)) * OVERCAST_RIPPLE_CELLS;
+	float k = wet.y * smoothstep(0.15, 0.05, footprint);
+	if (k <= 0.0 || overcast_rainfall <= 0.0) {
+		return normal;
+	}
+	vec2 s = overcast_ripple_slope(world_pos.xz) * k * OVERCAST_RIPPLE_TILT;
+	return normalize(normal + world_to_normal * vec3(-s.x, 0.0, -s.y));
 }
 
 // For a shader that lights itself (a lightmap): wet is darker, and reflects overcast_rain_sky, a
@@ -47,6 +112,7 @@ vec2 overcast_wet_pbr(inout vec3 albedo, inout float roughness, inout float spec
 // normal_view and view are NORMAL and VIEW.
 void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 world_normal,
 		vec3 normal_view, vec3 view) {
+	float footprint = length(fwidth(world_pos.xz));  // before any branch
 	vec2 w = overcast_wet_amount(world_pos, world_normal);
 	if (w.x <= 0.0) {
 		return;
@@ -56,6 +122,7 @@ void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 w
 	// would: the sky it reflects is far brighter than anything the light puts on the ground.
 	float dark = mix(1.0, 0.6, w.x) * mix(1.0, 0.6, w.y);
 	float mirror = mix(w.x * 0.5 * fresnel, max(fresnel * 2.0, 0.1), w.y);
+	mirror *= overcast_ripple_shine(world_pos, w.y, footprint);
 	lit_srgb = min(lit_srgb * dark + overcast_rain_sky * mirror, vec3(1.0));
 	albedo *= dark;
 }

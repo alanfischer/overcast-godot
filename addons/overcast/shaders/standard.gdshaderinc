@@ -82,7 +82,8 @@ void fragment() {
 #endif
 	float spec = specular;
 	vec3 world_normal = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	overcast_wet_pbr(alb, rough, spec, ov_world_pos, world_normal);
+	vec2 wet = overcast_wet_pbr(alb, rough, spec, ov_world_pos, world_normal);
+	NORMAL = overcast_wet_normal(NORMAL, mat3(VIEW_MATRIX), ov_world_pos, wet);
 	float snow = overcast_snow_pbr(alb, rough, spec, ov_world_pos, world_normal);
 	metal *= 1.0 - snow;
 	ov_glint = vec2(snow, overcast_snow_footprint(ov_world_pos));

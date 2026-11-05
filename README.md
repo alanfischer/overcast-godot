@@ -77,14 +77,21 @@ and go on their own.
   `light()`. For a game with baked lighting, scale the sun's share of each lightmap texel
   instead.
 - **`OvercastWeather`** handles the rain and snow:
-  - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow
+  - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow.
+    Most drops are fine and a few big; they show against the ground and hardly at all against
+    the sky, as real rain does
+  - `wind`, with gusts (`gustiness`): the rain slants and sways, the snow is carried off on it, and
+    whatever stands upwind keeps rain and snow off the ground in its lee
+  - splashes where the rain lands, on roofs and the open ground, with rings where it lands in
+    standing water. They land on the rain floor, so they need one
   - haze and far rain only through air that rain is actually falling in; snow turns the storm
     sky a pale grey, and hazes less
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc` and calls
     `overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal)` from `fragment()`:
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's
-    `puddle_scale` says how readily it pools. `overcast_wet()` is the same for a shader that
-    lights itself, such as a lightmapped one.
+    `puddle_scale` says how readily it pools. While it rains, ripples spread over the puddles;
+    `overcast_wet_normal()` bends `NORMAL` by them too, for reflections that can show it.
+    `overcast_wet()` is the same for a shader that lights itself, such as a lightmapped one.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
     a dusting in patches first on what faces up, then a layer over all of it, never under a
@@ -103,7 +110,10 @@ and go on their own.
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a
   physics frame instead. Without a rain floor, rain falls everywhere. Off its edges none falls,
-  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea.
+  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea. In wind,
+  the shaders read it along the rain's slant, taking what it holds as solid to the ground: a lee
+  stays dry, and rain never blows in under a roof. `floor_at()` and the rain sound go straight
+  down.
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor
   wherever it goes, so each cell takes the highest of it over that cell: something rotated,
@@ -120,7 +130,8 @@ and go on their own.
 
 Overcast has no networking of its own; you sync two things.
 
-1. **Rain:** sync `rain` and `snow`, or share `cycle_seed` and `cycle_time` (and `snow`).
+1. **Rain:** sync `rain`, `snow` and `wind`, or share `cycle_seed` and `cycle_time` (and `snow`
+   and `wind`). Gusts are each peer's own: they only sway what is drawn.
 2. **Lightning:** let one peer time the strikes (`times_strikes = true`) and send the seed from
    `struck` to the others, which call `strike(seed)`. The bolt, flash direction and thunder all
    derive from the seed, so every peer sees the same strike.

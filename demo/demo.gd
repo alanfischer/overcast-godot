@@ -39,6 +39,7 @@ func _ready() -> void:
 		cycle_check.button_pressed = false
 		weather.rain = v)
 	%Snow.value_changed.connect(func(v: float) -> void: weather.snow = v)
+	%Wind.value_changed.connect(func(v: float) -> void: weather.wind = Vector3(v, 0.0, v * 0.4))
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)

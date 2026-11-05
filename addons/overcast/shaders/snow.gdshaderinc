@@ -28,11 +28,15 @@ float overcast_snow_amount(vec3 world_pos, vec3 world_normal) {
 	// Steeper holds less, but only gently past the cutoff, so the noise and not the mesh's facets
 	// draws the edges of the patches.
 	float slope = smoothstep(0.4, 0.55, world_normal.y) * mix(0.8, 1.0, smoothstep(0.55, 0.9, world_normal.y));
-	float s = overcast_snow_cover * snow_scale * slope * rain_reaches(world_pos + world_normal * 0.02);
+	vec2 q = world_pos.xz;
+	// Asked a wandering way off, so where cover keeps it off the edge is ragged, blown in here and
+	// short there, not the roof's outline.
+	vec2 warp = vec2(overcast_vnoise(q * 0.9 + 5.3), overcast_vnoise(q * 0.9 + 11.7)) - 0.5;
+	float s = overcast_snow_cover * snow_scale * slope
+		* rain_reaches(world_pos + world_normal * 0.02 + vec3(warp.x, 0.0, warp.y) * 0.9);
 	if (s <= 0.0) {
 		return 0.0;
 	}
-	vec2 q = world_pos.xz;
 	float n = overcast_vnoise(q * 0.45) * 0.6 + overcast_vnoise(q * 1.9) * 0.3
 		+ overcast_vnoise(q * 8.0) * 0.1;
 	// Half settled, the high half of the noise is under snow; fully settled, all of it.
@@ -40,12 +44,19 @@ float overcast_snow_amount(vec3 world_pos, vec3 world_normal) {
 	return cover * mix(0.55, 1.0, smoothstep(0.2, 0.9, s));
 }
 
+// Lying snow's colour at world_pos: not one flat white, but packed and drifted a little brighter
+// here and duller there, over metres.
+vec3 overcast_snow_albedo(vec3 world_pos) {
+	vec2 q = world_pos.xz;
+	return OVERCAST_SNOW_ALBEDO * (0.93 + 0.1 * overcast_vnoise(q * 0.3 + 3.1) + 0.04 * overcast_vnoise(q * 1.7));
+}
+
 // For Godot's own lighting: white, rough and dull where it lies. Returns overcast_snow_amount.
 // Bend NORMAL with overcast_snow_normal and add overcast_snow_glint in light() for the rest.
 float overcast_snow_pbr(inout vec3 albedo, inout float roughness, inout float specular,
 		vec3 world_pos, vec3 world_normal) {
 	float k = overcast_snow_amount(world_pos, world_normal);
-	albedo = mix(albedo, OVERCAST_SNOW_ALBEDO, k);
+	albedo = mix(albedo, overcast_snow_albedo(world_pos), k);
 	roughness = mix(roughness, 0.75, k);
 	specular = mix(specular, 0.35, k);
 	return k;
@@ -109,17 +120,17 @@ void overcast_snow(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 
 	}
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
 	vec3 base = albedo;
-	vec3 white = OVERCAST_SNOW_ALBEDO;
+	vec3 white = overcast_snow_albedo(world_pos);
 #else
 	vec3 base = pow(max(albedo, vec3(0.0)), vec3(1.0 / 2.2));
-	vec3 white = pow(OVERCAST_SNOW_ALBEDO, vec3(2.2));
+	vec3 white = pow(overcast_snow_albedo(world_pos), vec3(2.2));
 #endif
 	// A dark texel says little about its light; the floor keeps it from reading as none.
 	vec3 light = min(lit_srgb / max(base, vec3(0.08)), vec3(4.0));
 	float glint = overcast_snow_glint(world_pos, k, footprint, normal_view, view, view);
 	// Only direct light glints: what a lightmap gives past the ambient's share.
 	float direct = smoothstep(0.5, 1.2, dot(light, vec3(0.333)));
-	lit_srgb = min(mix(lit_srgb, OVERCAST_SNOW_ALBEDO * light, k) + glint * direct * 0.04, vec3(1.0));
+	lit_srgb = min(mix(lit_srgb, overcast_snow_albedo(world_pos) * light, k) + glint * direct * 0.04, vec3(1.0));
 	albedo = mix(albedo, white, k);
 }
 #endif

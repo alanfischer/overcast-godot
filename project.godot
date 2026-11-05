@@ -1,16 +1,22 @@
-; Overcast — sky, clouds and weather for Godot.
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
 ;
-; The repo is itself a Godot project so a clone can run the suites (./run_tests.sh) and open the
-; demo without any setup. A game consuming Overcast copies addons/overcast/ and enables the plugin,
-; which declares the shader globals below in its own project.
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="overcast"
 run/main_scene="res://demo/demo.tscn"
-config/features=PackedStringArray("4.4", "GL Compatibility")
+config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [editor_plugins]
 
@@ -66,6 +72,10 @@ overcast_rain_floor={
 "type": "sampler2D",
 "value": ""
 }
+overcast_rain_under={
+"type": "sampler2D",
+"value": ""
+}
 overcast_has_rain_floor={
 "type": "bool",
 "value": false
@@ -97,6 +107,14 @@ overcast_rain_sky={
 overcast_snow_cover={
 "type": "float",
 "value": 0.0
+}
+overcast_rainfall={
+"type": "float",
+"value": 0.0
+}
+overcast_rain_slant={
+"type": "vec2",
+"value": Vector2(0, 0)
 }
 overcast_rain_beyond_floor={
 "type": "bool",

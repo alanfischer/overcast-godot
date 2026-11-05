@@ -16,6 +16,9 @@ var heights := PackedFloat32Array()
 var dims := Vector2i.ZERO
 var image: Image
 var texture: ImageTexture
+## The air under cover (OvercastRainFloor.under), as it was baked: covers do not change it. Only
+## when drawn and baked with one.
+var under_texture: ImageTexture
 var origin := Vector3.ZERO
 var size := Vector2.ONE
 var cell := Vector2.ONE
@@ -34,6 +37,7 @@ var _cover_in := 0.0
 ## stay, to be stamped afresh on it.
 func set_floor(source: RainFloor, drawn: bool) -> void:
 	texture = null
+	under_texture = null
 	if source == null or source.image == null:
 		image = null
 		baked = PackedFloat32Array()
@@ -55,6 +59,12 @@ func set_floor(source: RainFloor, drawn: bool) -> void:
 		top = source.top
 		if drawn:
 			texture = ImageTexture.create_from_image(image)
+			if source.under and source.under.get_size() == dims:
+				var air := source.under
+				if air.get_format() != Image.FORMAT_RGF:
+					air = air.duplicate()
+					air.convert(Image.FORMAT_RGF)
+				under_texture = ImageTexture.create_from_image(air)
 	for node in covers:
 		covers[node].xform = Transform3D(Basis(), Vector3.INF)
 		covers[node].raster_xform = Transform3D(Basis(), Vector3.INF)

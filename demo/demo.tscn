@@ -42,7 +42,7 @@ sun = NodePath("../Sun")
 offset_left = 12.0
 offset_top = 12.0
 offset_right = 232.0
-offset_bottom = 270.0
+offset_bottom = 320.0
 
 [node name="Box" type="VBoxContainer" parent="UI/Panel"]
 layout_mode = 2
@@ -64,8 +64,18 @@ text = "Snow"
 [node name="Snow" type="HSlider" parent="UI/Panel/Box"]
 unique_name_in_owner = true
 layout_mode = 2
-max_value = 1.0
+max_value = 1.5
 step = 0.01
+
+[node name="WindLabel" type="Label" parent="UI/Panel/Box"]
+layout_mode = 2
+text = "Wind"
+
+[node name="Wind" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 15.0
+step = 0.1
 
 [node name="Cycle" type="CheckBox" parent="UI/Panel/Box"]
 unique_name_in_owner = true

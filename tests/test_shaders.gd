@@ -4,9 +4,10 @@ extends "res://tests/suite.gd"
 
 const SHADERS := {
 	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "snowy", "flash_color", "cloud_amount"],
-	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "velocity", "haze_density"],
-	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "velocity", "haze_density", "flake_size", "opacity", "flash"],
-	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap"],
+	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "fall_speed", "wind", "drift", "haze_density"],
+	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "fall_speed", "drift", "haze_density", "flake_size", "opacity", "flash"],
+	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap", "slant"],
+	"res://addons/overcast/shaders/splash.gdshader": ["color", "box", "haze_density", "opacity", "flash", "puddle_scale"],
 }
 
 
@@ -40,6 +41,7 @@ void fragment() {
 	float roughness = 0.8;
 	float specular = 0.5;
 	vec2 wet = overcast_wet_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
+	NORMAL = overcast_wet_normal(NORMAL, mat3(VIEW_MATRIX), world_pos, wet);
 	overcast_snow(lit, albedo, world_pos, vec3(0.0, 1.0, 0.0), NORMAL, VIEW);
 	float snow = overcast_snow_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
 	NORMAL = overcast_snow_normal(NORMAL, vec3(0.0, 1.0, 0.0), snow);

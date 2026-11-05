@@ -260,8 +260,18 @@ func light_dir() -> Vector3:
 	return -sun if night > 0.5 else sun
 
 
+## How strongly what light_dir points at shines, 0 to 1. The moon takes over from the sun once
+## night is half in, by then already above the horizon, so it comes up from nothing rather than
+## switching on.
+func light_strength() -> float:
+	if not sun_follows_time or night <= 0.5:
+		return 1.0
+	return smoothstep(0.5, 0.8, night)
+
+
 func _sync_light() -> void:
 	set_shader_parameter("light_dir", light_dir())
+	set_shader_parameter("light_strength", light_strength())
 	_sync_layer()
 
 

@@ -48,8 +48,9 @@ and go on their own.
   turns to match. For a sun baked into your lighting, turn off `sun_follows_time`: the sun and
   moon then stay at `sun_dir`.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
-  lightmap. It draws a gradient, a sun, stars, cirrus and a cumulus
-  layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
+  lightmap; `light_dir()` and `light_strength()` are where the sun or moon is and how strongly it
+  shines, as the moon comes up from nothing once it takes over at dusk. It draws a gradient, a
+  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
@@ -76,33 +77,47 @@ and go on their own.
   `light()`. For a game with baked lighting, scale the sun's share of each lightmap texel
   instead.
 - **`OvercastWeather`** handles the rain and snow:
-  - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow
+  - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow.
+    Flakes tumble, come in clumps as well as singly, and blur out of focus right at the eye.
+    Most drops are fine and a few big; they show against the ground and hardly at all against
+    the sky, as real rain does
+  - `wind`, with gusts (`gustiness`): the rain slants and sways, the snow is carried off on it, and
+    whatever stands upwind keeps rain and snow off the ground in its lee
+  - splashes where the rain lands, on roofs and the open ground, with rings where it lands in
+    standing water. They land on the rain floor, so they need one
   - haze and far rain only through air that rain is actually falling in; snow turns the storm
     sky a pale grey, and hazes less
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc` and calls
     `overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal)` from `fragment()`:
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's
-    `puddle_scale` says how readily it pools. `overcast_wet()` is the same for a shader that
-    lights itself, such as a lightmapped one.
+    `puddle_scale` says how readily it pools. While it rains, ripples spread over the puddles;
+    `overcast_wet_normal()` bends `NORMAL` by them too, for reflections that can show it.
+    `overcast_wet()` is the same for a shader that lights itself, such as a lightmapped one.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
     a dusting in patches first on what faces up, then a layer over all of it, never under a
-    roof. It settles while more snow falls than rain and melts, wetting the ground, once it
+    roof, with a ragged edge where cover keeps it off. It settles while more snow falls than rain and melts, wetting the ground, once it
     stops; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
     `overcast_snow_glint()` in `light()` makes it glitter where the sun reaches it
     (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and
     `overcast_snow()` is the version for a shader that lights itself. The weather's
     `snow_lying` says how much lies, for a game to stop its exposure down by. Snow does not
     thunder.
-  - rain sound that fades and low-passes under cover
+  - rain sound that fades and low-passes under cover, and wind you hear only when it blows hard
+    (from about 10 m/s, at full strength by 18), swelling with each gust. Snow is silent
   - lightning: a glowing bolt, a flash, and thunder delayed by the distance
-  - its own rain loop and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream` and
-    `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
+  - its own rain and wind loops and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream`,
+    `wind_stream` and `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
 - **`OvercastRainFloor`** is where rain stops: roofs, overhangs, the ground. The weather's
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a
   physics frame instead. Without a rain floor, rain falls everywhere. Off its edges none falls,
-  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea.
+  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea. The bake
+  also finds the open air under each roof (`under`), so in wind the shaders follow the rain's
+  slant through it: it blows a metre or two in under eaves and open shelters, thinning as it
+  goes, and through doorways, while walls, posts and roofs stop it and a lee stays dry. A floor
+  without `under` (made by `create`, or baked before it existed) takes all it holds as solid to
+  the ground, as do moving covers. `floor_at()` and the rain sound go straight down.
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor
   wherever it goes, so each cell takes the highest of it over that cell: something rotated,
@@ -119,7 +134,8 @@ and go on their own.
 
 Overcast has no networking of its own; you sync two things.
 
-1. **Rain:** sync `rain` and `snow`, or share `cycle_seed` and `cycle_time` (and `snow`).
+1. **Rain:** sync `rain`, `snow` and `wind`, or share `cycle_seed` and `cycle_time` (and `snow`
+   and `wind`). Gusts are each peer's own: they only sway what is drawn.
 2. **Lightning:** let one peer time the strikes (`times_strikes = true`) and send the seed from
    `struck` to the others, which call `strike(seed)`. The bolt, flash direction and thunder all
    derive from the seed, so every peer sees the same strike.

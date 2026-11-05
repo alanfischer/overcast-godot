@@ -25,6 +25,8 @@ uniform vec3 streak_color = vec3(0.0);  // as the drops', lit
 uniform float streak_opacity = 0.0;
 uniform float presence = 1.0;  // the share of streak slots holding a drop
 uniform float fall_speed = 9.0;
+// Metres the wind carries a drop sideways per metre it falls: the columns lean with it.
+uniform vec2 slant = vec2(0.0);
 uniform float streak_length = 0.4;
 uniform float streak_width = 0.006;
 // Metres between one streak in a column and the next: rain's are close behind each other, snow's
@@ -52,7 +54,7 @@ void vertex() {
 }
 
 bool raining_at(vec3 p) {
-	return p.y < overcast_rain_top && rain_falls_at(p);
+	return p.y < overcast_rain_top && rain_open_above(p);
 }
 
 // pcg3d. The inputs are whole numbers in the thousands, which a float hash smears together.
@@ -104,7 +106,9 @@ void fragment() {
 	float march = max(dist - t0, 0.0);
 	float step_len = march / float(STEPS);
 	// Per-pixel offset into the steps, so a wall edge across a step boundary does not band.
-	float jitter = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
+	// Interleaved gradient noise, as the sky's march: a sin() hash breaks into patterns on mobile
+	// GPUs.
+	float jitter = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 	float rainy = 0.0;
 	for (int i = 0; i < STEPS; i++) {
 		vec3 p = cam + dir * (t0 + (float(i) + jitter) * step_len);
@@ -116,8 +120,10 @@ void fragment() {
 	float haze = 1.0 - exp(-density * rainy);
 
 	float streak = 0.0;
+	// Walked in a frame sheared along the slant (x + slant * (y - cam.y)), where every column of
+	// falling drops stands straight.
 	vec2 o = cam.xz;
-	vec2 d = dir.xz;
+	vec2 d = dir.xz + slant * dir.y;
 	float flat_len = length(d);
 	// A ray through no rain-filled air has no far rain on it either.
 	if (streak_opacity > 0.0 && rainy > 0.0 && flat_len > 0.001) {
@@ -154,6 +160,8 @@ void fragment() {
 				cell.y += step_dir.y;
 			}
 		}
+		// Against the sky, rain has little to stand out from (rain.gdshader).
+		streak *= mix(1.0, 0.35, smoothstep(-0.05, 0.5, dir.y));
 		streak = min(streak * streak_opacity * (1.0 + flash), 1.0);
 	}
 	// The streaks over the haze behind them.

@@ -17,10 +17,12 @@ func _weather() -> Weather:
 
 class FakeSky extends SkyScript:
 	var flashes := 0
+	var flash := Color.BLACK
 
 	func set_flash(color: Color, dir: Vector3) -> void:
 		super(color, dir)
 		flashes += 1
+		flash = color
 
 
 ## A floor 4 m by 2 m from (-2, -1): the west half roofed at 3 m, the east half open to 0.
@@ -653,3 +655,212 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	sky.time_of_day = 9.0
 	w._process(0.0)
 	assert_true(sun.global_basis.is_equal_approx(before), "a sun that does not follow the time is left where it is")
+
+
+func test_lying_snow_comes_back_with_the_weather() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.settle()
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_snow_cover"), 1.0, "settled snow lies")
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "gone, it takes its snow")
+	_root().add_child(w)
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_snow_cover"), 1.0, "back, it brings it again")
+
+
+func test_a_strike_dies_with_the_weather() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var drawn := [0]
+	var w := _weather()
+	w.bolt_drawer = func(_p: PackedVector3Array, _w: float, _b: float, _f: float) -> void: drawn[0] += 1
+	_root().add_child(w)
+	w.strike(7)
+	await tree.create_timer(0.3).timeout
+	var strokes: int = drawn[0]
+	assert_gt(strokes, 0, "its strokes are drawn in turn")
+	assert_eq(w.get_children().filter(func(n: Node) -> bool: return n is AudioStreamPlayer and n not in [w._rain_audio, w._wind_audio]).size(), 1,
+		"and its thunder is on the way")
+	drawn[0] = 0
+	w.strike(7)
+	w.free()
+	await tree.create_timer(0.3).timeout
+	assert_eq(drawn[0], 0, "freed, nothing of the strike is left to fire")
+
+
+func test_a_sky_is_let_go_of_clear() -> void:
+	var w := _weather()
+	_keep(w)
+	var sky := FakeSky.new({"drawing": false})
+	var flashes: Array[float] = []
+	w.flash_changed.connect(func(k: float) -> void: flashes.append(k))
+	w.sky = sky
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 0.4
+	w.settle()
+	w.strike(3)
+	w._process(0.01)
+	assert_gt(sky.storm, 0.9, "the storm is on the sky")
+	assert_ne(sky.flash, Color.BLACK, "and so is the flash")
+	_root().remove_child(w)
+	assert_eq(sky.storm, 0.0, "gone, the weather takes its storm")
+	assert_eq(sky.snowy, 0.0, "and its snow")
+	assert_eq(sky.flash, Color.BLACK, "and its flash")
+	assert_eq(flashes[-1], 0.0, "which ends on 0 for the scene's light too")
+	_root().add_child(w)
+	w._process(0.01)
+	assert_gt(sky.storm, 0.9, "back, it brings them again")
+	var other := FakeSky.new({"drawing": false})
+	w.sky = other
+	w._process(0.01)
+	assert_eq(sky.storm, 0.0, "a sky swapped out is let go of clear")
+	assert_gt(other.storm, 0.9, "and the new one takes the storm")
+
+
+func test_the_moon_comes_up_from_nothing() -> void:
+	var w := _weather()
+	_keep(w)
+	var sun := DirectionalLight3D.new()
+	_keep(sun)
+	_root().add_child(sun)
+	w.sun = sun
+	var sky := SkyScript.new({"drawing": false})
+	w.sky = sky
+	_root().add_child(w)
+	for from in [17.0, 4.0]:
+		var worst := 0.0
+		var last := -1.0
+		for i in 241:
+			sky.time_of_day = from + i * 3.0 / 240.0  # a step under a minute of game time
+			w._process(0.0)
+			var light := sun.light_color.get_luminance()
+			if last >= 0.0:
+				worst = maxf(worst, absf(light - last))
+			last = light
+		assert_lt(worst, 0.03, "the sun's light never jumps between %d:00 and %d:00 (%.3f)" % [from, from + 3, worst])
+
+
+func test_the_wind_carries_the_rain_and_gusts() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.wind = Vector3(6.0, 3.0, 0.0)
+	w.gustiness = 0.0
+	w._process(0.5)
+	assert_vec3_almost_eq(w.wind_now(), Vector3(6.0, 0.0, 0.0), 1e-4, "steady, it blows as set, along the ground")
+	assert_vec3_almost_eq(w._drop_material.get_shader_parameter("drift"), Vector3(3.0, 0.0, 0.0), 1e-4,
+		"and carries the drops with it")
+	for i in 100:
+		w._process(0.1)
+	var drift: Vector3 = w._drop_material.get_shader_parameter("drift")
+	assert_true(drift.x >= 0.0 and drift.x < Weather.DROP_BOX.x, "wrapped into their box (%s)" % drift)
+	w.gustiness = 1.0
+	var speeds: Array[float] = []
+	for i in 200:
+		w._process(0.05)
+		speeds.append(w.wind_now().length())
+	assert_lt(speeds.min(), 4.0, "gusts drop it (%.1f)" % speeds.min())
+	assert_gt(speeds.max(), 8.0, "and raise it (%.1f)" % speeds.max())
+
+
+func test_splashes_land_on_the_floor_while_it_rains() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w._process(0.1)
+	assert_eq(w._splashes.multimesh.visible_instance_count, w.splashes_heavy, "a downpour's splashes")
+	assert_false(w._splashes.visible, "but with no floor, nowhere to land")
+	w.rain_floor = _roofed_floor()
+	w._process(0.1)
+	assert_true(w._splashes.visible, "on a floor they show")
+	w.snow = 1.0
+	w._process(0.1)
+	assert_false(w._splashes.visible, "snow does not splash")
+	assert_eq(w._splashes.multimesh.visible_instance_count, 0)
+
+
+func test_the_rainfall_ripples_puddles_through_a_global() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _roofed_floor()
+	_root().add_child(w)
+	w.rain = 0.5
+	w._process(0.1)
+	assert_almost_eq(Globals.value("overcast_rainfall"), 0.5, 0.01, "as hard as it is raining now")
+	w.rain = 0.0
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_rainfall"), 0.0, "and stopping at once with it")
+	w.rain = 1.0
+	w._process(0.1)
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_rainfall"), 0.0, "gone, it leaves no ripples")
+
+
+func test_snow_with_no_rain_and_no_wind_is_silent() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w._process(0.1)
+	assert_false(w._rain_audio.playing, "no rain to hear")
+	assert_false(w._wind_audio.playing, "and no wind")
+	w.wind = Vector3(3.0, 0.0, 0.0)
+	w.gustiness = 0.0
+	w._process(0.1)
+	assert_false(w._wind_audio.playing, "a breeze is not heard")
+
+
+func test_only_a_strong_wind_is_heard_and_louder_as_it_blows() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.gustiness = 0.0
+	var volumes: Array[float] = []
+	for speed in [10.0, 14.0, 20.0]:
+		w.wind = Vector3(0.0, 0.0, speed)
+		w._process(0.1)
+		assert_true(w._wind_audio.playing, "a %d m/s wind is heard, rain or none" % speed)
+		volumes.append(w._wind_audio.volume_db)
+	assert_lt(volumes[0], volumes[1], "louder as it blows harder")
+	assert_lt(volumes[1], volumes[2])
+	assert_almost_eq(volumes[2], Weather.WIND_DB, 0.01, "and no louder than WIND_DB past WIND_LOUD")
+	assert_lt(volumes[0], Weather.WIND_DB - 15.0, "a fresh breeze is only faint (%.1f dB)" % volumes[0])
+	w.wind = Vector3.ZERO
+	w._process(0.1)
+	assert_false(w._wind_audio.playing, "still, it stops")
+	assert_ne(Weather._sound("wind"), null, "with its own wind loop")
+
+
+func test_the_wind_is_quieter_under_a_roof() -> void:
+	var w := _weather()
+	_keep(w)
+	# An 80 m field, open but for a 30 m hall at its middle: the sound's sample rings reach 12 m,
+	# so the hall's middle hears no open sky, and the field's corner all of it.
+	var img := Image.create_empty(80, 80, false, Image.FORMAT_RF)
+	for y in 80:
+		for x in 80:
+			img.set_pixel(x, y, Color(3.0 if absi(x - 40) < 15 and absi(y - 40) < 15 else 0.0, 0, 0))
+	w.rain_floor = RainFloor.create(img, Vector3(-40, 0, -40), Vector2(80, 80), 10.0)
+	w.listener = _keep(Node3D.new())
+	_root().add_child(w.listener)
+	_root().add_child(w)
+	w.gustiness = 0.0
+	w.wind = Vector3(20.0, 0.0, 0.0)
+	w.listener.global_position = Vector3(27.0, 1.0, 27.0)  # out in the field
+	for i in 40:
+		w._process(0.1)
+	var open := w._wind_audio.volume_db
+	assert_almost_eq(open, Weather.WIND_DB, 0.01, "in the open, at full strength")
+	w.listener.global_position = Vector3(0.0, 1.0, 0.0)  # in the hall
+	for i in 40:
+		w._process(0.1)
+	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather.WIND_INDOOR_GAIN), 0.01,
+		"indoors, WIND_INDOOR_GAIN of it")

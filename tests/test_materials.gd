@@ -176,3 +176,14 @@ func test_watch_converts_what_spawns_after_its_ready() -> void:
 	assert_true(later.material_override is StandardMaterial3D, "a root that has left stops watching")
 	later.free()
 	mi.free()
+
+
+func test_a_source_edited_in_place_converts_to_the_edit() -> void:
+	var src := StandardMaterial3D.new()
+	var to := Materials.convert_material(src) as ShaderMaterial
+	src.albedo_color = Color.RED
+	src.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var again := Materials.convert_material(src) as ShaderMaterial
+	assert_eq(again.get_shader_parameter("albedo"), Color.RED, "the new colour")
+	assert_true("#define OV_ALPHA\n" in again.shader.code, "and the new switches")
+	assert_eq(again, to, "still the one twin, so what draws with it changes too")

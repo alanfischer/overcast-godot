@@ -78,6 +78,7 @@ and go on their own.
   instead.
 - **`OvercastWeather`** handles the rain and snow:
   - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow.
+    Flakes tumble, come in clumps as well as singly, and blur out of focus right at the eye.
     Most drops are fine and a few big; they show against the ground and hardly at all against
     the sky, as real rain does
   - `wind`, with gusts (`gustiness`): the rain slants and sways, the snow is carried off on it, and
@@ -95,7 +96,7 @@ and go on their own.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
     a dusting in patches first on what faces up, then a layer over all of it, never under a
-    roof. It settles while more snow falls than rain and melts, wetting the ground, once it
+    roof, with a ragged edge where cover keeps it off. It settles while more snow falls than rain and melts, wetting the ground, once it
     stops; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
     `overcast_snow_glint()` in `light()` makes it glitter where the sun reaches it
     (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and

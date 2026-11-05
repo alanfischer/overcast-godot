@@ -82,7 +82,7 @@ const FLAKE_COLOR := Color(0.95, 0.96, 1.0)
 ## so some show dark against that haze and some light against the ground.
 const SNOW_HAZE := 0.6
 const SNOW_HAZE_COLOR := Color(0.72, 0.74, 0.78)
-const FLAKE_DIM := 0.45
+const FLAKE_DIM := 0.7
 ## Opacity of the far rain's streaks at a downpour, and of the far snow's flakes at a blizzard.
 const FAR_OPACITY := 0.6
 const FAR_SNOW_OPACITY := 0.8
@@ -214,8 +214,8 @@ const SUN_STORM_SHADOW := 0.88
 ## Snow covers every material that includes shaders/snow.gdshaderinc.
 @export var lying_snow := true
 ## Flakes around the camera at the lightest snow and at a blizzard.
-@export_range(0, 100000, 100) var flakes_light := 5000
-@export_range(0, 100000, 100) var flakes_heavy := 25000
+@export_range(0, 100000, 100) var flakes_light := 8000
+@export_range(0, 100000, 100) var flakes_heavy := 50000
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var soak_time := 20.0

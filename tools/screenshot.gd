@@ -1,5 +1,6 @@
 extends SceneTree
-## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=1 WIND=6 VOL=1 TIME=18.5 to vary it;
+## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=0.7 WIND=6 VOL=1 TIME=18.5 to vary
+## it (RAIN and SNOW as the demo's sliders: how much of each);
 ## CLEARED=1 clears the sky over the settled weather.
 ##   godot --path . -s res://tools/screenshot.gd
 

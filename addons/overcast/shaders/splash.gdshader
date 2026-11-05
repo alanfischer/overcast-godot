@@ -51,7 +51,7 @@ void vertex() {
 			float dist = length(rel);
 			fade = smoothstep(box.x * 0.5, box.x * 0.3, length(rel.xz)) * exp(-haze_density * dist)
 				* step(p.y, overcast_rain_top) * mix(0.6, 1.0, r.w)
-				* (rain_falls_at(p + vec3(0.0, 0.05, 0.0)) ? 1.0 : 0.0);
+				* rain_reaches_air(p + vec3(0.0, 0.05, 0.0));
 		}
 	}
 	if (fade <= 0.0) {

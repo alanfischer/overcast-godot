@@ -449,7 +449,8 @@ func _exit_tree() -> void:
 		flash_changed.emit(0.0)
 	if _globals_owner == get_instance_id():
 		_globals_owner = 0
-		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor", "overcast_rain_floor_origin",
+		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor",
+				"overcast_rain_under", "overcast_rain_floor_origin",
 				"overcast_rain_floor_size", "overcast_rain_top", "overcast_wetness", "overcast_puddles",
 				"overcast_rain_sky", "overcast_snow_cover", "overcast_rainfall", "overcast_rain_slant"]:
 			Globals.reset(key)
@@ -547,6 +548,7 @@ func _push_floor() -> void:
 	Globals.set_value("overcast_has_rain_floor", _live.texture != null)
 	Globals.set_value("overcast_rain_beyond_floor", rain_beyond_floor)
 	Globals.set_value("overcast_rain_floor", _live.texture)
+	Globals.set_value("overcast_rain_under", _live.under_texture)
 	Globals.set_value("overcast_rain_floor_origin", _live.origin)
 	Globals.set_value("overcast_rain_floor_size", _live.size)
 	Globals.set_value("overcast_rain_top", _live.top)

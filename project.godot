@@ -72,6 +72,10 @@ overcast_rain_floor={
 "type": "sampler2D",
 "value": ""
 }
+overcast_rain_under={
+"type": "sampler2D",
+"value": ""
+}
 overcast_has_rain_floor={
 "type": "bool",
 "value": false

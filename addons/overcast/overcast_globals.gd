@@ -19,6 +19,7 @@ const GLOBALS := {
 	"overcast_volumetric": ["float", 0.0],
 	"overcast_volume": ["sampler3D", ""],
 	"overcast_rain_floor": ["sampler2D", ""],
+	"overcast_rain_under": ["sampler2D", ""],
 	"overcast_has_rain_floor": ["bool", false],
 	"overcast_rain_beyond_floor": ["bool", false],
 	"overcast_rain_floor_origin": ["vec3", Vector3.ZERO],

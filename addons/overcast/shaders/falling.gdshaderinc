@@ -30,7 +30,8 @@ vec3 overcast_fall_place(vec3 start, float fallen, vec3 cam) {
 }
 
 // How much of one at `p` to draw: faded out toward the faces of the box, where they wrap, right at
-// the lens, by the haze, and not at all below the rain floor (tested at `floor_p`).
+// the lens, by the haze, and by how much rain reaches `floor_p` (none under a roof, unless the wind
+// blows it in).
 float overcast_fall_fade(vec3 p, vec3 cam, vec3 floor_p) {
 	vec3 rel = p - cam;
 	float dist = length(rel);
@@ -38,8 +39,8 @@ float overcast_fall_fade(vec3 p, vec3 cam, vec3 floor_p) {
 		* smoothstep(box.y * 0.5, box.y * 0.35, abs(rel.y))
 		* smoothstep(0.2, 1.0, dist)
 		* exp(-haze_density * dist);
-	if (fade > 0.0 && !rain_falls_at(floor_p)) {
-		fade = 0.0;
+	if (fade > 0.0) {
+		fade *= rain_reaches_air(floor_p);
 	}
 	return fade;
 }

@@ -112,10 +112,12 @@ and go on their own.
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a
   physics frame instead. Without a rain floor, rain falls everywhere. Off its edges none falls,
-  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea. In wind,
-  the shaders read it along the rain's slant, taking what it holds as solid to the ground: a lee
-  stays dry, and rain never blows in under a roof. `floor_at()` and the rain sound go straight
-  down.
+  unless `rain_beyond_floor` is on: for an open world, such as an island in the sea. The bake
+  also finds the open air under each roof (`under`), so in wind the shaders follow the rain's
+  slant through it: it blows a metre or two in under eaves and open shelters, thinning as it
+  goes, and through doorways, while walls, posts and roofs stop it and a lee stays dry. A floor
+  without `under` (made by `create`, or baked before it existed) takes all it holds as solid to
+  the ground, as do moving covers. `floor_at()` and the rain sound go straight down.
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor
   wherever it goes, so each cell takes the highest of it over that cell: something rotated,

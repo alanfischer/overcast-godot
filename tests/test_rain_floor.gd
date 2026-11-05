@@ -44,3 +44,30 @@ func test_a_baked_floor_saves_and_loads() -> void:
 	assert_eq(loaded.size, Vector2(3, 2), "its span")
 	assert_almost_eq(loaded.top, 9.0, 1e-6, "and its top")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func test_the_air_under_cover_is_baked_and_walls_are_solid() -> void:
+	_box(Vector3(40, 1, 40), Vector3(0, -0.5, 0))   # ground, top at 0
+	_box(Vector3(6, 0.2, 6), Vector3(0, 3.0, 0))    # roof on nothing, 2.9..3.1
+	_box(Vector3(1, 0.5, 1), Vector3(-1.5, 0.75, -1.5))  # a crate under it, 0.5..1.0
+	_box(Vector3(1, 4, 1), Vector3(6.5, 2, 0.5))      # a wall, 0..4
+	_box(Vector3(1, 2.9, 1), Vector3(2.5, 1.45, 2.5))  # a post holding the roof up, 0..2.9
+	_box(Vector3(1, 1.0, 1), Vector3(0.5, 2.4, -2.5))  # a beam under the roof, 1.9..2.9
+	await (Engine.get_main_loop() as SceneTree).physics_frame
+	await (Engine.get_main_loop() as SceneTree).physics_frame
+	var f := RainFloor.bake(_root().get_world_3d(), AABB(Vector3(-10, -2, -10), Vector3(20, 12, 20)), 1.0)
+	assert_eq(f.under.get_size(), f.image.get_size(), "a gap per cell")
+	assert_eq(f.under.get_format(), Image.FORMAT_RGF)
+	var gap := f.under.get_pixel(9, 11)
+	assert_almost_eq(gap.r, 2.9, 0.01, "under the roof the air reaches its underside")
+	assert_almost_eq(gap.g, 0.0, 0.01, "from the ground")
+	gap = f.under.get_pixel(8, 8)
+	assert_almost_eq(gap.r, 2.9, 0.01, "over the crate it is the roof's underside, not the crate's")
+	assert_almost_eq(gap.g, 1.0, 0.01, "down to the crate's top")
+	gap = f.under.get_pixel(16, 10)
+	assert_true(gap.r < 0.5, "a wall has no air in it below its top (%s)" % gap)
+	gap = f.under.get_pixel(10, 7)
+	assert_almost_eq(gap.r, 1.9, 0.01, "under a beam the air reaches the beam's underside")
+	assert_almost_eq(gap.g, 0.0, 0.01, "from the ground")
+	gap = f.under.get_pixel(12, 12)
+	assert_true(gap.r < 0.5, "nor does a post under the roof (%s)" % gap)

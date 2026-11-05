@@ -1,5 +1,6 @@
 extends SceneTree
-## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=1 VOL=1 TIME=18.5 to vary it.
+## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=1 VOL=1 TIME=18.5 to vary it;
+## CLEARED=1 clears the sky over the settled weather.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -25,9 +26,13 @@ func _run() -> void:
 		await physics_frame
 	var weather = demo.get_node("Weather")
 	weather.settle()
+	if OS.get_environment("CLEARED") == "1":  # the snow lying, and the sky cleared over it
+		weather.rain = 0.0
+		weather.storm = 0.0
+		weather.snowy = 0.0
 	demo.get_node("UI").visible = false
 	var views := {"field": [Vector3(0, 1.7, 8), 0.12, 0.0], "up": [Vector3(0, 1.7, 8), 0.7, 0.6],
-		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9]}
+		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9], "ground": [Vector3(0, 1.7, 8), -0.45, 0.0]}
 	for name in views:
 		var v: Array = views[name]
 		demo._yaw = v[2]

@@ -47,6 +47,8 @@ uniform vec3 uv1_scale = vec3(1.0);
 uniform vec3 uv1_offset = vec3(0.0);
 
 varying vec3 ov_world_pos;
+// The snow, and how many glint cells a pixel spans, for light()'s glints.
+varying vec2 ov_glint;
 // light() has no SPECULAR to build the reflectance from.
 varying float ov_specular;
 
@@ -83,6 +85,8 @@ void fragment() {
 	overcast_wet_pbr(alb, rough, spec, ov_world_pos, world_normal);
 	float snow = overcast_snow_pbr(alb, rough, spec, ov_world_pos, world_normal);
 	metal *= 1.0 - snow;
+	ov_glint = vec2(snow, overcast_snow_footprint(ov_world_pos));
+	NORMAL = overcast_snow_normal(NORMAL, (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz, snow);
 	ALBEDO = alb;
 	METALLIC = metal;
 	ROUGHNESS = rough;
@@ -90,7 +94,7 @@ void fragment() {
 	ov_specular = spec;
 #ifdef OV_NORMAL
 	NORMAL_MAP = texture(texture_normal, UV).rgb;
-	NORMAL_MAP_DEPTH = normal_scale;
+	NORMAL_MAP_DEPTH = normal_scale * (1.0 - snow);  // snow smooths over the bumps
 #endif
 #ifdef OV_EMISSION
 	vec3 emission_tex = texture(texture_emission, UV).rgb;
@@ -101,7 +105,7 @@ void fragment() {
 #endif
 #endif
 #ifdef OV_AO
-	AO = dot(texture(texture_ambient_occlusion, UV), ao_texture_channel);
+	AO = mix(dot(texture(texture_ambient_occlusion, UV), ao_texture_channel), 1.0, snow);
 	AO_LIGHT_AFFECT = ao_light_affect;
 #endif
 #ifdef OV_ALPHA
@@ -159,5 +163,6 @@ void light() {
 		SPECULAR_LIGHT += cNdotL * D * F * G * light * SPECULAR_AMOUNT;
 	}
 #endif
+	SPECULAR_LIGHT += light * cNdotL * overcast_snow_glint(ov_world_pos, ov_glint.x, ov_glint.y, NORMAL, VIEW, LIGHT);
 }
 #endif

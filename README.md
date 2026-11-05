@@ -86,10 +86,14 @@ and go on their own.
     lights itself, such as a lightmapped one.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
-    patches first on what faces up, then all of it, never under a roof. It settles while more
-    snow falls than rain and melts, wetting the ground, once it stops; rain melts it faster.
-    `snow_scale` says how readily a material holds it, and `overcast_snow()` is the version for
-    a shader that lights itself. Snow does not thunder.
+    a dusting in patches first on what faces up, then a layer over all of it, never under a
+    roof. It settles while more snow falls than rain and melts, wetting the ground, once it
+    stops; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
+    `overcast_snow_glint()` in `light()` makes it glitter where the sun reaches it
+    (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and
+    `overcast_snow()` is the version for a shader that lights itself. The weather's
+    `snow_lying` says how much lies, for a game to stop its exposure down by. Snow does not
+    thunder.
   - rain sound that fades and low-passes under cover
   - lightning: a glowing bolt, a flash, and thunder delayed by the distance
   - its own rain loop and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream` and

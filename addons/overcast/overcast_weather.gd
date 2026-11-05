@@ -246,6 +246,11 @@ var presenting := DisplayServer.get_name() != "headless"
 ## brightness: float, fade: float) -> void. Called for each stroke.
 var bolt_drawer: Callable
 
+## How much snow lies on the ground, 0 to 1 (overcast_snow_cover): for a game's exposure, or its
+## footsteps.
+var snow_lying: float:
+	get:
+		return _snow_lying
 ## How far the sky has closed over, 0 to 1: follows the rain at STORM_RATE.
 var storm := 0.0
 ## Seconds into the showers (cycle). Peers that share cycle_seed and this agree on the rain; set

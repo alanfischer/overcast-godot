@@ -41,6 +41,8 @@ const FLASH_LENGTH := 0.6
 ## How overcast the sky goes at the lightest rain (it reaches 1 at a downpour), and how fast it
 ## closes over or clears, per second.
 const STORM_LIGHT := 0.55
+## Snow falls from a sky already closed over: even light snow takes it this far.
+const SNOW_STORM_LIGHT := 0.85
 const STORM_RATE := 0.2
 ## Rain sound by how much of the rain around the listener is reachable: sampled off the rain floor
 ## in rings (metres) a few times a second. Deep indoors it is RAIN_INDOOR_GAIN of the open-air
@@ -79,8 +81,9 @@ const FLAKE_COLOR := Color(0.95, 0.96, 1.0)
 const SNOW_HAZE := 0.6
 const SNOW_HAZE_COLOR := Color(0.72, 0.74, 0.78)
 const FLAKE_DIM := 0.45
-## Opacity of the far rain's streaks at a downpour.
+## Opacity of the far rain's streaks at a downpour, and of the far snow's flakes at a blizzard.
 const FAR_OPACITY := 0.6
+const FAR_SNOW_OPACITY := 0.8
 ## Bolts: segments, height over the top of `area` in cloud heights, and the speed thunder travels at.
 const BOLT_SEGMENTS := 16
 const BOLT_HEIGHT := Vector2(1.1, 1.7)
@@ -469,7 +472,7 @@ func _settling() -> bool:
 
 
 func _storm_target() -> float:
-	return 0.0 if rain <= 0.0 else lerpf(STORM_LIGHT, 1.0, heaviness(rain))
+	return 0.0 if rain <= 0.0 else lerpf(lerpf(STORM_LIGHT, SNOW_STORM_LIGHT, snow), 1.0, heaviness(rain))
 
 
 ## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge, a
@@ -551,8 +554,6 @@ func _refresh(was: float) -> void:
 	var wet := rainfall()
 	var count := _fill(_drops, drops_light, drops_heavy, wet)
 	if wet <= 0.0:
-		if _haze_material:
-			_haze_material.set_shader_parameter("streak_opacity", 0.0)
 		if _rain_audio and _rain_audio.playing:
 			_rain_audio.stop()
 		return
@@ -566,14 +567,10 @@ func _refresh(was: float) -> void:
 	_drop_material.set_shader_parameter("streak_length", streak_length)
 	_drop_material.set_shader_parameter("width", streak_width)
 	_drop_material.set_shader_parameter("opacity", lerpf(0.3, 0.45, heavy))
-	if _haze_material:
+	if _haze_material and not _far_snow():
 		# The far rain thins out with the rain, and past a downpour fills in as the box does.
 		var full := float(count) / maxi(drops_heavy, 1)
-		_haze_material.set_shader_parameter("presence", clampf(full, 0.15, 1.0))
-		_haze_material.set_shader_parameter("streak_opacity", FAR_OPACITY * maxf(full, 1.0))
-		_haze_material.set_shader_parameter("fall_speed", fall_speed)
-		_haze_material.set_shader_parameter("streak_length", streak_length)
-		_haze_material.set_shader_parameter("streak_width", streak_width)
+		_set_far(full, FAR_OPACITY, fall_speed, streak_length, streak_width, streak_length * 5.0)
 
 	# -20 dB for light rain to -5 dB for a downpour, and by how much of it is in reach.
 	_rain_db = lerpf(-20.0, -5.0, heavy)
@@ -594,9 +591,31 @@ static func _fill(mmi: MultiMeshInstance3D, light: int, heavy: int, amount: floa
 	return count
 
 
+## Whether the far streaks are snow's flakes rather than rain's: when more of it is snow.
+func _far_snow() -> bool:
+	return snow >= 0.5
+
+
+## The far rain or snow, past the box (rain_haze.gdshader): `full` is how full its slots are.
+func _set_far(full: float, opacity: float, fall_speed: float, length: float, width: float,
+		gap: float) -> void:
+	_haze_material.set_shader_parameter("presence", clampf(full, 0.15, 1.0))
+	_haze_material.set_shader_parameter("streak_opacity", opacity * maxf(full, 1.0) if full > 0.0 else 0.0)
+	_haze_material.set_shader_parameter("fall_speed", fall_speed)
+	_haze_material.set_shader_parameter("streak_length", length)
+	_haze_material.set_shader_parameter("streak_width", width)
+	_haze_material.set_shader_parameter("streak_gap", gap)
+
+
 func _refresh_flakes() -> void:
 	var amount := snowfall()
-	_fill(_flakes, flakes_light, flakes_heavy, amount)
+	var count := _fill(_flakes, flakes_light, flakes_heavy, amount)
+	if _haze_material and (_far_snow() or rain <= 0.0):
+		var full := float(count) / maxi(flakes_heavy, 1) if _far_snow() else 0.0
+		var heavy_far := heaviness(amount)
+		var size := lerpf(0.018, 0.03, heavy_far)
+		# Far off, a flake is a dot: a streak no longer than it is wide.
+		_set_far(full, FAR_SNOW_OPACITY, lerpf(0.8, 1.5, heavy_far), size * 1.5, size, 3.0)
 	if amount <= 0.0:
 		return
 	var heavy := heaviness(amount)
@@ -720,6 +739,8 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	_flake_material.set_shader_parameter("haze_density", density)
 	_haze_material.set_shader_parameter("haze_color", Vector3(haze_color.r, haze_color.g, haze_color.b))
 	var streak := DROP_COLOR * drop_light
+	if _far_snow():
+		streak = FLAKE_COLOR * drop_light * lerpf(FLAKE_DIM, 1.0, 0.5)
 	_haze_material.set_shader_parameter("streak_color", Vector3(streak.r, streak.g, streak.b))
 	_haze_material.set_shader_parameter("flash", _flash_k * DROP_FLASH_OPACITY)
 

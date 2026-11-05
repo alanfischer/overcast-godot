@@ -27,6 +27,9 @@ uniform float presence = 1.0;  // the share of streak slots holding a drop
 uniform float fall_speed = 9.0;
 uniform float streak_length = 0.4;
 uniform float streak_width = 0.006;
+// Metres between one streak in a column and the next: rain's are close behind each other, snow's
+// far apart, or a column of flakes reads as a string of beads.
+uniform float streak_gap = 2.0;
 uniform float flash = 0.0;
 // Colours are linear. The RD renderers encode on output; gl_compatibility writes ALBEDO as it is,
 // so there it is encoded here.
@@ -37,13 +40,12 @@ const float GUST_CELL = 80.0;  // metres to the noise texture's width, as Overca
 const int STEPS = 16;
 const float MAX_DIST = 160.0;
 // Far rain, by horizontal distance (m): fading in where the drop box fades out, and out again at
-// FAR_END. One column of drops per CELL metres of grid, each a streak per SLOT streak lengths of
+// FAR_END. One column of drops per CELL metres of grid, each a streak every streak_gap metres of
 // height; MAX_CELLS covers the diagonal of FAR_NEAR..FAR_END.
 const float FAR_NEAR = 12.0;
 const float FAR_END = 50.0;
 const float CELL = 0.9;
 const int MAX_CELLS = 96;
-const float SLOT = 5.0;
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy, 0.5, 1.0);
@@ -71,13 +73,13 @@ float column_streak(vec2 cell, float y, float miss, float footprint) {
 		return 0.0;
 	}
 	vec3 hc = hash3(cell.x, cell.y, 1.0);
-	float slot = streak_length * SLOT;
+	float slot = streak_gap;
 	float yy = y + fall_speed * mix(0.85, 1.15, hc.x) * TIME + hc.y * slot;
 	float k = floor(yy / slot);
 	if (hash3(cell.x, cell.y, k).x > presence) {
 		return 0.0;
 	}
-	float along = fract(yy / slot) * SLOT;  // 0 at the head, 1 at the tail
+	float along = fract(yy / slot) * slot / streak_length;  // 0 at the head, 1 at the tail
 	float profile = smoothstep(0.0, 0.25, along) * smoothstep(1.0, 0.6, along);
 	return profile * (streak_width / w) * (1.0 - miss / w);
 }

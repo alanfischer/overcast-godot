@@ -6,7 +6,7 @@ const SHADERS := {
 	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "snowy", "flash_color", "cloud_amount"],
 	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "velocity", "haze_density"],
 	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "velocity", "haze_density", "flake_size", "opacity", "flash"],
-	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output"],
+	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap"],
 }
 
 

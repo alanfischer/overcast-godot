@@ -683,7 +683,7 @@ func test_a_strike_dies_with_the_weather() -> void:
 	await tree.create_timer(0.3).timeout
 	var strokes: int = drawn[0]
 	assert_gt(strokes, 0, "its strokes are drawn in turn")
-	assert_eq(w.get_children().filter(func(n: Node) -> bool: return n is AudioStreamPlayer and n != w._rain_audio).size(), 1,
+	assert_eq(w.get_children().filter(func(n: Node) -> bool: return n is AudioStreamPlayer and n not in [w._rain_audio, w._wind_audio]).size(), 1,
 		"and its thunder is on the way")
 	drawn[0] = 0
 	w.strike(7)
@@ -801,3 +801,66 @@ func test_the_rainfall_ripples_puddles_through_a_global() -> void:
 	w._process(0.1)
 	_root().remove_child(w)
 	assert_eq(Globals.value("overcast_rainfall"), 0.0, "gone, it leaves no ripples")
+
+
+func test_snow_with_no_rain_and_no_wind_is_silent() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w._process(0.1)
+	assert_false(w._rain_audio.playing, "no rain to hear")
+	assert_false(w._wind_audio.playing, "and no wind")
+	w.wind = Vector3(3.0, 0.0, 0.0)
+	w.gustiness = 0.0
+	w._process(0.1)
+	assert_false(w._wind_audio.playing, "a breeze is not heard")
+
+
+func test_only_a_strong_wind_is_heard_and_louder_as_it_blows() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.gustiness = 0.0
+	var volumes: Array[float] = []
+	for speed in [10.0, 14.0, 20.0]:
+		w.wind = Vector3(0.0, 0.0, speed)
+		w._process(0.1)
+		assert_true(w._wind_audio.playing, "a %d m/s wind is heard, rain or none" % speed)
+		volumes.append(w._wind_audio.volume_db)
+	assert_lt(volumes[0], volumes[1], "louder as it blows harder")
+	assert_lt(volumes[1], volumes[2])
+	assert_almost_eq(volumes[2], Weather.WIND_DB, 0.01, "and no louder than WIND_DB past WIND_LOUD")
+	assert_lt(volumes[0], Weather.WIND_DB - 15.0, "a fresh breeze is only faint (%.1f dB)" % volumes[0])
+	w.wind = Vector3.ZERO
+	w._process(0.1)
+	assert_false(w._wind_audio.playing, "still, it stops")
+	assert_ne(Weather._sound("wind"), null, "with its own wind loop")
+
+
+func test_the_wind_is_quieter_under_a_roof() -> void:
+	var w := _weather()
+	_keep(w)
+	# An 80 m field, open but for a 30 m hall at its middle: the sound's sample rings reach 12 m,
+	# so the hall's middle hears no open sky, and the field's corner all of it.
+	var img := Image.create_empty(80, 80, false, Image.FORMAT_RF)
+	for y in 80:
+		for x in 80:
+			img.set_pixel(x, y, Color(3.0 if absi(x - 40) < 15 and absi(y - 40) < 15 else 0.0, 0, 0))
+	w.rain_floor = RainFloor.create(img, Vector3(-40, 0, -40), Vector2(80, 80), 10.0)
+	w.listener = _keep(Node3D.new())
+	_root().add_child(w.listener)
+	_root().add_child(w)
+	w.gustiness = 0.0
+	w.wind = Vector3(20.0, 0.0, 0.0)
+	w.listener.global_position = Vector3(27.0, 1.0, 27.0)  # out in the field
+	for i in 40:
+		w._process(0.1)
+	var open := w._wind_audio.volume_db
+	assert_almost_eq(open, Weather.WIND_DB, 0.01, "in the open, at full strength")
+	w.listener.global_position = Vector3(0.0, 1.0, 0.0)  # in the hall
+	for i in 40:
+		w._process(0.1)
+	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather.WIND_INDOOR_GAIN), 0.01,
+		"indoors, WIND_INDOOR_GAIN of it")

@@ -54,6 +54,14 @@ const RAIN_INDOOR_CUTOFF := 600.0
 const RAIN_OPEN_CUTOFF := 20000.0
 const RAIN_SAMPLE_EVERY := 0.25
 const RAIN_EASE := 1.5  # exposure per second
+## Wind sound by the wind's speed as it gusts (m/s): none below WIND_QUIET, a breeze can be heard
+## but not this, rising to WIND_DB at WIND_LOUD and past it, and a little higher in pitch as it
+## rises. Under a roof it is WIND_INDOOR_GAIN as loud.
+const WIND_QUIET := 5.0
+const WIND_LOUD := 18.0
+const WIND_DB := -4.0
+const WIND_PITCH := Vector2(0.85, 1.15)
+const WIND_INDOOR_GAIN := 0.4
 ## Rain haze's colour is the sky's at the horizon, so distance fades into the sky behind it, but
 ## never darker than HAZE_FLOOR of HAZE_COLOR in the scene's light: a night sky is near black, and the
 ## scene's moonlight usually is not.
@@ -245,6 +253,17 @@ const SUN_STORM_SHADOW := 0.88
 		if _rain_audio:
 			_rain_audio.bus = v
 @export var thunder_bus := &"Master"
+## Overcast's own wind (sounds/, CC0) when unset. Heard only in a strong wind.
+@export var wind_stream: AudioStream:
+	set(v):
+		wind_stream = v
+		if _wind_audio:
+			_wind_audio.stream = v if v else _sound("wind")
+@export var wind_bus := &"Master":
+	set(v):
+		wind_bus = v
+		if _wind_audio:
+			_wind_audio.bus = v
 
 ## Set while the camera is underwater: no rain is drawn, the sound carries on.
 var underwater := false
@@ -300,6 +319,7 @@ var _flake_material: ShaderMaterial
 var _haze: MeshInstance3D
 var _haze_material: ShaderMaterial
 var _rain_audio: AudioStreamPlayer
+var _wind_audio: AudioStreamPlayer
 var _linear_output := true
 var _live := Live.new()
 var _rain_db := 0.0
@@ -353,6 +373,12 @@ func _ready() -> void:
 		_rain_audio.stream = rain_stream if rain_stream else _sound("rain")
 		_rain_audio.finished.connect(_on_rain_finished)
 		add_child(_rain_audio)
+		_wind_audio = AudioStreamPlayer.new()
+		_wind_audio.name = "WindAudio"
+		_wind_audio.bus = wind_bus
+		_wind_audio.stream = wind_stream if wind_stream else _sound("wind")
+		_wind_audio.finished.connect(func() -> void: _wind_audio.play())
+		add_child(_wind_audio)
 	_push_floor()
 	_refresh(0.0)
 
@@ -782,14 +808,34 @@ func floor_at(q: Vector3) -> float:
 	return _live.floor_at(q)
 
 
-func _update_rain_sound(delta: float) -> void:
+## How open the sky around the listener is, for the rain and the wind, eased as they move.
+func _update_exposure(delta: float) -> void:
 	_sample_in -= delta
 	if _sample_in <= 0.0:
 		_sample_in = RAIN_SAMPLE_EVERY
 		_exposure_target = rain_exposure(_ears())
 	if _exposure != _exposure_target:
 		_exposure = move_toward(_exposure, _exposure_target, RAIN_EASE * delta)
-		_apply_rain_volume()
+		if _rain_audio.playing:
+			_apply_rain_volume()
+
+
+## How loud the wind is now, 0 to 1 (of WIND_DB), in the open: none in a breeze.
+func wind_loudness() -> float:
+	var k := smoothstep(WIND_QUIET, WIND_LOUD, _wind_now.length())
+	return k * k
+
+
+func _update_wind_sound() -> void:
+	var gain := wind_loudness()
+	if gain < 0.001:
+		if _wind_audio.playing:
+			_wind_audio.stop()
+		return
+	_wind_audio.volume_db = WIND_DB + linear_to_db(gain * lerpf(WIND_INDOOR_GAIN, 1.0, _exposure))
+	_wind_audio.pitch_scale = lerpf(WIND_PITCH.x, WIND_PITCH.y, sqrt(gain))
+	if not _wind_audio.playing and _wind_audio.stream:
+		_wind_audio.play()
 
 
 func _apply_rain_volume() -> void:
@@ -964,8 +1010,10 @@ func _process(delta: float) -> void:
 	_drops.visible = rainfall() > 0.0 and not underwater
 	_flakes.visible = snowfall() > 0.0 and not underwater
 	_splashes.visible = _drops.visible and _live.texture != null
-	if _rain_audio and _rain_audio.playing:
-		_update_rain_sound(delta)
+	if _rain_audio and (_rain_audio.playing or _wind_audio.playing or wind_loudness() > 0.0):
+		_update_exposure(delta)
+	if _wind_audio:
+		_update_wind_sound()
 
 	if _flash_t >= 0.0:
 		_flash_t += delta

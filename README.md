@@ -103,10 +103,11 @@ and go on their own.
     `overcast_snow()` is the version for a shader that lights itself. The weather's
     `snow_lying` says how much lies, for a game to stop its exposure down by. Snow does not
     thunder.
-  - rain sound that fades and low-passes under cover
+  - rain sound that fades and low-passes under cover, and wind you hear only when it blows hard
+    (from about 10 m/s, at full strength by 18), swelling with each gust. Snow is silent
   - lightning: a glowing bolt, a flash, and thunder delayed by the distance
-  - its own rain loop and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream` and
-    `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
+  - its own rain and wind loops and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream`,
+    `wind_stream` and `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
 - **`OvercastRainFloor`** is where rain stops: roofs, overhangs, the ground. The weather's
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a

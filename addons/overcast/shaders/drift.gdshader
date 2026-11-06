@@ -1,7 +1,8 @@
 shader_type spatial;
 // Drifted snow (OvercastSnowDrift.surface_mesh): the mesh lies on the ground, and each vertex rises
 // by its depth over the even layer (UV.x) as the snow settles, so it heaps up and melts away with
-// overcast_snow_cover. Thinner than THIN it is not drawn: the ground's own snow is there.
+// overcast_snow_cover, and by `grown` as the wind turns and they shift. Thinner than THIN it is not
+// drawn: the ground's own snow is there.
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 #include "res://addons/overcast/shaders/snow.gdshaderinc"
 
@@ -9,12 +10,13 @@ const float THIN = 0.02;
 // Depth in colour, with a contour every `contour` metres: to tune drifts by.
 uniform bool contours = false;
 uniform float contour = 0.25;
+uniform float grown = 1.0;  // how far these drifts have heaped up (or, the old, worn away)
 varying float thick;
 varying vec3 world_pos;
 varying float footprint;  // overcast_snow_footprint, for light()'s glints
 
 void vertex() {
-	thick = UV.x * overcast_snow_cover;
+	thick = UV.x * overcast_snow_cover * grown;
 	VERTEX.y += thick;
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }

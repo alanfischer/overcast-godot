@@ -138,6 +138,62 @@ func test_the_rain_reaches_wet_ground_through_the_globals() -> void:
 	assert_eq(Globals.value("overcast_wetness"), 0.0, "and no wet ground")
 
 
+func test_wet_ground_comes_round_to_a_turned_wind_as_it_soaks() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _roofed_floor()
+	_root().add_child(w)
+	w.wind = Vector3(9, 0, 0)
+	w._process(0.1)
+	var east: Vector2 = Globals.value("overcast_rain_slant")
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4(east.x, east.y, east.x, east.y),
+		"dry, the ground takes the wind's slant at once")
+	assert_eq(Globals.value("overcast_ground_shift"), 1.0, "with nothing to fade")
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	east = Globals.value("overcast_rain_slant")  # drops fall faster in a downpour
+	w.wind = Vector3(-9, 0, 0)
+	w._process(0.1)
+	var west: Vector2 = Globals.value("overcast_rain_slant")
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4(east.x, east.y, west.x, west.y),
+		"wet, it fades from the old slant to the new")
+	assert_lt(Globals.value("overcast_ground_shift"), 0.1, "beginning now")
+	w._process(w.soak_time * 0.5)
+	assert_almost_eq(Globals.value("overcast_ground_shift"), 0.5, 0.01, "half round in half the soak")
+	w.wind = Vector3(0, 0, 9)
+	w._process(0.1)
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4(east.x, east.y, west.x, west.y),
+		"a wind that turns again waits for this turn to finish")
+	w._process(w.soak_time)
+	w._process(0.1)
+	var north: Vector2 = Globals.value("overcast_rain_slant")
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4(west.x, west.y, north.x, north.y),
+		"then turns to it")
+	w._process(w.soak_time)
+	assert_eq(Globals.value("overcast_ground_shift"), 1.0, "and comes all the way round")
+	_root().remove_child(w)
+	assert_eq(Globals.value("overcast_ground_shift"), 1.0, "gone, it leaves the default")
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4.ZERO, "slant and all")
+
+
+func test_a_wind_still_turning_retargets_a_turn_just_begun() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _roofed_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	var calm: Vector4 = Globals.value("overcast_ground_slant")
+	for speed in [1.0, 4.0, 9.0]:
+		w.wind = Vector3(speed, 0, 0)
+		w._process(0.05)
+	var slant: Vector2 = Globals.value("overcast_rain_slant")
+	assert_eq(Globals.value("overcast_ground_slant"), Vector4(calm.z, calm.w, slant.x, slant.y),
+		"a wind swept up over a few frames is followed to where it ends")
+
+
 func test_snow_falls_as_flakes_and_lies() -> void:
 	var w := _weather()
 	_keep(w)
@@ -228,6 +284,38 @@ func test_snow_drifts_bake_off_the_main_thread_as_the_wind_turns() -> void:
 			break
 		OS.delay_msec(5)
 	assert_true(w.get_node("SnowDrifts").mesh != null, "then the drifts are baked again for it")
+
+
+func test_drifts_wear_away_as_new_ones_heap_up_in_a_turned_wind() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _walled_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.wind = Vector3(10, 0, 0)
+	w.settle()
+	w.bake_drifts()
+	var old: MeshInstance3D = w.get_node("SnowDrifts")
+	var old_mesh := old.mesh
+	w.wind = Vector3(-10, 0, 0)
+	for i in 400:
+		w._process(0.05)
+		if w.has_node("SnowDriftsWas"):
+			break
+		OS.delay_msec(5)
+	assert_true(w.has_node("SnowDriftsWas"), "the old drifts stay to wear away")
+	assert_eq(w.get_node("SnowDriftsWas"), old, "the ones there were")
+	assert_eq(old.mesh, old_mesh, "as they were")
+	var fresh: MeshInstance3D = w.get_node("SnowDrifts")
+	assert_ne(fresh, old, "beside the new")
+	assert_lt(w.drift_material.get_shader_parameter("grown"), 0.1, "which have only begun to heap up")
+	w._process(w.snow_time * 0.5)
+	assert_almost_eq(w.drift_material.get_shader_parameter("grown"), 0.5, 0.02, "half up in half the settling")
+	assert_almost_eq(old.material_override.get_shader_parameter("grown"), 0.5, 0.02, "the old half gone")
+	w._process(w.snow_time)
+	assert_true(w._drifts_was == null and old.is_queued_for_deletion(), "until they are gone")
+	assert_eq(w.drift_material.get_shader_parameter("grown"), 1.0, "and the new all heaped up")
 
 
 func test_a_snow_storm_greys_the_sky_pale() -> void:

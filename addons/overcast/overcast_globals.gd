@@ -31,6 +31,8 @@ const GLOBALS := {
 	"overcast_snow_cover": ["float", 0.0],
 	"overcast_rainfall": ["float", 0.0],
 	"overcast_rain_slant": ["vec2", Vector2.ZERO],
+	"overcast_ground_slant": ["vec4", Vector4.ZERO],
+	"overcast_ground_shift": ["float", 1.0],
 }
 
 const _TYPES := {
@@ -38,6 +40,7 @@ const _TYPES := {
 	"float": RenderingServer.GLOBAL_VAR_TYPE_FLOAT,
 	"vec2": RenderingServer.GLOBAL_VAR_TYPE_VEC2,
 	"vec3": RenderingServer.GLOBAL_VAR_TYPE_VEC3,
+	"vec4": RenderingServer.GLOBAL_VAR_TYPE_VEC4,
 	"sampler2D": RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D,
 	"sampler3D": RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D,
 }

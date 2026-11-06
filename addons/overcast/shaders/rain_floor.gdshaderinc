@@ -11,6 +11,10 @@ global uniform vec2 overcast_rain_floor_size;
 global uniform float overcast_rain_top;  // no rain above this
 // Metres the wind carries rain sideways per metre it falls (OvercastWeather, from its steady wind).
 global uniform vec2 overcast_rain_slant;
+// What lies on the ground comes round to a new wind gradually: it is wet (or snowed on) as for the
+// slant in xy, turning to that in zw by overcast_ground_shift, 0 to 1.
+global uniform vec4 overcast_ground_slant;
+global uniform float overcast_ground_shift;
 
 // The open air under what catches rain, per column: x the underside of the roof, y the ground under
 // it; none where they are equal (OvercastRainFloor.under). Unset, there is none anywhere, and all
@@ -89,13 +93,13 @@ bool rain_slant_exits(vec3 a, vec3 b) {
 }
 
 // How much of the rain slanting in on the wind reaches p, 0 to 1, by the walk described above.
-float rain_slant_reach(vec3 p) {
+float rain_slant_reach(vec3 p, vec2 slant) {
 	bool roofed;
 	int was = rain_place(p, roofed);
 	if (was == RAIN_SOLID) {
 		return 0.0;
 	}
-	float len = length(overcast_rain_slant);
+	float len = length(slant);
 	float up = min(RAIN_SLANT_UP, RAIN_SLANT_REACH / max(len, 1e-4));
 	float wander = 0.15 + 0.7 * overcast_vnoise(p.xz * 1.3);
 	float under = 0.0;  // metres sideways it blew in under cover to reach p
@@ -104,7 +108,7 @@ float rain_slant_reach(vec3 p) {
 	float last_s = 0.0;
 	for (int i = 0; i < RAIN_SLANT_TAPS; i++) {
 		float s = up * (float(i) + wander) / float(RAIN_SLANT_TAPS);
-		vec3 q = p + vec3(-overcast_rain_slant.x * s, s, -overcast_rain_slant.y * s);
+		vec3 q = p + vec3(-slant.x * s, s, -slant.y * s);
 		int now = rain_place(q, roofed);
 		if (now == RAIN_SOLID) {
 			return 0.0;
@@ -139,7 +143,7 @@ float rain_reaches_air(vec3 p) {
 	if (overcast_rain_slant == vec2(0.0)) {
 		return p.y > textureLod(overcast_rain_floor, uv, 0.0).r ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p);
+	return rain_slant_reach(p, overcast_rain_slant);
 }
 
 // Whether rain falling past world point p, slanted by the wind, has not yet been caught.
@@ -168,19 +172,29 @@ float rain_open_blend(vec3 p, float off) {
 	return mix(mix(reach.x, reach.y, f.x), mix(reach.z, reach.w, f.x), f.y);
 }
 
-// 1 where rain reaches world point p on a surface, 0 under cover; in wind, along its slant, so it
-// blows in under eaves and open shelters and leaves a dry lee. Everywhere, with no floor.
-float rain_reaches(vec3 p) {
-	if (!overcast_has_rain_floor) {
-		return 1.0;
-	}
-	if (overcast_rain_slant == vec2(0.0)) {
+// 1 where rain reaching world point p on a surface along `slant` would, 0 under cover.
+float rain_reaches_along(vec3 p, vec2 slant) {
+	if (slant == vec2(0.0)) {
 		return rain_open_blend(p, overcast_rain_beyond_floor ? 1.0 : 0.0);
 	}
 	vec2 uv = rain_floor_uv(p);
 	if (!rain_floor_covers(uv)) {
 		return overcast_rain_beyond_floor ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p);
+	return rain_slant_reach(p, slant);
+}
+
+// 1 where rain has reached world point p on a surface, 0 under cover; in wind, along its slant, so
+// it blows in under eaves and open shelters and leaves a dry lee, which follow a turning wind over
+// time (overcast_ground_shift). Everywhere, with no floor.
+float rain_reaches(vec3 p) {
+	if (!overcast_has_rain_floor) {
+		return 1.0;
+	}
+	float now = rain_reaches_along(p, overcast_ground_slant.zw);
+	if (overcast_ground_shift >= 1.0) {
+		return now;
+	}
+	return mix(rain_reaches_along(p, overcast_ground_slant.xy), now, overcast_ground_shift);
 }
 #endif

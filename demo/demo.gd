@@ -35,6 +35,8 @@ func _ready() -> void:
 	field.set_shader_parameter("vary", true)
 	for hut in [Vector3(0, 0, -12), Vector3(14, 0, -6), Vector3(-12, 0, -20)]:
 		_add_hut(hut)
+	# A solid fence across the wind, which (unlike the huts on their posts) snow drifts behind.
+	_add_box(Vector3(0.2, 1.5, 8.0), Vector3(-6, 0.75, -3), _surface(ROOF))
 
 	# Physics has to have the boxes before the rain floor can be traced against them. A scene built
 	# in the editor would bake it there instead (the weather's Bake Rain Floor).
@@ -45,6 +47,8 @@ func _ready() -> void:
 	rain_slider.value_changed.connect(_set_falling.unbind(1))
 	snow_slider.value_changed.connect(_set_falling.unbind(1))
 	%Wind.value_changed.connect(func(v: float) -> void: weather.wind = Vector3(v, 0.0, v * 0.4))
+	%Drifts.toggled.connect(func(on: bool) -> void:
+		weather.drift_material.set_shader_parameter("contours", on))
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)

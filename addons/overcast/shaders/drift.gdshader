@@ -1,0 +1,50 @@
+shader_type spatial;
+// Drifted snow (OvercastSnowDrift.surface_mesh): the mesh lies on the ground, and each vertex rises
+// by its depth over the even layer (UV.x) as the snow settles, so it heaps up and melts away with
+// overcast_snow_cover, and by `grown` as the wind turns and they shift. Thinner than THIN it is not
+// drawn: the ground's own snow is there.
+#include "res://addons/overcast/shaders/clouds.gdshaderinc"
+#include "res://addons/overcast/shaders/snow.gdshaderinc"
+
+const float THIN = 0.02;
+// Depth in colour, with a contour every `contour` metres: to tune drifts by.
+uniform bool contours = false;
+uniform float contour = 0.25;
+uniform float grown = 1.0;  // how far these drifts have heaped up (or, the old, worn away)
+varying float thick;
+varying vec3 world_pos;
+varying float footprint;  // overcast_snow_footprint, for light()'s glints
+
+void vertex() {
+	thick = UV.x * overcast_snow_cover * grown;
+	VERTEX.y += thick;
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	footprint = overcast_snow_footprint(world_pos);  // before any branch
+	if (thick < THIN) {
+		discard;
+	}
+	ALBEDO = overcast_snow_albedo(world_pos);
+	ROUGHNESS = 0.75;
+	SPECULAR = 0.35;
+	if (contours) {
+		float t = clamp(thick / 1.5, 0.0, 1.0);
+		vec3 c = mix(vec3(0.55, 0.65, 0.9), vec3(0.95, 0.85, 0.2), smoothstep(0.0, 0.5, t));
+		c = mix(c, vec3(0.9, 0.15, 0.1), smoothstep(0.5, 1.0, t));
+		float d = thick / contour;
+		float line = 1.0 - smoothstep(0.0, 1.5 * fwidth(d), abs(d - round(d)));
+		ALBEDO = mix(c, vec3(0.05), line);
+	}
+}
+
+// Lit as the ground's snow is (demo/ground.gdshader), so the two meet without a seam: the clouds
+// take their share off the sun, and it glints.
+void light() {
+	float shade = LIGHT_IS_DIRECTIONAL ? cloud_sunlight(world_pos) : 1.0;
+	float lit = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	DIFFUSE_LIGHT += lit * ATTENUATION * LIGHT_COLOR / PI * shade;
+	SPECULAR_LIGHT += lit * ATTENUATION * LIGHT_COLOR * shade
+		* overcast_snow_glint(world_pos, 1.0, footprint, NORMAL, VIEW, LIGHT);
+}

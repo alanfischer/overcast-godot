@@ -169,6 +169,67 @@ func test_snow_falls_as_flakes_and_lies() -> void:
 	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "and gone, it leaves none behind")
 
 
+## 30 m by 20 m of open ground at 0, a cell a metre, with a wall 2 m high across it at x 10.
+func _walled_floor() -> RainFloor:
+	var img := Image.create_empty(30, 20, false, Image.FORMAT_RF)
+	img.fill_rect(Rect2i(10, 4, 1, 12), Color(2.0, 0, 0))
+	return RainFloor.create(img, Vector3.ZERO, Vector2(30, 20), 10.0)
+
+
+func test_snow_drifts_behind_a_wall_in_a_wind() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _walled_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.wind = Vector3(10, 0, 0)
+	w.settle()
+	w.bake_drifts()
+	var drifts: MeshInstance3D = w.get_node("SnowDrifts")
+	assert_true(drifts.top_level, "drawn in the world, wherever the weather is")
+	assert_true(drifts.visible, "while the snow lies")
+	var mesh: ArrayMesh = drifts.mesh
+	assert_true(mesh != null, "a heap behind the wall")
+	var raise := 0.0
+	var uvs: PackedVector2Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV]
+	var verts: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	for c in verts.size():
+		if verts[c].distance_to(Vector3(11.5, 0, 10.5)) < 0.1:
+			raise = uvs[c].x
+	assert_gt(raise, 0.8, "heaped deep against its lee (%s m over the even layer)" % raise)
+	assert_true(mesh.custom_aabb.end.y >= raise, "and its bounds reach the top of the heap")
+	w.rain = 0.0
+	w._process(w.melt_time * 2.0)
+	assert_false(drifts.visible, "melted, nothing is drawn")
+
+
+func test_snow_drifts_bake_off_the_main_thread_as_the_wind_turns() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _walled_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.settle()
+	for i in 200:
+		w._process(0.05)
+		if w._drift_task < 0 and w.has_node("SnowDrifts"):
+			break
+		OS.delay_msec(5)
+	assert_true(w.has_node("SnowDrifts"), "baked for the floor once snow lies")
+	assert_eq(w.get_node("SnowDrifts").mesh, null, "in a calm nothing heaps up past the even layer")
+	w.wind = Vector3(10, 0, 0)
+	w._process(0.05)
+	assert_eq(w._drift_task, -1, "a new wind waits to hold")
+	for i in 400:
+		w._process(0.05)
+		if w._drift_task < 0 and w.get_node("SnowDrifts").mesh != null:
+			break
+		OS.delay_msec(5)
+	assert_true(w.get_node("SnowDrifts").mesh != null, "then the drifts are baked again for it")
+
+
 func test_a_snow_storm_greys_the_sky_pale() -> void:
 	var w := _weather()
 	_keep(w)

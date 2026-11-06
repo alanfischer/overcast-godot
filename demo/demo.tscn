@@ -95,7 +95,7 @@ text = "Volumetric clouds"
 [node name="Drifts" type="CheckBox" parent="UI/Panel/Box"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Snow drifts (debug)"
+text = "Drift depth (debug)"
 
 [node name="TimeLabel" type="Label" parent="UI/Panel/Box"]
 layout_mode = 2

@@ -22,29 +22,11 @@ const LEE_SLOPE := 1.0 / 7.0
 const WINDWARD_FILL := 0.5
 const WINDWARD_SLOPE := 0.4
 const SIDE_SLOPE := 0.7
-## debug_mesh's snow is red this deep, with a contour every DEBUG_CONTOUR metres of depth.
-const DEBUG_RED := 1.5
-const DEBUG_CONTOUR := 0.25
-const DEBUG_SHADER := """
-shader_type spatial;
-render_mode cull_disabled;
-uniform float red;
-uniform float contour;
-varying float depth;
-void vertex() {
-	depth = UV.x;
-}
-void fragment() {
-	float t = clamp(depth / red, 0.0, 1.0);
-	vec3 c = mix(vec3(0.55, 0.65, 0.9), vec3(0.95, 0.85, 0.2), smoothstep(0.0, 0.5, t));
-	c = mix(c, vec3(0.9, 0.15, 0.1), smoothstep(0.5, 1.0, t));
-	float d = depth / contour;
-	float line = 1.0 - smoothstep(0.0, 1.5 * fwidth(d), abs(d - round(d)));
-	ALBEDO = mix(c, vec3(0.05), line * step(0.5, d));
-	ROUGHNESS = 1.0;
-}
-"""
-
+## Snow less than this over the even layer is the even layer (stored as 32-bit floats, it is a hair
+## over it).
+const HEAPED := 0.01
+## Ground this much higher or lower than a cell beside it is another surface: a wall, a roof.
+const SAME_GROUND := 0.1
 
 ## Metres of snow on each cell of `rain_floor` once it has all settled, FORMAT_RF, laid out as the
 ## floor's image is. `depth` is the even layer a calm leaves; `wind` the steady wind (y ignored).
@@ -152,40 +134,81 @@ static func _sweep(solid: PackedFloat32Array, dims: Vector2i, cell: Vector2, dir
 	return surface
 
 
-## A mesh of the snow `drift` (bake) lays on `rain_floor`, in world space, coloured by how deep it
-## is: blue shallow, yellow, then red at DEBUG_RED metres and deeper, with contours. To see a bake.
-static func debug_mesh(rain_floor: OvercastRainFloor, drift: Image) -> ArrayMesh:
+## Mesh arrays (Mesh.ARRAY_*) for the snow `drift` (bake) heaps above the even layer `layer` on
+## `rain_floor`, which the ground's own snow already draws. Vertices lie on the ground, in world
+## space, with each one's depth over the layer in UV.x for shaders/drift.gdshader to raise it by;
+## heaps are rounded off, and run up to the walls they lie against. No faces where none heaps up.
+## Safe off the main thread; surface_mesh makes the mesh.
+static func surface_arrays(rain_floor: OvercastRainFloor, drift: Image, layer: float) -> Array:
 	var dims := rain_floor.image.get_size()
 	var w := dims.x
 	var h := dims.y
 	var cell := rain_floor.size / Vector2(dims)
-	var depths := _floats(drift, Image.FORMAT_RF)
-	var tops := _floats(rain_floor.image, Image.FORMAT_RF)
+	var ground := _floats(rain_floor.image, Image.FORMAT_RF)
+	var extra := _floats(drift, Image.FORMAT_RF)
 	for c in w * h:
-		tops[c] += depths[c]
-	# Neighbours further apart than this are on different surfaces (a roof's edge over the ground).
+		extra[c] = 0.0 if extra[c] < layer + HEAPED else extra[c] - layer
+	for _round in 2:
+		var rounded := extra.duplicate()
+		for j in h:
+			for i in w:
+				var c := j * w + i
+				var sum := 0.0
+				var count := 0
+				for nj in range(maxi(j - 1, 0), mini(j + 2, h)):
+					for ni in range(maxi(i - 1, 0), mini(i + 2, w)):
+						var o := nj * w + ni
+						if absf(ground[o] - ground[c]) < SAME_GROUND:
+							sum += extra[o]
+							count += 1
+				rounded[c] = sum / count
+		extra = rounded
+	# A wall's cell takes the deepest heap beside it, so the heap meets the wall's face rather than
+	# stopping a cell short of it. The wall hides the rest.
+	var base := ground.duplicate()
+	var raised := extra.duplicate()
+	for j in h:
+		for i in w:
+			var c := j * w + i
+			if extra[c] > 0.0:
+				continue
+			var best := -INF
+			for nj in range(maxi(j - 1, 0), mini(j + 2, h)):
+				for ni in range(maxi(i - 1, 0), mini(i + 2, w)):
+					var o := nj * w + ni
+					if extra[o] > 0.0 and ground[o] < ground[c] - SAME_GROUND and ground[o] + extra[o] > best:
+						best = ground[o] + extra[o]
+						base[c] = ground[o]
+						raised[c] = extra[o]
+	var tops := base.duplicate()
+	for c in w * h:
+		tops[c] += raised[c]
 	var jump := 1.5 * maxf(cell.x, cell.y)
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var uvs := PackedVector2Array()
+	verts.resize(w * h)
+	normals.resize(w * h)
+	uvs.resize(w * h)
 	for j in h:
 		for i in w:
 			var c := j * w + i
 			var y := tops[c]
-			verts.append(Vector3(rain_floor.origin.x + (i + 0.5) * cell.x, y, rain_floor.origin.z + (j + 0.5) * cell.y))
+			verts[c] = Vector3(rain_floor.origin.x + (i + 0.5) * cell.x, base[c], rain_floor.origin.z + (j + 0.5) * cell.y)
+			uvs[c] = Vector2(raised[c], 0.0)
 			var dx := (_near(tops, c + 1, y, jump) if i + 1 < w else y) - (_near(tops, c - 1, y, jump) if i > 0 else y)
 			var dz := (_near(tops, c + w, y, jump) if j + 1 < h else y) - (_near(tops, c - w, y, jump) if j > 0 else y)
-			normals.append(Vector3(-dx / (2.0 * cell.x), 1.0, -dz / (2.0 * cell.y)).normalized())
-			uvs.append(Vector2(depths[c], 0.0))
+			normals[c] = Vector3(-dx / (2.0 * cell.x), 1.0, -dz / (2.0 * cell.y)).normalized()
 	var indices := PackedInt32Array()
 	for j in h - 1:
 		for i in w - 1:
 			var a := j * w + i
 			for tri in [[a, a + 1, a + w], [a + 1, a + w + 1, a + w]]:
-				var lo := minf(tops[tri[0]], minf(tops[tri[1]], tops[tri[2]]))
-				var hi := maxf(tops[tri[0]], maxf(tops[tri[1]], tops[tri[2]]))
-				var deep := maxf(depths[tri[0]], maxf(depths[tri[1]], depths[tri[2]]))
-				if hi - lo <= jump and deep > 0.01:
+				if raised[tri[0]] <= 0.0 and raised[tri[1]] <= 0.0 and raised[tri[2]] <= 0.0:
+					continue
+				var lo := minf(base[tri[0]], minf(base[tri[1]], base[tri[2]]))
+				var hi := maxf(base[tri[0]], maxf(base[tri[1]], base[tri[2]]))
+				if hi - lo <= jump:
 					indices.append_array(tri)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
@@ -193,16 +216,23 @@ static func debug_mesh(rain_floor: OvercastRainFloor, drift: Image) -> ArrayMesh
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
+	return arrays
+
+
+## The mesh of surface_arrays, drawn with `material` (shaders/drift.gdshader); none if it has no
+## faces. Its bounds reach as high as the snow will heap.
+static func surface_mesh(arrays: Array, material: Material) -> ArrayMesh:
+	if (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).is_empty():
+		return null
 	var mesh := ArrayMesh.new()
-	if indices.is_empty():
-		return mesh
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var mat := ShaderMaterial.new()
-	mat.shader = Shader.new()
-	mat.shader.code = DEBUG_SHADER
-	mat.set_shader_parameter("red", DEBUG_RED)
-	mat.set_shader_parameter("contour", DEBUG_CONTOUR)
-	mesh.surface_set_material(0, mat)
+	mesh.surface_set_material(0, material)
+	var deepest := 0.0
+	for uv in arrays[Mesh.ARRAY_TEX_UV] as PackedVector2Array:
+		deepest = maxf(deepest, uv.x)
+	var bounds := mesh.get_aabb()
+	bounds.size.y += deepest
+	mesh.custom_aabb = bounds
 	return mesh
 
 

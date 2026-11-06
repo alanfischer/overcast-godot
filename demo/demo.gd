@@ -5,7 +5,6 @@ extends Node3D
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
 const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
-const Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
 const GroundShader = preload("res://demo/ground.gdshader")
 
 const FIELD := 120.0
@@ -26,9 +25,6 @@ var sky: SkyScript
 var _surfaces := {}
 var _yaw := 0.0
 var _pitch := 0.15
-var _drifts: MeshInstance3D
-## Seconds until the drifts are baked again for a wind that has moved; none pending below 0.
-var _drifts_due := -1.0
 
 
 func _ready() -> void:
@@ -50,10 +46,9 @@ func _ready() -> void:
 
 	rain_slider.value_changed.connect(_set_falling.unbind(1))
 	snow_slider.value_changed.connect(_set_falling.unbind(1))
-	%Wind.value_changed.connect(func(v: float) -> void:
-		weather.wind = Vector3(v, 0.0, v * 0.4)
-		_drifts_due = 0.3)
-	%Drifts.toggled.connect(func(_on: bool) -> void: _show_drifts())
+	%Wind.value_changed.connect(func(v: float) -> void: weather.wind = Vector3(v, 0.0, v * 0.4))
+	%Drifts.toggled.connect(func(on: bool) -> void:
+		weather.drift_material.set_shader_parameter("contours", on))
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)
@@ -116,26 +111,7 @@ func _set_time(hours: float) -> void:
 	sky.time_of_day = hours  # the weather turns the sun, and lights its rain, to match
 
 
-## The snow the wind would drift over the rain floor, drawn by depth, when Snow drifts is on.
-func _show_drifts() -> void:
-	_drifts_due = -1.0
-	if not %Drifts.button_pressed or weather.rain_floor == null:
-		if _drifts:
-			_drifts.visible = false
-		return
-	if not _drifts:
-		_drifts = MeshInstance3D.new()
-		_drifts.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(_drifts)
-	_drifts.mesh = Drift.debug_mesh(weather.rain_floor, Drift.bake(weather.rain_floor, weather.wind))
-	_drifts.visible = true
-
-
 func _process(delta: float) -> void:
-	if _drifts_due >= 0.0:
-		_drifts_due -= delta
-		if _drifts_due < 0.0:
-			_show_drifts()
 	# The eye stops down over a snowfield, as a game would by weather.snow_lying.
 	$WorldEnvironment.environment.tonemap_exposure = lerpf(1.0, 0.75, weather.snow_lying)
 	if weather.cycle:  # 20x, in the scene: a shower every half minute or so

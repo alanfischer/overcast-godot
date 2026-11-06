@@ -118,6 +118,11 @@ and go on their own.
   goes, and through doorways, while walls, posts and roofs stop it and a lee stays dry. A floor
   without `under` (made by `create`, or baked before it existed) takes all it holds as solid to
   the ground, as do moving covers. `floor_at()` and the rain sound go straight down.
+- **`OvercastSnowDrift`** (in progress) bakes, from a rain floor and the steady wind, how deep snow
+  lies once it has all settled, per cell: an even layer in a calm; in a wind, scoured thin in the
+  open, drifted deep in the lee of whatever stands solid from the ground up (a roof on posts lets
+  the wind through) and banked on its windward side. Nothing draws it yet but `debug_mesh()`,
+  which the demo's **Snow drifts** switch shows over a fence.
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor
   wherever it goes, so each cell takes the highest of it over that cell: something rotated,

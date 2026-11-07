@@ -1,7 +1,8 @@
 class_name OvercastCycle
 extends RefCounted
 ## Weather that comes and goes on its own: showers of a few minutes that swell, wander and die
-## away, with dry spells between. rain_at(t) is the rain `t` seconds in, for OvercastWeather.rain;
+## away, with dry spells between, and a wind that rises, falls and turns, blowing harder in them.
+## rain_at(t) and wind_at(t) are the weather `t` seconds in, for OvercastWeather.rain and .wind;
 ## the same seed gives the same weather, so peers that share one agree without talking.
 
 ## Dry spell between showers, and how long one lasts (s).
@@ -13,9 +14,20 @@ const PEAK := Vector2(0.1, 1.0)
 const RAMP := 30.0
 ## How far the rain wanders below its peak mid-shower.
 const WANDER := 0.4
+## Wind between showers (m/s), from near still to a breeze, and how much a shower adds at its
+## peak by how hard it rains.
+const BREEZE := Vector2(0.5, 5.0)
+const SHOWER_WIND := 6.0
+## How far the wind turns either way from where it prevails (rad), and the seconds its speed and
+## its direction take to wander.
+const TURN := PI * 0.5
+const WIND_WANDER := 90.0
+const TURN_WANDER := 600.0
 
 var _rng := RandomNumberGenerator.new()
 var _noise := FastNoiseLite.new()
+var _wind_noise := FastNoiseLite.new()
+var _prevailing := 0.0
 var _start := 0.0
 var _end := 0.0
 var _peak := 0.0
@@ -30,6 +42,11 @@ func _init(rng_seed: int = 0) -> void:
 	_noise.seed = _rng.randi()
 	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_noise.frequency = 1.0 / 40.0
+	# Off the rain's seed rather than another draw, so a seed keeps the showers it had.
+	_wind_noise.seed = _noise.seed + 1
+	_wind_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_wind_noise.frequency = 1.0
+	_prevailing = posmod(hash(_noise.seed), 3600) / 3600.0 * TAU
 	restart()
 
 
@@ -47,10 +64,28 @@ func _plan(after: float) -> void:
 
 ## Rain at `t` seconds since restart(): 0 between showers. Times must not go backwards.
 func rain_at(t: float) -> float:
-	while t >= _end:
-		_plan(_end)
+	_reach(t)
 	if t <= _start:
 		return 0.0
-	var envelope := smoothstep(0.0, RAMP, t - _start) * smoothstep(0.0, RAMP, _end - t)
 	var wander := 1.0 - WANDER * (0.5 + 0.5 * _noise.get_noise_1d(t))
-	return maxf(_peak * envelope * wander, 0.01)
+	return maxf(_peak * _envelope(t) * wander, 0.01)
+
+
+## Wind across the ground at `t` seconds since restart() (m/s). Times must not go backwards.
+func wind_at(t: float) -> Vector3:
+	_reach(t)
+	var rise := smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / WIND_WANDER))
+	var speed := lerpf(BREEZE.x, BREEZE.y, rise) + SHOWER_WIND * _peak * _envelope(t)
+	var angle := _prevailing + TURN * _wind_noise.get_noise_2d(t / TURN_WANDER, 100.0)
+	return Vector3(sin(angle), 0.0, cos(angle)) * speed
+
+
+func _reach(t: float) -> void:
+	while t >= _end:
+		_plan(_end)
+
+
+func _envelope(t: float) -> float:
+	if t <= _start:
+		return 0.0
+	return smoothstep(0.0, RAMP, t - _start) * smoothstep(0.0, RAMP, _end - t)

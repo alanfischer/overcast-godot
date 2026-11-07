@@ -185,6 +185,8 @@ const SUN_STORM_SHADOW := 0.88
 	set(v):
 		cycle_seed = v
 		_cycle = null
+## Whether the showers bring their own wind too, overriding `wind`.
+@export var cycle_wind := true
 ## How much faster than real time the showers pass.
 @export_range(0.0, 100.0, 0.1, "or_greater") var cycle_speed := 1.0
 
@@ -1151,6 +1153,8 @@ func _process(delta: float) -> void:
 			_cycle = Cycle.new(cycle_seed)
 		cycle_time += delta * cycle_speed
 		rain = _cycle.rain_at(cycle_time)
+		if cycle_wind:
+			wind = _cycle.wind_at(cycle_time)
 	storm = move_toward(storm, _storm_target(), STORM_RATE * delta)
 	# Snow hardly ever thunders: strikes come with the rain in it.
 	if rainfall() > 0.0 and lightning and times_strikes and not _editor:

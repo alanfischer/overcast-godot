@@ -114,6 +114,8 @@ const BOLT_HEIGHT := Vector2(1.1, 1.7)
 const SOUND_SPEED := 340.0
 ## How far a full storm dims `sun` when there is no sky to say (OvercastSky.storm_shadow).
 const SUN_STORM_SHADOW := 0.88
+## How far under where rain stops ground still takes it (rains_on).
+const GROUND_REACH := 1.0
 
 ## How hard it is raining: 0 dry, from a drizzle just above 0 to a downpour at 1. Past 1 only the
 ## number of drops keeps rising.
@@ -304,6 +306,13 @@ var bolt_drawer: Callable
 var snow_lying: float:
 	get:
 		return _snow_lying
+## How wet the ground is, 0 dry to 1 soaked (overcast_wetness), as rain soaks it and it dries: on a
+## headless server too. Set it to agree with another peer; it soaks and dries on from there.
+var wetness: float:
+	get:
+		return _wetness
+	set(value):
+		_wetness = clampf(value, 0.0, 1.0)
 ## How far the sky has closed over, 0 to 1: follows the rain at STORM_RATE.
 var storm := 0.0
 ## Seconds into the showers (cycle). Peers that share cycle_seed and this agree on the rain; set
@@ -939,6 +948,13 @@ func rain_exposure(ears: Vector3) -> float:
 	return hit / total
 
 
+## Whether rain falls on the ground at world point `p`, straight down (the wind's slant aside). A
+## cell stops rain at the highest of its corners, so ground up to GROUND_REACH under that still
+## counts: a slope, a stair. With `wetness`, how wet the ground is there, for gameplay.
+func rains_on(p: Vector3) -> bool:
+	return floor_at(p) < p.y + GROUND_REACH
+
+
 ## Where rain stops at world XZ `q`, covers included: off the floor INF, where no rain falls, or
 ## -INF with rain_beyond_floor; -INF with no floor.
 func floor_at(q: Vector3) -> float:
@@ -1074,13 +1090,12 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 
 ## Soaks and dries the ground, settles and melts the snow, and hands wet surfaces the sky they
 ## reflect, lightning included. Pushed only when the state moves by a step the screen can show.
-func _update_wet(delta: float, reflected: Color) -> void:
-	_update_snow(delta)
-	var falling := snappedf(heaviness(rainfall()), 1.0 / 255.0)
-	if falling != _rainfall_pushed:
-		_rainfall_pushed = falling
-		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_rainfall", falling)
+## Soaks and dries the ground, and lays and melts the snow on it; drawn or not.
+func _weather_ground(delta: float) -> void:
+	if _settling() and lying_snow:
+		_snow_lying = move_toward(_snow_lying, 1.0, lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time * delta)
+	else:
+		_snow_lying = move_toward(_snow_lying, 0.0, (1.0 + 3.0 * heaviness(rainfall())) / melt_time * delta)
 	# Melting snow keeps the ground under it wet.
 	var melting := _snow_lying > 0.0 and not _settling()
 	var wet_target := 1.0 if (rainfall() > 0.0 or melting) and wet_ground else 0.0
@@ -1089,6 +1104,15 @@ func _update_wet(delta: float, reflected: Color) -> void:
 		(lerpf(0.35, 1.0, puddle_target) / soak_time if wet_target > _wetness else 1.0 / dry_time) * delta)
 	_puddles = move_toward(_puddles, puddle_target,
 		(1.0 / puddle_time if puddle_target > _puddles else 1.0 / puddle_dry_time) * delta)
+
+
+func _update_wet(reflected: Color) -> void:
+	_update_snow()
+	var falling := snappedf(heaviness(rainfall()), 1.0 / 255.0)
+	if falling != _rainfall_pushed:
+		_rainfall_pushed = falling
+		_globals_owner = get_instance_id()
+		Globals.set_value("overcast_rainfall", falling)
 	var state := Vector4(_wetness, _puddles, reflected.get_luminance(), _flash_k).snapped(Vector4.ONE / 255.0)
 	if state == _wet_pushed:
 		return
@@ -1100,11 +1124,7 @@ func _update_wet(delta: float, reflected: Color) -> void:
 	Globals.set_value("overcast_rain_sky", Vector3(srgb.r, srgb.g, srgb.b))
 
 
-func _update_snow(delta: float) -> void:
-	if _settling() and lying_snow:
-		_snow_lying = move_toward(_snow_lying, 1.0, lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time * delta)
-	else:
-		_snow_lying = move_toward(_snow_lying, 0.0, (1.0 + 3.0 * heaviness(rainfall())) / melt_time * delta)
+func _update_snow() -> void:
 	var lying := snappedf(_snow_lying, 1.0 / 255.0)
 	if lying == _snow_pushed:
 		return
@@ -1164,6 +1184,9 @@ func _process(delta: float) -> void:
 			var strike_seed := randi()
 			strike(strike_seed)
 			struck.emit(strike_seed)
+	var on_ground := rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0
+	if on_ground:
+		_weather_ground(delta)
 	if not presenting:
 		return
 	var drawn := current_sky()
@@ -1211,11 +1234,11 @@ func _process(delta: float) -> void:
 	var drop_light := light * DROP_LIGHT + SKY_FLASH * _flash_k * DROP_FLASH
 	_update_drops(drop_light)
 	_update_flakes(light * FLAKE_COLOR + SKY_FLASH * _flash_k * DROP_FLASH)
-	if _haze or rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0:
+	if _haze or on_ground:
 		var haze_color := _haze_base(drawn, light) + SKY_FLASH * _flash_k * HAZE_FLASH
 		if _haze:
 			_update_haze(delta, haze_color, drop_light)
-		_update_wet(delta, haze_color)
+		_update_wet(haze_color)
 	_update_drifts(delta)
 
 

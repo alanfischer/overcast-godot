@@ -150,7 +150,10 @@ Overcast has no networking of its own; you sync two things.
    derive from the seed, so every peer sees the same strike.
 
 A headless server draws nothing, but `floor_at(point)` still answers where rain stops there,
-moving covers included, for gameplay that cares whether something is out in the rain.
+moving covers included, for gameplay that cares whether something is out in the rain. It soaks and
+dries the ground too: for gameplay on wet ground (a slick floor), send the server's `wetness` and
+ask `rains_on(point)` on both ends. Each peer soaks its own from when it joined, so set a client's
+`wetness` to the server's when they part.
 
 ## Lighting the scene
 

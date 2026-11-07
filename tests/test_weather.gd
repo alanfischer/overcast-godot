@@ -370,6 +370,39 @@ func test_a_headless_peer_answers_with_its_covers() -> void:
 	assert_eq(w._live.texture, null, "with no texture to upload")
 
 
+func test_a_headless_peer_soaks_and_dries_the_ground() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _roofed_floor()
+	w.rain = 1.0
+	w._process(w.soak_time / 2.0)
+	assert_almost_eq(w.wetness, 0.5, 1e-4, "a server soaks the ground as a client does")
+	w.rain = 0.0
+	w._process(w.dry_time / 4.0)
+	assert_almost_eq(w.wetness, 0.25, 1e-4, "and dries it")
+	w.wetness = 2.0
+	assert_eq(w.wetness, 1.0, "set from another peer, it is held to 0..1")
+	w._process(w.dry_time / 2.0)
+	assert_almost_eq(w.wetness, 0.5, 1e-4, "and dries on from there")
+
+
+func test_rain_falls_on_open_ground_and_not_under_the_roof() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _roofed_floor()
+	assert_true(w.rains_on(Vector3(1, 0, 0)), "open ground takes rain")
+	assert_true(w.rains_on(Vector3(1, -0.9, 0)), "as does ground a little under the floor: a slope")
+	assert_false(w.rains_on(Vector3(-1, 0, 0)), "ground under the roof does not")
+	assert_true(w.rains_on(Vector3(-1, 3, 0)), "the roof does")
+	assert_false(w.rains_on(Vector3(5, 0, 0)), "nor off the floor")
+	w.rain_beyond_floor = true
+	assert_true(w.rains_on(Vector3(5, 0, 0)), "unless rain falls beyond it")
+
+
 func test_the_rain_takes_the_skys_light() -> void:
 	var w := _weather()
 	_keep(w)

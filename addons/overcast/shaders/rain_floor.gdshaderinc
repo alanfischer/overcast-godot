@@ -35,6 +35,10 @@ const int RAIN_SLANT_TAPS = 7;
 const float RAIN_SLANT_UP = 5.0;
 const float RAIN_SLANT_REACH = 3.0;
 const float RAIN_SHELTER_DEPTH = 3.0;
+// A surface's walk reads the floor's height blended between cells, and lets rain fade in over the
+// top RAIN_EDGE metres of what it would stop on, so the edge of a wind shadow is a smooth line and
+// not a staircase of cells.
+const float RAIN_EDGE = 0.15;
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
 
 // Where world point p falls on the rain floor.
@@ -59,32 +63,56 @@ bool rain_open_above(vec3 p) {
 	return p.y > textureLod(overcast_rain_floor, uv, 0.0).r;
 }
 
+// The height rain falls to at uv, blended between the four cells around it.
+float rain_floor_smooth(vec2 uv) {
+	ivec2 res = textureSize(overcast_rain_floor, 0);
+	vec2 texel = uv * vec2(res) - 0.5;
+	ivec2 cell = ivec2(floor(texel));
+	vec2 f = fract(texel);
+	vec4 h;
+	for (int i = 0; i < 4; i++) {
+		h[i] = texelFetch(overcast_rain_floor, clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
+	}
+	return mix(mix(h.x, h.y, f.x), mix(h.z, h.w, f.x), f.y);
+}
+
 // Where q is for rain slanting through it: in the open (over whatever catches rain there), in the
 // air under cover, or in something solid. `roofed`: whether q's column has air under cover at all.
+// `soft`: the floor's height blended (rain_floor_smooth), and `edge` how near the top of the
+// solid q is in, 1 at it to 0 RAIN_EDGE under; 0 without `soft`.
 const int RAIN_OPEN = 0;
 const int RAIN_SHELTERED = 1;
 const int RAIN_SOLID = 2;
-int rain_place(vec3 q, out bool roofed) {
+int rain_place(vec3 q, bool soft, out bool roofed, out float edge) {
 	roofed = false;
+	edge = 0.0;
 	vec2 uv = rain_floor_uv(q);
 	if (!rain_floor_covers(uv)) {
 		return RAIN_OPEN;  // the slant only adds what is there to catch it
 	}
 	vec2 gap = textureLod(overcast_rain_under, uv, 0.0).rg;
 	roofed = gap.x > gap.y;
-	if (q.y > textureLod(overcast_rain_floor, uv, 0.0).r) {
+	float top = soft ? rain_floor_smooth(uv) : textureLod(overcast_rain_floor, uv, 0.0).r;
+	if (q.y > top) {
 		return RAIN_OPEN;
 	}
-	return q.y > gap.y && q.y < gap.x ? RAIN_SHELTERED : RAIN_SOLID;
+	if (q.y > gap.y && q.y < gap.x) {
+		return RAIN_SHELTERED;
+	}
+	if (soft) {
+		edge = clamp((q.y - top) / RAIN_EDGE + 1.0, 0.0, 1.0);
+	}
+	return RAIN_SOLID;
 }
 
 // Whether the slanted line from `a` (in the air under cover) to `b` (in the open) came out past the
 // roof's edge rather than up through the roof: looked at between them, where it would be in the
 // roof if it went through it.
-bool rain_slant_exits(vec3 a, vec3 b) {
+bool rain_slant_exits(vec3 a, vec3 b, bool soft) {
 	for (int i = 1; i <= 2; i++) {
 		bool roofed;
-		int at = rain_place(mix(a, b, float(i) / 3.0), roofed);
+		float edge;
+		int at = rain_place(mix(a, b, float(i) / 3.0), soft, roofed, edge);
 		if (at == RAIN_SOLID || (at == RAIN_OPEN && roofed)) {
 			return false;
 		}
@@ -92,12 +120,19 @@ bool rain_slant_exits(vec3 a, vec3 b) {
 	return true;
 }
 
-// How much of the rain slanting in on the wind reaches p, 0 to 1, by the walk described above.
-float rain_slant_reach(vec3 p, vec2 slant) {
+// How much of the rain slanting in on the wind reaches p, 0 to 1, by the walk described above;
+// `soft` for a surface (see RAIN_EDGE).
+float rain_slant_reach(vec3 p, vec2 slant, bool soft) {
 	bool roofed;
-	int was = rain_place(p, roofed);
+	float edge;
+	int was = rain_place(p, soft, roofed, edge);
+	float lit = 1.0;  // the least of what the edges it grazed let through
 	if (was == RAIN_SOLID) {
-		return 0.0;
+		if (edge <= 0.0) {
+			return 0.0;
+		}
+		lit = edge;
+		was = RAIN_OPEN;
 	}
 	float len = length(slant);
 	float up = min(RAIN_SLANT_UP, RAIN_SLANT_REACH / max(len, 1e-4));
@@ -109,11 +144,15 @@ float rain_slant_reach(vec3 p, vec2 slant) {
 	for (int i = 0; i < RAIN_SLANT_TAPS; i++) {
 		float s = up * (float(i) + wander) / float(RAIN_SLANT_TAPS);
 		vec3 q = p + vec3(-slant.x * s, s, -slant.y * s);
-		int now = rain_place(q, roofed);
+		int now = rain_place(q, soft, roofed, edge);
 		if (now == RAIN_SOLID) {
-			return 0.0;
+			if (edge <= 0.0) {
+				return 0.0;
+			}
+			lit = min(lit, edge);
+			now = RAIN_OPEN;
 		}
-		if (was == RAIN_SHELTERED && now == RAIN_OPEN && (roofed || !rain_slant_exits(last, q))) {
+		if (was == RAIN_SHELTERED && now == RAIN_OPEN && (roofed || !rain_slant_exits(last, q, soft))) {
 			return 0.0;  // down through the roof
 		}
 		if (inside) {
@@ -127,7 +166,7 @@ float rain_slant_reach(vec3 p, vec2 slant) {
 	if (inside) {
 		return 0.0;  // under cover as far as the wind carries it: none comes this far in
 	}
-	return exp(-under / RAIN_SHELTER_DEPTH);
+	return lit * exp(-under / RAIN_SHELTER_DEPTH);
 }
 
 // How much of the rain reaches world point p in the air, 0 to 1: everywhere with no floor, off it
@@ -143,7 +182,7 @@ float rain_reaches_air(vec3 p) {
 	if (overcast_rain_slant == vec2(0.0)) {
 		return p.y > textureLod(overcast_rain_floor, uv, 0.0).r ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p, overcast_rain_slant);
+	return rain_slant_reach(p, overcast_rain_slant, false);
 }
 
 // Whether rain falling past world point p, slanted by the wind, has not yet been caught.
@@ -181,7 +220,7 @@ float rain_reaches_along(vec3 p, vec2 slant) {
 	if (!rain_floor_covers(uv)) {
 		return overcast_rain_beyond_floor ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p, slant);
+	return rain_slant_reach(p, slant, true);
 }
 
 // A rain floor cell's size in metres, x and z.

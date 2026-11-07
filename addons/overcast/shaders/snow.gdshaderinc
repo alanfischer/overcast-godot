@@ -32,8 +32,9 @@ float overcast_snow_amount(vec3 world_pos, vec3 world_normal) {
 	// Asked a wandering way off, so where cover keeps it off the edge is ragged, blown in here and
 	// short there, not the roof's outline.
 	vec2 warp = vec2(overcast_vnoise(q * 0.9 + 5.3), overcast_vnoise(q * 0.9 + 11.7)) - 0.5;
+	vec3 off = vec3(warp.x * 0.9, rain_slope_lift(world_normal, abs(warp) * 0.9), warp.y * 0.9);
 	float s = overcast_snow_cover * snow_scale * slope
-		* rain_reaches(world_pos + world_normal * 0.02 + vec3(warp.x, 0.0, warp.y) * 0.9);
+		* rain_reaches(world_pos + world_normal * 0.02 + off);
 	if (s <= 0.0) {
 		return 0.0;
 	}

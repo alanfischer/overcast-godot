@@ -184,6 +184,22 @@ float rain_reaches_along(vec3 p, vec2 slant) {
 	return rain_slant_reach(p, slant);
 }
 
+// A rain floor cell's size in metres, x and z.
+vec2 rain_floor_cell() {
+	return overcast_rain_floor_size / vec2(max(textureSize(overcast_rain_floor, 0), ivec2(1)));
+}
+
+// How far to raise a point on a slope with this normal before asking whether rain reaches it. A
+// cell holds the highest ground anywhere in it, so the rest of a sloped cell lies under its own
+// height and would read as solid, cell by cell. `span`: how far, per axis, the point asked about
+// has been moved off the surface sideways, which a slope also drops.
+float rain_slope_lift(vec3 normal, vec2 span) {
+	if (!overcast_has_rain_floor || normal.y <= 0.0) {
+		return 0.0;
+	}
+	return dot(abs(normal.xz), rain_floor_cell() + span) / normal.y;
+}
+
 // 1 where rain has reached world point p on a surface, 0 under cover; in wind, along its slant, so
 // it blows in under eaves and open shelters and leaves a dry lee, which follow a turning wind over
 // time (overcast_ground_shift). Everywhere, with no floor.

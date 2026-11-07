@@ -47,13 +47,16 @@ vec2 overcast_ripple_slope(vec2 xz) {
 }
 
 // How wet the surface at world_pos is (x), and how much of it is puddle (y). A ceiling stays dry;
-// a wall asks about the air half a metre out from it, and takes less.
+// a wall asks about the air a cell and a half out from it (clear of the cells the wall's top is
+// in, even on the diagonal), and takes less.
 vec2 overcast_wet_amount(vec3 world_pos, vec3 world_normal) {
 	if (overcast_wetness <= 0.0 || world_normal.y < -0.3) {
 		return vec2(0.0);
 	}
-	float reach = world_normal.y > 0.3 ? rain_reaches(world_pos + world_normal * 0.02)
-		: rain_reaches(world_pos + world_normal * 0.5) * 0.6;
+	vec2 cell = rain_floor_cell();
+	float reach = world_normal.y > 0.3
+		? rain_reaches(world_pos + world_normal * 0.02 + vec3(0.0, rain_slope_lift(world_normal, vec2(0.0)), 0.0))
+		: rain_reaches(world_pos + world_normal * 1.5 * max(cell.x, cell.y)) * 0.6;
 	float wet = overcast_wetness * reach;
 	float pool = 0.0;
 	if (wet > 0.0 && world_normal.y > 0.95) {

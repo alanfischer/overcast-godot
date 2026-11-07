@@ -133,7 +133,8 @@ and go on their own.
   work too. A cover that only slides reuses its raster, and turning ones share out a per-tick
   budget. A hidden cover keeps nothing off. Drops, haze, wet ground and rain sound all follow it.
 - **Showers:** turn on the weather's `cycle` and rain comes and goes on its own, building,
-  wandering and dying away (`OvercastCycle`). The same `cycle_seed` gives the same weather.
+  wandering and dying away (`OvercastCycle`), in a wind that rises, falls and slowly turns and
+  blows harder in a shower (`cycle_wind`). The same `cycle_seed` gives the same weather.
 - **Tuning** that a game would want to change is in the inspector: haze, drop and flake counts,
   how fast ground soaks and dries and snow settles and melts, the gaps between strikes, how dark cloud shadows are, how high the
   clouds sit.

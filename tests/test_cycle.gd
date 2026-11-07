@@ -1,5 +1,5 @@
 extends "res://tests/suite.gd"
-## Showers of a few minutes with dry spells between, never a jump in the rain.
+## Showers of a few minutes with dry spells between, never a jump in the rain or the wind.
 
 const Cycle = preload("res://addons/overcast/overcast_cycle.gd")
 
@@ -38,11 +38,48 @@ func test_showers_come_and_go() -> void:
 	assert_true(worst_step < 0.02, "the rain never jumps (worst %.4f per %.2f s)" % [worst_step, dt])
 
 
+func test_the_wind_rises_falls_and_turns() -> void:
+	var cycle := Cycle.new(1234)
+	var dt := 0.25
+	var calm := INF
+	var hardest := 0.0
+	var worst_step := 0.0
+	var widest_turn := 0.0
+	var dry_mean := Vector2.ZERO  # sum, count
+	var wet_mean := Vector2.ZERO
+	var prevailing := cycle.wind_at(0.0)
+	var last := prevailing
+	var flat := true
+	var t := 0.0
+	while t < 3.0 * 3600.0:
+		t += dt
+		var r := cycle.rain_at(t)
+		var w := cycle.wind_at(t)
+		flat = flat and w.y == 0.0
+		var speed := w.length()
+		calm = minf(calm, speed)
+		hardest = maxf(hardest, speed)
+		worst_step = maxf(worst_step, w.distance_to(last))
+		widest_turn = maxf(widest_turn, absf(Vector2(w.x, w.z).angle_to(Vector2(prevailing.x, prevailing.z))))
+		if r > 0.0:
+			wet_mean += Vector2(speed, 1.0)
+		else:
+			dry_mean += Vector2(speed, 1.0)
+		last = w
+	assert_true(flat, "the wind blows across the ground")
+	assert_true(calm < 1.5 and hardest > 6.0, "the wind rises and falls (%.1f..%.1f m/s)" % [calm, hardest])
+	assert_true(hardest <= Cycle.BREEZE.y + Cycle.SHOWER_WIND * Cycle.PEAK.y + 0.01, "and no harder than a gale")
+	assert_true(widest_turn > 0.3 and widest_turn < 2.0 * Cycle.TURN,
+		"it turns, and keeps roughly to where it prevails (%.2f rad)" % widest_turn)
+	assert_gt(wet_mean.x / wet_mean.y, dry_mean.x / dry_mean.y + 1.0, "showers blow harder")
+	assert_true(worst_step < dt, "the wind never jumps, at most 1 m/s a second (worst %.4f per %.2f s)" % [worst_step, dt])
+
+
 func test_one_seed_one_weather() -> void:
 	var a := Cycle.new(77)
 	var b := Cycle.new(77)
 	for t in range(0, 7200, 5):
-		if a.rain_at(t) != b.rain_at(t):
+		if a.rain_at(t) != b.rain_at(t) or a.wind_at(t) != b.wind_at(t):
 			assert_true(false, "two cycles on one seed part at %d s" % t)
 			return
 	assert_true(true, "two cycles on one seed agree for two hours")

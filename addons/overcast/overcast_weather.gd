@@ -239,6 +239,8 @@ const GROUND_REACH := 1.0
 ## its own over the ground's snow (OvercastSnowDrift). Baked off the main thread from the rain
 ## floor, and again when the steady wind turns.
 @export var snow_drifts := true
+## The deepest a drift starts against a wall or a cliff (m); it slopes away downwind from there.
+@export_range(0.3, 5.0, 0.05, "or_greater", "suffix:m") var drift_deepest := Drift.DEEPEST
 ## Flakes around the camera at the lightest snow and at a blizzard.
 @export_range(0, 100000, 100) var flakes_light := 8000
 @export_range(0, 100000, 100) var flakes_heavy := 50000
@@ -631,7 +633,7 @@ func bake_drifts() -> void:
 		return
 	_drift_floor = rain_floor
 	_drift_wind = Vector3(wind.x, 0.0, wind.z)
-	_drift_target = _drifted(rain_floor, _drift_wind)
+	_drift_target = _drifted(rain_floor, _drift_wind, drift_deepest)
 	_field.set_target(_drift_target)
 	_field_drifted = true
 	_field.fill(_snow_lying)
@@ -643,8 +645,8 @@ func _drifting() -> bool:
 
 
 ## The snow `rain_floor` holds once it has all settled in `wind`, rounded off.
-static func _drifted(source: OvercastRainFloor, steady: Vector3) -> PackedFloat32Array:
-	return Drift.rounded(source, Drift.bake(source, steady, DRIFT_LAYER).get_data().to_float32_array())
+static func _drifted(source: OvercastRainFloor, steady: Vector3, deepest: float) -> PackedFloat32Array:
+	return Drift.rounded(source, Drift.bake(source, steady, DRIFT_LAYER, deepest).get_data().to_float32_array())
 
 
 ## Shows the drifts while snow lies, and bakes them again for a new floor, or a wind that has
@@ -686,8 +688,9 @@ func _update_drifts(delta: float) -> void:
 	var source := rain_floor
 	var lying := _field.depth.duplicate()
 	var bare := _field.bare_cells().duplicate()
+	var deepest := drift_deepest
 	_drift_task = WorkerThreadPool.add_task(func() -> void:
-		var drifted := _drifted(source, steady)
+		var drifted := _drifted(source, steady, deepest)
 		var heap := drifted.duplicate()
 		for i in heap.size():
 			heap[i] = maxf(heap[i], lying[i])

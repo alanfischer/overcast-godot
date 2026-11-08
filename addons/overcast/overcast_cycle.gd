@@ -71,11 +71,13 @@ func rain_at(t: float) -> float:
 	return maxf(_peak * _envelope(t) * wander, 0.01)
 
 
-## Wind across the ground at `t` seconds since restart() (m/s). Times must not go backwards.
-func wind_at(t: float) -> Vector3:
+## Wind across the ground at `t` seconds since restart() (m/s), blowing harder in a shower, or
+## without `showers` only the breeze between them: for a wind that comes and goes on its own while
+## the rain is set some other way. Times must not go backwards.
+func wind_at(t: float, showers := true) -> Vector3:
 	_reach(t)
 	var rise := smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / WIND_WANDER))
-	var speed := lerpf(BREEZE.x, BREEZE.y, rise) + SHOWER_WIND * _peak * _envelope(t)
+	var speed := lerpf(BREEZE.x, BREEZE.y, rise) + (SHOWER_WIND * _peak * _envelope(t) if showers else 0.0)
 	var angle := _prevailing + TURN * _wind_noise.get_noise_2d(t / TURN_WANDER, 100.0)
 	return Vector3(sin(angle), 0.0, cos(angle)) * speed
 

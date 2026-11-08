@@ -21,6 +21,9 @@ const LEE_FILL := 0.85
 const LEE_SLOPE := 1.0 / 7.0
 const WINDWARD_FILL := 0.5
 const WINDWARD_SLOPE := 0.4
+## The deepest a drift starts against what it lies by (m), however tall: a cliff's lee drifts as a
+## wall's does, not a heap of most of its height.
+const DEEPEST := 1.5
 const SIDE_SLOPE := 0.7
 ## Snow less than this over the even layer is the even layer (stored as 32-bit floats, it is a hair
 ## over it).
@@ -66,7 +69,7 @@ static func _floats(img: Image, format: Image.Format) -> PackedFloat32Array:
 
 
 ## The snow surface a wind along `dir` drifts over `solid` (heights, row by row): each cell sheds
-## `fill` of its height over the lowest ground beside it, falling `slope` a metre along `dir` and
+## `fill` of its height (DEEPEST at most) over the lowest ground beside it, falling `slope` a metre along `dir` and
 ## SIDE_SLOPE a metre across it, and keeps the highest of what reaches it. Worked on a grid turned
 ## to the wind, where each fall is taken exactly a row or a column at a time, then read back.
 static func _sweep(solid: PackedFloat32Array, dims: Vector2i, cell: Vector2, dir: Vector2,
@@ -82,7 +85,7 @@ static func _sweep(solid: PackedFloat32Array, dims: Vector2i, cell: Vector2, dir
 			for nj in range(maxi(j - 1, 0), mini(j + 2, h)):
 				for ni in range(maxi(i - 1, 0), mini(i + 2, w)):
 					foot = minf(foot, solid[nj * w + ni])
-			seeds[j * w + i] = foot + (g - foot) * fill
+			seeds[j * w + i] = foot + minf((g - foot) * fill, DEEPEST)
 	# The turned grid: u along dir and v across it, from the floor's middle, in square cells `c`;
 	# cell (a, b) is turned[b * nu + a], its middle at u0 + (a + 0.5) c, v0 + (b + 0.5) c.
 	var c := minf(cell.x, cell.y)

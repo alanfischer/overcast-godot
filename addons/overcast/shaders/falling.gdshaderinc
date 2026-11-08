@@ -11,6 +11,9 @@ uniform vec3 box = vec3(36.0, 24.0, 36.0);
 // How far the wind has carried them all, wrapped into the box (OvercastWeather integrates it, so a
 // gust that changes the wind moves them on from where they are).
 uniform vec3 drift = vec3(0.0);
+// Metres they have fallen at their speed, wrapped (OvercastWeather integrates it too, so a change of
+// speed does not jump them by the change times the clock).
+uniform float fallen = 0.0;
 // Drawn over the rain haze (rain_haze.gdshader), which would haze one by the distance to the wall
 // behind it; this hazes it by its own.
 uniform float haze_density = 0.0;
@@ -22,10 +25,10 @@ vec4 overcast_fall_hash(uint n) {
 	return vec4(v) / 4294967295.0;
 }
 
-// Where `start` (a point in the unit box) has fallen to after falling `fallen` metres and drifting
+// Where `start` (a point in the unit box) has fallen to after falling `down` metres and drifting
 // with the wind, wrapped into the box around `cam`.
-vec3 overcast_fall_place(vec3 start, float fallen, vec3 cam) {
-	vec3 p = start * box + drift - vec3(0.0, fallen, 0.0);
+vec3 overcast_fall_place(vec3 start, float down, vec3 cam) {
+	vec3 p = start * box + drift - vec3(0.0, down, 0.0);
 	return cam + mod(p - cam + box * 0.5, box) - box * 0.5;
 }
 

@@ -94,6 +94,10 @@ const SPLASH_BOX := 28.0
 ## Flakes fill a smaller box: they are slow, and far off too small to see. FLAKE_COLOR is theirs in
 ## full daylight.
 const FLAKE_BOX := Vector3(24.0, 16.0, 24.0)
+## Metres fallen are wrapped at this; the far rain's carry at FAR_WRAP, where its grid repeats
+## (rain_haze.gdshader's CELL * WRAP_CELLS).
+const FALL_WRAP := 16384.0
+const FAR_WRAP := 0.9 * 1024.0
 const FLAKE_COLOR := Color(0.95, 0.96, 1.0)
 ## Snow hazes the distance less than rain, into the pale sky a snow storm draws; with no sky, into
 ## SNOW_HAZE_COLOR in the scene's light. Flakes range from FLAKE_DIM of their light to all of it,
@@ -378,6 +382,13 @@ var _drop_drift := Vector3.ZERO
 var _flake_drift := Vector3.ZERO
 var _drop_fall := 9.0
 var _flake_fall := 1.0
+var _far_fall := 9.0
+## How far they have fallen, and the far rain been carried: integrated, so a change of speed moves
+## them on from where they are.
+var _drop_fallen := 0.0
+var _flake_fallen := 0.0
+var _far_fallen := 0.0
+var _far_carried := Vector2.ZERO
 var _wetness := 0.0
 var _puddles := 0.0
 var _snow_lying := 0.0
@@ -891,7 +902,7 @@ func _set_far(full: float, opacity: float, fall_speed: float, length: float, wid
 		gap: float) -> void:
 	_haze_material.set_shader_parameter("presence", clampf(full, 0.15, 1.0))
 	_haze_material.set_shader_parameter("streak_opacity", opacity * maxf(full, 1.0) if full > 0.0 else 0.0)
-	_haze_material.set_shader_parameter("fall_speed", fall_speed)
+	_far_fall = fall_speed
 	_haze_material.set_shader_parameter("streak_length", length)
 	_haze_material.set_shader_parameter("streak_width", width)
 	_haze_material.set_shader_parameter("streak_gap", gap)
@@ -911,7 +922,6 @@ func _refresh_flakes() -> void:
 	var heavy := heaviness(amount)
 	# Flakes drift down at about a metre a second; a blizzard's are bigger and wetter, and faster.
 	_flake_fall = lerpf(0.8, 1.5, heavy)
-	_flake_material.set_shader_parameter("fall_speed", _flake_fall)
 	_flake_material.set_shader_parameter("flake_size", lerpf(0.018, 0.03, heavy))
 	_flake_material.set_shader_parameter("opacity", lerpf(0.8, 0.95, heavy))
 	_flake_material.set_shader_parameter("dim", FLAKE_DIM)
@@ -1066,9 +1076,13 @@ func _blow(delta: float) -> void:
 		* maxf(1.0 + swing * gustiness * GUST_SWING, 0.0)
 	_drop_drift = (_drop_drift + _wind_now * delta).posmodv(DROP_BOX)
 	_flake_drift = (_flake_drift + _wind_now * delta).posmodv(FLAKE_BOX)
+	_drop_fallen = fposmod(_drop_fallen + _drop_fall * delta, FALL_WRAP)
+	_flake_fallen = fposmod(_flake_fallen + _flake_fall * delta, FALL_WRAP)
 	_drop_material.set_shader_parameter("drift", _drop_drift)
+	_drop_material.set_shader_parameter("fallen", _drop_fallen)
 	_drop_material.set_shader_parameter("wind", _wind_now)
 	_flake_material.set_shader_parameter("drift", _flake_drift)
+	_flake_material.set_shader_parameter("fallen", _flake_fallen)
 	# Roofs keep rain off by the steady wind, not each gust: wet ground does not flicker with it.
 	var fall := _flake_fall if snowfall() > rainfall() else _drop_fall
 	var slant := (Vector2(wind.x, wind.z) / fall).snapped(Vector2.ONE / 64.0)
@@ -1112,8 +1126,12 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 		return
 	# Kept in [0, 1) rather than driven off TIME, which loses precision as it grows.
 	_gust_offset = (_gust_offset + (GUST_DRIFT + _wind_now) * delta / GUST_CELL).posmod(1.0)
-	var fall := _flake_fall if _far_snow() else _drop_fall
-	_haze_material.set_shader_parameter("slant", Vector2(_wind_now.x, _wind_now.z) / fall)
+	var blow := Vector2(_wind_now.x, _wind_now.z)
+	_far_fallen = fposmod(_far_fallen + _far_fall * delta, FALL_WRAP)
+	_far_carried = (_far_carried + blow * delta).posmod(FAR_WRAP)
+	_haze_material.set_shader_parameter("fallen", _far_fallen)
+	_haze_material.set_shader_parameter("carried", _far_carried)
+	_haze_material.set_shader_parameter("slant", blow / _far_fall)
 	_haze_material.set_shader_parameter("gust_offset", _gust_offset)
 	_haze_material.set_shader_parameter("density", density)
 	_drop_material.set_shader_parameter("haze_density", density)

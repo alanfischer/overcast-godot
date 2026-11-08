@@ -4,9 +4,9 @@ extends "res://tests/suite.gd"
 
 const SHADERS := {
 	"res://addons/overcast/shaders/sky.gdshader": ["zenith_color", "storm", "snowy", "flash_color", "cloud_amount"],
-	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "fall_speed", "wind", "drift", "haze_density"],
-	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "fall_speed", "drift", "haze_density", "flake_size", "opacity", "flash"],
-	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap", "slant"],
+	"res://addons/overcast/shaders/rain.gdshader": ["color", "box", "fall_speed", "fallen", "wind", "drift", "haze_density"],
+	"res://addons/overcast/shaders/snow.gdshader": ["color", "box", "fallen", "drift", "haze_density", "flake_size", "opacity", "flash"],
+	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap", "slant", "fallen", "carried"],
 	"res://addons/overcast/shaders/drift.gdshader": ["contours", "contour"],
 	"res://addons/overcast/shaders/splash.gdshader": ["color", "box", "haze_density", "opacity", "flash", "puddle_scale"],
 }

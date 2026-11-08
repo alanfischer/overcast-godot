@@ -989,6 +989,28 @@ func test_the_moon_comes_up_from_nothing() -> void:
 		assert_lt(worst, 0.03, "the sun's light never jumps between %d:00 and %d:00 (%.3f)" % [from, from + 3, worst])
 
 
+func test_the_fall_and_the_far_rain_move_on_from_where_they_are() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain = 0.2
+	w.wind = Vector3(3.0, 0.0, 0.0)
+	w.gustiness = 0.0
+	w._process(0.5)
+	var fallen: float = w._drop_material.get_shader_parameter("fallen")
+	assert_almost_eq(fallen, w._drop_fall * 0.5, 1e-4, "the drops fall at their speed")
+	var carried: Vector2 = w._haze_material.get_shader_parameter("carried")
+	assert_lt(carried.distance_to(Vector2(1.5, 0.0)), 1e-4, "and the wind carries the far rain, as the near (%s)" % carried)
+	w.rain = 1.0
+	w._process(0.1)
+	assert_almost_eq(w._drop_material.get_shader_parameter("fallen"), fallen + w._drop_fall * 0.1, 1e-4,
+		"heavier, they fall faster from where they were, with no jump")
+	for i in 1000:
+		w._process(0.5)
+	carried = w._haze_material.get_shader_parameter("carried")
+	assert_true(carried.x >= 0.0 and carried.x < Weather.FAR_WRAP, "wrapped where the far grid repeats (%s)" % carried)
+
+
 func test_the_wind_carries_the_rain_and_gusts() -> void:
 	var w := _weather()
 	_keep(w)

@@ -23,9 +23,10 @@ void vertex() {
 	vec3 cam = INV_VIEW_MATRIX[3].xyz;
 	// Most drops are fine, a few are big: those fall faster, and catch more light.
 	float size = g.x * g.x * g.x;
-	float speed = fall_speed * mix(0.85, 1.2, size) * mix(0.95, 1.05, h.w);
+	float pace = mix(0.85, 1.2, size) * mix(0.95, 1.05, h.w);
+	float speed = fall_speed * pace;
 	float len = streak_length * mix(0.75, 1.25, size);
-	vec3 p = overcast_fall_place(h.xyz, speed * TIME, cam);
+	vec3 p = overcast_fall_place(h.xyz, fallen * pace, cam);
 	fade = overcast_fall_fade(p, cam, p - vec3(0.0, len * 0.5, 0.0)) * mix(0.5, 1.8, size);
 	if (fade <= 0.0) {
 		VERTEX = vec3(0.0);  // nothing to see: a zero-area quad, which draws no pixels at all

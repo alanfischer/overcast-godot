@@ -246,10 +246,24 @@ func _walled_floor() -> RainFloor:
 	return RainFloor.create(img, Vector3.ZERO, Vector2(30, 20), 10.0)
 
 
+## The ground and wall of _walled_floor, as meshes for `w`'s drifts to lie on.
+func _walled_ground(w: Weather) -> void:
+	var level := Node3D.new()
+	for box: AABB in [AABB(Vector3(0, -1, 0), Vector3(30, 1, 20)), AABB(Vector3(10, 0, 4), Vector3(1, 2, 12))]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = BoxMesh.new()
+		mi.mesh.size = box.size
+		mi.position = box.get_center()
+		level.add_child(mi)
+	_root().add_child(_keep(level))
+	w.drift_ground = level
+
+
 func test_snow_drifts_behind_a_wall_in_a_wind() -> void:
 	var w := _weather()
 	_keep(w)
 	w.rain_floor = _walled_floor()
+	_walled_ground(w)
 	_root().add_child(w)
 	w.rain = 1.0
 	w.snow = 1.0
@@ -273,10 +287,32 @@ func test_snow_drifts_behind_a_wall_in_a_wind() -> void:
 	assert_eq(w.snow_depth_at(Vector3(11.5, 0, 10.5)), 0.0, "and none lies")
 
 
+func test_snow_drifts_lie_on_the_meshes_beside_the_weather_by_default() -> void:
+	var level := Node3D.new()
+	var ground := MeshInstance3D.new()
+	ground.mesh = BoxMesh.new()
+	ground.mesh.size = Vector3(30, 1, 20)
+	ground.position = Vector3(15, -0.5, 10)
+	level.add_child(ground)
+	var w := _weather()
+	w.rain_floor = _walled_floor()
+	level.add_child(w)
+	_root().add_child(_keep(level))
+	w.rain = 1.0
+	w.snow = 1.0
+	w.wind = Vector3(10, 0, 0)
+	w.settle()
+	w.bake_drifts()
+	var mesh: ArrayMesh = w.get_node("SnowDrifts").mesh
+	assert_true(mesh != null, "on the ground beside it, with no drift_ground set")
+	assert_eq(w._ground_faces().size(), 36, "a box's faces, and none of the weather's own")
+
+
 func test_snow_drifts_bake_off_the_main_thread_as_the_wind_turns() -> void:
 	var w := _weather()
 	_keep(w)
 	w.rain_floor = _walled_floor()
+	_walled_ground(w)
 	_root().add_child(w)
 	w.rain = 1.0
 	w.snow = 1.0
@@ -303,6 +339,7 @@ func test_the_snow_comes_round_to_a_turned_wind() -> void:
 	var w := _weather()
 	_keep(w)
 	w.rain_floor = _walled_floor()
+	_walled_ground(w)
 	_root().add_child(w)
 	w.rain = 1.0
 	w.snow = 1.0
@@ -320,12 +357,14 @@ func test_the_snow_comes_round_to_a_turned_wind() -> void:
 			break
 		OS.delay_msec(5)
 	assert_eq(w._drift_task, -1, "baked again for the west wind")
-	var uvs: PackedVector2Array = w.get_node("SnowDrifts").mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV]
-	var has := {}
-	for uv in uvs:
-		has[uv] = true
-	assert_true(has.has(Vector2(11, 10)) and has.has(Vector2(8, 10)),
-		"the mesh reaches over the old drift and the new")
+	var arrays: Array = w.get_node("SnowDrifts").mesh.surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var near := func(at: Vector3) -> bool:
+		for i: int in arrays[Mesh.ARRAY_INDEX]:
+			if Vector2(verts[i].x - at.x, verts[i].z - at.z).length() < 0.6:
+				return true
+		return false
+	assert_true(near.call(east) and near.call(west), "the mesh reaches over the old drift and the new")
 	for i in 100:
 		w._process(w.snow_time / 100.0)
 	assert_lt(w.snow_depth_at(east), deep - 0.5, "the old drift worn down")
@@ -337,6 +376,7 @@ func test_snowless_boxes_hold_for_every_floor() -> void:
 	_keep(w)
 	w.add_snowless(AABB(Vector3(20, -1, 0), Vector3(5, 2, 20)))
 	w.rain_floor = _walled_floor()
+	_walled_ground(w)
 	_root().add_child(w)
 	w.rain = 1.0
 	w.snow = 1.0
@@ -352,6 +392,7 @@ func test_a_melt_digs_out_the_snow() -> void:
 	var w := _weather()
 	_keep(w)
 	w.rain_floor = _walled_floor()
+	_walled_ground(w)
 	_root().add_child(w)
 	w.rain = 1.0
 	w.snow = 1.0

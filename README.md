@@ -133,9 +133,14 @@ and go on their own.
   the depths from the rain floor and the steady wind, on a worker thread, again whenever the wind
   turns by 1 m/s and holds for a second; the field comes round to them as fast as snow settles,
   and the weather draws what heaps past the even layer as a surface of its own
-  (`shaders/drift.gdshader`), lit as the ground's snow is. A game that lights its world its own
-  way (lightmaps, say) sets `drift_material.shader` to its own, calling `overcast_drift()` from
-  `shaders/drift.gdshaderinc` in `vertex()` for the shape. `bake_drifts()` bakes them at once. The
+  (`shaders/drift.gdshader`), lit as the ground's snow is. That surface lies on the level's own
+  faces: the meshes under `drift_ground` (the weather's parent if unset), where they face up and
+  rain reaches them, laid once per floor on the worker thread. So a drift ends where its ledge
+  does, with a side flush with the ledge's face, rather than at the rain floor's cells; a game
+  leaves out meshes that are not ground (a liquid's surface) by overriding `_drifts_on()`. A game
+  that lights its world its own way (lightmaps, say) sets `drift_material.shader` to its own,
+  calling `overcast_drift(VERTEX, NORMAL, UV, CUSTOM0, UV2.x)` from `shaders/drift.gdshaderinc` in
+  `vertex()` for the shape. `bake_drifts()` bakes them at once. The
   drift material's `contours` colour them by depth, to tune by (the demo's **Drift depth** switch).
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor

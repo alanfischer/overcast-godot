@@ -2,7 +2,6 @@ extends "res://tests/suite.gd"
 
 const RainFloor = preload("res://addons/overcast/overcast_rain_floor.gd")
 const Field = preload("res://addons/overcast/overcast_snow_field.gd")
-const Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
 
 const LAYER := 0.3
 
@@ -83,27 +82,6 @@ func test_a_melt_keeps_to_what_lies_near_its_height() -> void:
 	f.melt(Vector3(2.5, 0.2, 4.5), 2.0)
 	assert_almost_eq(f.depth_at(Vector3(1.5, 3, 4.5)), LAYER, 1e-6, "the roof 3 m over a blast on the ground keeps its snow")
 	assert_eq(f.depth_at(Vector3(2.5, 0, 4.5)), 0.0, "the ground beside it does not")
-
-
-func test_the_drift_mesh_reads_its_cells_from_the_field() -> void:
-	var img := Image.create_empty(10, 8, false, Image.FORMAT_RF)
-	img.fill_rect(Rect2i(4, 0, 1, 8), Color(2.0, 0, 0))
-	var rf := RainFloor.create(img, Vector3.ZERO, Vector2(10, 8), 10.0)
-	var heap := PackedFloat32Array()
-	heap.resize(80)
-	heap.fill(LAYER)
-	for j in 8:
-		heap[j * 10 + 5] = 1.2  # heaped against the wall's lee
-	var baked := Drift.surface_arrays(rf, heap, LAYER)
-	var arrays: Array = baked[0]
-	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
-	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	assert_eq(uvs[3 * 10 + 5], Vector2(5, 3), "a heaped cell rises by its own snow")
-	assert_eq(uvs[3 * 10 + 4].x, 5.0, "the wall's cell by the heap beside it")
-	assert_almost_eq(verts[3 * 10 + 4].y, 0.0, 1e-6, "from that heap's ground, so it meets the wall's face")
-	assert_almost_eq(baked[1], 1.2 - LAYER, 1e-6, "as deep as it heaps over the layer")
-	assert_false((arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).is_empty(), "faces where it heaps")
-
 
 
 func test_snow_is_kept_off_what_lies_in_a_snowless_box() -> void:

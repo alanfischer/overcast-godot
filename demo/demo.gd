@@ -1,6 +1,6 @@
 extends Node3D
 ## A field, a few huts and the weather over them. Drag to look, WASD to walk, and the panel on the
-## left drives the rain and snow.
+## left drives the rain and how cold it is.
 
 const Weather = preload("res://addons/overcast/overcast_weather.gd")
 const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
@@ -17,7 +17,6 @@ const ROOF := ["weathered_brown_planks", 1.8]
 @onready var camera: Camera3D = $Camera3D
 @onready var weather: Weather = $Weather
 @onready var rain_slider: HSlider = %Rain
-@onready var snow_slider: HSlider = %Snow
 @onready var cycle_check: CheckBox = %Cycle
 
 ## The sky in the scene's WorldEnvironment, which the weather finds by itself.
@@ -45,7 +44,7 @@ func _ready() -> void:
 	weather.bake_rain_floor()
 
 	rain_slider.value_changed.connect(_set_falling.unbind(1))
-	snow_slider.value_changed.connect(_set_falling.unbind(1))
+	%Temperature.value_changed.connect(_set_temperature)
 	%Wind.value_changed.connect(func(v: float) -> void: weather.wind = Vector3(v, 0.0, v * 0.4))
 	%Drifts.toggled.connect(func(on: bool) -> void:
 		weather.drift_material.set_shader_parameter("contours", on))
@@ -97,14 +96,15 @@ func _add_hut(at: Vector3) -> void:
 	_add_box(Vector3(7.0, 0.3, 6.0), at + Vector3(0, 3.15, 0), _surface(ROOF))
 
 
-## The sliders are how much rain and how much snow; the weather takes how much falls in all
-## (`rain`) and the share of it that is snow (`snow`).
 func _set_falling() -> void:
 	cycle_check.button_pressed = false
-	var total := rain_slider.value + snow_slider.value
-	weather.rain = total
-	if total > 0.0:
-		weather.snow = snow_slider.value / total
+	weather.rain = rain_slider.value
+
+
+## Below freezing what falls is snow, and it lies.
+func _set_temperature(degrees: float) -> void:
+	weather.temperature = degrees
+	%TemperatureLabel.text = "Temperature %s °C" % degrees
 
 
 func _set_time(hours: float) -> void:
@@ -115,8 +115,7 @@ func _process(delta: float) -> void:
 	# The eye stops down over a snowfield, as a game would by weather.snow_lying.
 	$WorldEnvironment.environment.tonemap_exposure = lerpf(1.0, 0.75, weather.snow_lying)
 	if weather.cycle:  # 20x, in the scene: a shower every half minute or so
-		rain_slider.set_value_no_signal(weather.rainfall())
-		snow_slider.set_value_no_signal(weather.snowfall())
+		rain_slider.set_value_no_signal(weather.rain)
 	var move := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	for key in [[KEY_A, Vector2.LEFT], [KEY_D, Vector2.RIGHT], [KEY_W, Vector2.UP], [KEY_S, Vector2.DOWN]]:
 		if Input.is_physical_key_pressed(key[0]):

@@ -1,6 +1,6 @@
 extends SceneTree
-## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 SNOW=0.7 WIND=6 VOL=1 TIME=18.5 to vary
-## it (RAIN and SNOW as the demo's sliders: how much of each);
+## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 TEMP=-5 WIND=6 VOL=1 TIME=18.5 to
+## vary it (as the demo's sliders: how much falls, and degrees C);
 ## CLEARED=1 clears the sky over the settled weather.
 ##   godot --path . -s res://tools/screenshot.gd
 
@@ -23,8 +23,8 @@ func _run() -> void:
 	demo.get_node("%Rain").value = rain
 	if OS.get_environment("WIND") != "":
 		demo.get_node("%Wind").value = float(OS.get_environment("WIND"))
-	if OS.get_environment("SNOW") != "":
-		demo.get_node("%Snow").value = float(OS.get_environment("SNOW"))
+	if OS.get_environment("TEMP") != "":
+		demo.get_node("%Temperature").value = float(OS.get_environment("TEMP"))
 	for i in 20:
 		await physics_frame
 	var weather = demo.get_node("Weather")

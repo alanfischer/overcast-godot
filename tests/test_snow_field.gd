@@ -41,6 +41,16 @@ func test_snow_melts_away_when_it_stops() -> void:
 	assert_eq(f.depth_at(Vector3(5, 0, 4)), 0.0, "then all of it")
 
 
+func test_snow_holds_at_no_rate_and_melts_once_it_has_one() -> void:
+	var f := Field.new(_floor(), LAYER, false)
+	f.fill(1.0)
+	_run_for(f, 20.0, false, 0.0)
+	assert_almost_eq(f.depth_at(Vector3(5, 0, 4)), LAYER, 1e-6, "still freezing, it holds")
+	assert_true(f.resting(), "and rests")
+	_run_for(f, 5.0, false, 0.1)
+	assert_almost_eq(f.depth_at(Vector3(5, 0, 4)), LAYER * 0.5, 0.02, "thawing, half gone in half the time")
+
+
 func test_a_drift_comes_round_to_a_new_wind() -> void:
 	var f := Field.new(_floor(), LAYER, false)
 	var drifted := f.target.duplicate()

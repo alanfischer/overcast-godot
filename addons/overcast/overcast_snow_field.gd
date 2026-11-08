@@ -35,6 +35,7 @@ var _row_time := PackedFloat64Array()
 var _clock := 0.0
 var _still_rows := 0  # rows in a row that a step left as they were
 var _settling := false
+var _moving := false
 var _dirty := false
 var _upload_in := 0.0
 
@@ -67,12 +68,16 @@ func resting() -> bool:
 
 
 ## A step's worth of time: while `settling`, each cell heaps up toward its target, else wears
-## away, `rate` of the most it held or heads for (at least the even layer) a second.
+## away, `rate` of the most it held or heads for (at least the even layer) a second. At a rate of
+## none it holds as it lies.
 func step(delta: float, settling: bool, rate: float) -> void:
 	_clock += delta
-	if settling != _settling:
+	if settling != _settling or (rate > 0.0) != _moving:
 		_settling = settling
+		_moving = rate > 0.0
 		_wake()
+	if not _moving:
+		_still_rows = dims.y
 	if not resting():
 		for k in mini(ceili(dims.y * delta / PASS), dims.y):
 			_step_row(_row, rate)

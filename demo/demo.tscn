@@ -57,15 +57,18 @@ layout_mode = 2
 max_value = 1.5
 step = 0.01
 
-[node name="SnowLabel" type="Label" parent="UI/Panel/Box"]
-layout_mode = 2
-text = "Snow"
-
-[node name="Snow" type="HSlider" parent="UI/Panel/Box"]
+[node name="TemperatureLabel" type="Label" parent="UI/Panel/Box"]
 unique_name_in_owner = true
 layout_mode = 2
-max_value = 1.5
-step = 0.01
+text = "Temperature 10 °C"
+
+[node name="Temperature" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = -10.0
+max_value = 15.0
+step = 0.5
+value = 10.0
 
 [node name="WindLabel" type="Label" parent="UI/Panel/Box"]
 layout_mode = 2

@@ -19,7 +19,7 @@ global shader uniforms, which every Overcast shader needs to compile.
 1. In your WorldEnvironment's Environment, set Background to Sky, and pick **New OvercastSky**
    as the Sky's material. Set its `sun_dir` to match your sun.
 2. Add an **OvercastWeather** node. Drag its box (`area`) to cover your level and press
-   **Bake Rain Floor**. Then drag `rain` up, and `snow` up to turn it to snow. The rain, the snow,
+   **Bake Rain Floor**. Then drag `rain` up, and `temperature` below freezing to turn it to snow. The rain, the snow,
    the storm closing over, wet and snowy ground and the lightning (**Strike**) all show in the
    editor. The node warns you if it has no sky or rain floor.
 3. For wet and snowy ground and cloud shadows, call `OvercastMaterials.watch($Level)` once the level is
@@ -33,11 +33,11 @@ var sky := OvercastSky.new({"cloud_amount": 0.4, "sun_dir": OvercastSky.sun_dir_
 $WorldEnvironment.environment = sky.make_environment()
 
 $OvercastWeather.rain = 0.6  # 0 dry … 1 a downpour; it finds the scene's sky by itself
-$OvercastWeather.snow = 1.0  # how much of it falls as snow: 0 rain, 1 snow, sleet between
+$OvercastWeather.temperature = -5.0  # °C: snow below -1, rain above 3, sleet between
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain, snow and the time of day, a lightning button, a volumetric-clouds switch, and a mode where showers come
+rain, temperature and the time of day, a lightning button, a volumetric-clouds switch, and a mode where showers come
 and go on their own.
 
 ## What's in it
@@ -77,7 +77,8 @@ and go on their own.
   `light()`. For a game with baked lighting, scale the sun's share of each lightmap texel
   instead.
 - **`OvercastWeather`** handles the rain and snow:
-  - drops or flakes in a box around the camera; `snow` says how much of `rain` falls as snow.
+  - drops or flakes in a box around the camera; `temperature` (°C) says how much of `rain`
+    falls as snow (`snow_share()`): all of it below -1 °C, none above 3 °C, sleet between.
     Flakes tumble, come in clumps as well as singly, and blur out of focus right at the eye.
     Most drops are fine and a few big; they show against the ground and hardly at all against
     the sky, as real rain does
@@ -96,8 +97,8 @@ and go on their own.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
     a dusting in patches first on what faces up, then a layer over all of it, never under a
-    roof, with a ragged edge where cover keeps it off. It settles while more snow falls than rain and melts, wetting the ground, once it
-    stops; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
+    roof, with a ragged edge where cover keeps it off. It settles while snow falls at or below freezing (0 °C), lies on
+    while it stays freezing, and melts, wetting the ground, once it is warmer; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
     `overcast_snow_glint()` in `light()` makes it glitter where the sun reaches it
     (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and
     `overcast_snow()` is the version for a shader that lights itself. The weather's
@@ -161,8 +162,8 @@ and go on their own.
 
 Overcast has no networking of its own; you sync two things.
 
-1. **Rain:** sync `rain`, `snow` and `wind`, or share `cycle_seed` and `cycle_time` (and `snow`
-   and `wind`). Gusts are each peer's own: they only sway what is drawn.
+1. **Rain:** sync `rain`, `temperature` and `wind`, or share `cycle_seed` and `cycle_time` (and
+   `temperature` and `wind`). Gusts are each peer's own: they only sway what is drawn.
 2. **Lightning:** let one peer time the strikes (`times_strikes = true`) and send the seed from
    `struck` to the others, which call `strike(seed)`. The bolt, flash direction and thunder all
    derive from the seed, so every peer sees the same strike.

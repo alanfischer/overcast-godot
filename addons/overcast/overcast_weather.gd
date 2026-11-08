@@ -3,7 +3,7 @@ class_name OvercastWeather
 extends Node3D
 ## Rain, snow and lightning: drops or flakes around the camera, haze and far rain where they are
 ## falling, wet ground, lying snow, rain sound that muffles under a roof, and a storm that closes the
-## sky over. Set `rain` (and `snow`) and it does the rest, over the scene's OvercastSky (or `sky`).
+## sky over. Set `rain` (and `temperature`) and it does the rest, over the scene's OvercastSky (or `sky`).
 ## It all shows in the editor.
 ##
 ## Roofs are a rain floor: press Bake Rain Floor in the inspector, or bake one at runtime
@@ -45,6 +45,10 @@ const FLASH_LENGTH := 0.6
 const STORM_LIGHT := 0.55
 ## Snow falls from a sky already closed over: even light snow takes it this far.
 const SNOW_STORM_LIGHT := 0.85
+## Degrees C over which what falls turns from all snow to all rain.
+const SLEET := Vector2(-1.0, 3.0)
+## Snow lies at this and below, and melts above it.
+const FREEZING := 0.0
 const STORM_RATE := 0.2
 ## Snow drifts: the even layer (m) a calm leaves, which the ground's own snow draws, and how far the
 ## steady wind (m/s) moves, held for DRIFT_WAIT seconds, before they are baked again.
@@ -130,11 +134,11 @@ const GROUND_REACH := 1.0
 		rain = maxf(value, 0.0)
 		if is_node_ready():
 			_refresh(was)
-## How much of what falls is snow: 0 all rain, 1 all snow, sleet between. `rain` is how much
-## falls either way.
-@export_range(0.0, 1.0, 0.01) var snow := 0.0:
+## Degrees C at the ground. What falls is snow below SLEET.x, rain above SLEET.y, sleet between;
+## snow lies while it is freezing (FREEZING and below), and melts once it is not.
+@export_range(-30.0, 40.0, 0.5, "or_less", "or_greater", "suffix:°C") var temperature := 10.0:
 	set(value):
-		snow = clampf(value, 0.0, 1.0)
+		temperature = value
 		if is_node_ready():
 			_refresh(rain)
 ## Wind across the ground, m/s (y is ignored): rain slants with it, snow is carried off on it, and
@@ -264,7 +268,7 @@ const GROUND_REACH := 1.0
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var puddle_time := 90.0
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var puddle_dry_time := 240.0
 ## Lying snow: seconds to cover the ground in a blizzard (longer in light snow), and to melt once
-## it stops (rain melts it four times as fast).
+## it is above freezing (rain melts it four times as fast).
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var snow_time := 90.0
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var melt_time := 600.0
 
@@ -341,7 +345,7 @@ var cycle_time := 0.0:
 var _cycle: Cycle
 var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
 var _sky_storm := Vector2(NAN, NAN)
-## How much of the storm is snow: follows `snow` at STORM_RATE, as the sky turns pale.
+## How much of the storm is snow: follows snow_share() at STORM_RATE, as the sky turns pale.
 var snowy := 0.0
 ## In the editor it draws, for a preview, but makes no sound, times no strikes and leaves the
 ## scene's own nodes (the sun) as they are saved.
@@ -642,7 +646,7 @@ func _push_floor() -> void:
 ## goes, the ground soaked or snowed over. For a scene that starts mid-shower, and for screenshots.
 func settle() -> void:
 	storm = _storm_target()
-	snowy = snow
+	snowy = snow_share()
 	_soak()
 	_ground_shift = 1.0
 	_ground_slant = Vector4.INF
@@ -803,27 +807,39 @@ func _soak() -> void:
 	if soaks:
 		_wetness = 1.0 if rainfall() > 0.0 else 0.0
 	_puddles = heaviness(rainfall())
-	_snow_lying = 1.0 if _settling() else 0.0
+	if _settling():
+		_snow_lying = 1.0
+	elif not _freezing():
+		_snow_lying = 0.0
 	if _field:
 		_field.fill(_snow_lying)
 
 
+## How much of what falls is snow at `temperature`: 0 all rain, 1 all snow, sleet between.
+func snow_share() -> float:
+	return 1.0 - smoothstep(SLEET.x, SLEET.y, temperature)
+
+
 ## How much of `rain` falls as rain, and how much as snow.
 func rainfall() -> float:
-	return rain * (1.0 - snow)
+	return rain * (1.0 - snow_share())
 
 
 func snowfall() -> float:
-	return rain * snow
+	return rain * snow_share()
 
 
-## Snow lies while more of it falls than rain.
+func _freezing() -> bool:
+	return temperature <= FREEZING
+
+
+## Snow lies while it falls on freezing ground.
 func _settling() -> bool:
-	return snow > 0.5 and rain > 0.0
+	return _freezing() and snowfall() > 0.0
 
 
 func _storm_target() -> float:
-	return 0.0 if rain <= 0.0 else lerpf(lerpf(STORM_LIGHT, SNOW_STORM_LIGHT, snow), 1.0, heaviness(rain))
+	return 0.0 if rain <= 0.0 else lerpf(lerpf(STORM_LIGHT, SNOW_STORM_LIGHT, snow_share()), 1.0, heaviness(rain))
 
 
 ## Something that moves and keeps rain off what is under it: a lift, a train, a drawbridge, a
@@ -946,7 +962,7 @@ static func _fill(mmi: MultiMeshInstance3D, light: int, heavy: int, amount: floa
 
 ## Whether the far streaks are snow's flakes rather than rain's: when more of it is snow.
 func _far_snow() -> bool:
-	return snow >= 0.5
+	return snow_share() >= 0.5
 
 
 ## The far rain or snow, past the box (rain_haze.gdshader): `full` is how full its slots are.
@@ -1203,10 +1219,13 @@ func _snow_settles() -> bool:
 	return _settling() and lying_snow
 
 
-## How fast snow lies or melts, of all of it a second.
+## How fast snow lies or melts, of all of it a second: none while it holds, freezing with none
+## falling.
 func _snow_rate() -> float:
 	if _snow_settles():
 		return lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time
+	if _freezing() and lying_snow:
+		return 0.0
 	return (1.0 + 3.0 * heaviness(rainfall())) / melt_time
 
 
@@ -1214,7 +1233,7 @@ func _snow_rate() -> float:
 func _weather_ground(delta: float) -> void:
 	_snow_lying = move_toward(_snow_lying, 1.0 if _snow_settles() else 0.0, _snow_rate() * delta)
 	# Melting snow keeps the ground under it wet.
-	var melting := _snow_lying > 0.0 and not _settling()
+	var melting := _snow_lying > 0.0 and not _freezing()
 	var wet_target := 1.0 if (rainfall() > 0.0 or melting) and wet_ground else 0.0
 	var puddle_target := heaviness(rainfall()) if wet_ground else 0.0
 	if soaks:
@@ -1311,7 +1330,7 @@ func _process(delta: float) -> void:
 	if not presenting:
 		return
 	var drawn := current_sky()
-	snowy = move_toward(snowy, snow, STORM_RATE * delta)
+	snowy = move_toward(snowy, snow_share(), STORM_RATE * delta)
 	if drawn and (drawn.get_instance_id() != _sky_told or Vector2(storm, snowy) != _sky_storm):
 		drawn.storm = storm
 		drawn.snowy = snowy

@@ -27,6 +27,7 @@ const Cycle = preload("res://addons/overcast/overcast_cycle.gd")
 const Globals = preload("res://addons/overcast/overcast_globals.gd")
 const Live = preload("res://addons/overcast/rain_floor_live.gd")
 const Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
+const Field = preload("res://addons/overcast/overcast_snow_field.gd")
 
 ## Lightning's light at the peak of a strike, as linear light added to the sky's.
 const FLASH := Vector3(2.0, 2.1, 2.6)
@@ -349,13 +350,13 @@ var _live := Live.new()
 ## The drifts' material (shaders/drift.gdshader): its `contours` show how deep they are.
 var drift_material: ShaderMaterial
 var _drifts: MeshInstance3D
-var _drifts_was: MeshInstance3D  # the drifts of the wind before, wearing away as _drifts heap up
-var _drift_shift := 1.0
+var _field: Field  # the snow lying on the rain floor, cell by cell; none undrawn
+var _field_drifted := false  # its target is a wind's drifts, not the even layer
+var _drift_target := PackedFloat32Array()
 var _drift_floor: OvercastRainFloor  # what the drifts were baked for, and in what wind
 var _drift_wind := Vector3.INF
 var _drift_wait := DRIFT_WAIT
 var _drift_task := -1
-var _drift_turning := false  # the bake under way is for the drifts' own floor, in a new wind
 var _drift_arrays := []
 var _rain_db := 0.0
 var _exposure := 1.0
@@ -496,7 +497,8 @@ func _exit_tree() -> void:
 		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor",
 				"overcast_rain_under", "overcast_rain_floor_origin",
 				"overcast_rain_floor_size", "overcast_rain_top", "overcast_wetness", "overcast_puddles",
-				"overcast_rain_sky", "overcast_snow_cover", "overcast_rainfall", "overcast_rain_slant",
+				"overcast_rain_sky", "overcast_snow_cover", "overcast_has_snow_field",
+				"overcast_snow_field", "overcast_rainfall", "overcast_rain_slant",
 				"overcast_ground_slant", "overcast_ground_shift"]:
 			Globals.reset(key)
 
@@ -575,6 +577,9 @@ func _bake_in_editor() -> void:
 ## A scene loaded into rain already falling starts soaked.
 func _take_floor() -> void:
 	_live.set_floor(rain_floor, presenting)
+	_field = Field.new(rain_floor, DRIFT_LAYER, true) if presenting and _live.image else null
+	_field_drifted = false
+	_drift_floor = null
 	if is_node_ready():
 		_push_floor()
 	if rain > 0.0 and _live.image:
@@ -598,6 +603,8 @@ func _push_floor() -> void:
 	Globals.set_value("overcast_rain_floor_origin", _live.origin)
 	Globals.set_value("overcast_rain_floor_size", _live.size)
 	Globals.set_value("overcast_rain_top", _live.top)
+	Globals.set_value("overcast_has_snow_field", _field != null)
+	Globals.set_value("overcast_snow_field", _field.texture if _field else null)
 
 
 ## Straight to the weather the current rain is heading for: the storm closed over as far as it
@@ -608,49 +615,58 @@ func settle() -> void:
 	_soak()
 	_ground_shift = 1.0
 	_ground_slant = Vector4.INF
-	_end_drift_shift()
 
 
 ## Bakes the drifts for the rain floor and wind now, on this thread, rather than waiting for the
-## wind to hold and baking them off it. For screenshots and tests.
+## wind to hold and baking them off it, and lays the snow as deep in them as it lies anywhere. For
+## screenshots and tests.
 func bake_drifts() -> void:
 	if _drift_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_drift_task)
 		_drift_task = -1
-	if not presenting or not _drifting():
+	if _field == null or not _drifting():
 		return
 	_drift_floor = rain_floor
 	_drift_wind = Vector3(wind.x, 0.0, wind.z)
-	_show_drifts(Drift.surface_arrays(rain_floor, Drift.bake(rain_floor, _drift_wind, DRIFT_LAYER), DRIFT_LAYER))
-	_end_drift_shift()
+	_drift_target = _drifted(rain_floor, _drift_wind)
+	_field.set_target(_drift_target)
+	_field_drifted = true
+	_field.fill(_snow_lying)
+	_show_drifts(Drift.surface_arrays(rain_floor, _drift_target, DRIFT_LAYER))
 
 
 func _drifting() -> bool:
 	return snow_drifts and lying_snow and rain_floor != null and rain_floor.image != null
 
 
+## The snow `rain_floor` holds once it has all settled in `wind`, rounded off.
+static func _drifted(source: OvercastRainFloor, steady: Vector3) -> PackedFloat32Array:
+	return Drift.rounded(source, Drift.bake(source, steady, DRIFT_LAYER).get_data().to_float32_array())
+
+
 ## Shows the drifts while snow lies, and bakes them again for a new floor, or a wind that has
-## turned and held. The new drifts heap up as the old wear away, and only once they have is the wind
-## looked at again.
+## turned and held: the field comes round to them, and the mesh reaches over both the snow lying
+## now and the drifts it heads for.
 func _update_drifts(delta: float) -> void:
 	if _drift_task >= 0:
 		if not WorkerThreadPool.is_task_completed(_drift_task):
 			return
 		WorkerThreadPool.wait_for_task_completion(_drift_task)
 		_drift_task = -1
-		_show_drifts(_drift_arrays, _drift_turning and rain_floor == _drift_floor)
-	var on := _drifting()
+		if _field and rain_floor == _drift_floor:
+			_field.set_target(_drift_target)
+			_field_drifted = true
+			_show_drifts(_drift_arrays)
+	var on := _field != null and _drifting()
 	if _drifts:
 		_drifts.visible = on and _snow_lying > 0.0
-	if _drifts_was:
-		_drifts_was.visible = on and _snow_lying > 0.0
-	if _drift_shift < 1.0:
-		_drift_shift = move_toward(_drift_shift, 1.0, _ground_rate() * delta)
-		drift_material.set_shader_parameter("grown", _drift_shift)
-		if _drift_shift < 1.0:
-			_drifts_was.material_override.set_shader_parameter("grown", 1.0 - _drift_shift)
-			return
-		_end_drift_shift()
+	if _field and not on and _field_drifted:
+		var even := PackedFloat32Array()
+		even.resize(_field.depth.size())
+		even.fill(DRIFT_LAYER)
+		_field.set_target(even)
+		_field_drifted = false
+		_drift_floor = null
 	if not on or (_snow_lying <= 0.0 and not _settling()):
 		return
 	var steady := Vector3(wind.x, 0.0, wind.z)
@@ -662,44 +678,35 @@ func _update_drifts(delta: float) -> void:
 		if _drift_wait > 0.0:
 			return
 	_drift_wait = DRIFT_WAIT
-	_drift_turning = rain_floor == _drift_floor
 	_drift_floor = rain_floor
 	_drift_wind = steady
 	var source := rain_floor
+	var lying := _field.depth.duplicate()
 	_drift_task = WorkerThreadPool.add_task(func() -> void:
-		_drift_arrays = Drift.surface_arrays(source, Drift.bake(source, steady, DRIFT_LAYER), DRIFT_LAYER))
+		var drifted := _drifted(source, steady)
+		var heap := drifted.duplicate()
+		for i in heap.size():
+			heap[i] = maxf(heap[i], lying[i])
+		_drift_target = drifted
+		_drift_arrays = Drift.surface_arrays(source, heap, DRIFT_LAYER))
 
 
-## Shows the drifts of `arrays`; `turning`, for the same floor in a new wind, they heap up while
-## those shown before wear away, if snow lies to see it.
-func _show_drifts(arrays: Array, turning := false) -> void:
+func _show_drifts(baked: Array) -> void:
 	if _drifts == null:
 		_drifts = MeshInstance3D.new()
 		_drifts.name = "SnowDrifts"
 		_drifts.top_level = true
 		add_child(_drifts)
-	if turning and _drifts.mesh and _snow_lying > 0.0:
-		_end_drift_shift()
-		_drifts_was = _drifts
-		_drifts_was.name = "SnowDriftsWas"
-		_drifts_was.material_override = drift_material.duplicate()
-		_drifts = MeshInstance3D.new()
-		_drifts.name = "SnowDrifts"
-		_drifts.top_level = true
-		add_child(_drifts)
-		_drift_shift = 0.0
-		drift_material.set_shader_parameter("grown", 0.0)
-	_drifts.mesh = Drift.surface_mesh(arrays, drift_material)
+	_drifts.mesh = Drift.surface_mesh(baked, drift_material)
 	_drifts.visible = _snow_lying > 0.0
 
 
-## The old drifts gone and the new ones all heaped up.
-func _end_drift_shift() -> void:
-	_drift_shift = 1.0
-	drift_material.set_shader_parameter("grown", 1.0)
-	if _drifts_was:
-		_drifts_was.queue_free()
-		_drifts_was = null
+## Melts the lying snow within `radius` metres of `at`, on what lies near its height: bare in the
+## middle, thinning out to the edge. It fills in again as snow keeps settling. For fire and
+## explosions; drawing only (a headless peer has no snow to melt).
+func melt(at: Vector3, radius: float) -> void:
+	if _field:
+		_field.melt(at, radius)
 
 
 ## How fast lying wet or snow comes round to a new wind, per second: as snow settles where it lies,
@@ -712,6 +719,8 @@ func _soak() -> void:
 	_wetness = 1.0 if rainfall() > 0.0 else 0.0
 	_puddles = heaviness(rainfall())
 	_snow_lying = 1.0 if _settling() else 0.0
+	if _field:
+		_field.fill(_snow_lying)
 
 
 ## How much of `rain` falls as rain, and how much as snow.
@@ -1090,12 +1099,20 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 
 ## Soaks and dries the ground, settles and melts the snow, and hands wet surfaces the sky they
 ## reflect, lightning included. Pushed only when the state moves by a step the screen can show.
+func _snow_settles() -> bool:
+	return _settling() and lying_snow
+
+
+## How fast snow lies or melts, of all of it a second.
+func _snow_rate() -> float:
+	if _snow_settles():
+		return lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time
+	return (1.0 + 3.0 * heaviness(rainfall())) / melt_time
+
+
 ## Soaks and dries the ground, and lays and melts the snow on it; drawn or not.
 func _weather_ground(delta: float) -> void:
-	if _settling() and lying_snow:
-		_snow_lying = move_toward(_snow_lying, 1.0, lerpf(0.35, 1.0, heaviness(snowfall())) / snow_time * delta)
-	else:
-		_snow_lying = move_toward(_snow_lying, 0.0, (1.0 + 3.0 * heaviness(rainfall())) / melt_time * delta)
+	_snow_lying = move_toward(_snow_lying, 1.0 if _snow_settles() else 0.0, _snow_rate() * delta)
 	# Melting snow keeps the ground under it wet.
 	var melting := _snow_lying > 0.0 and not _settling()
 	var wet_target := 1.0 if (rainfall() > 0.0 or melting) and wet_ground else 0.0
@@ -1187,6 +1204,8 @@ func _process(delta: float) -> void:
 	var on_ground := rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0
 	if on_ground:
 		_weather_ground(delta)
+	if _field:
+		_field.step(delta, _snow_settles(), _snow_rate())
 	if not presenting:
 		return
 	var drawn := current_sky()

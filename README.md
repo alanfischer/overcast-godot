@@ -118,14 +118,21 @@ and go on their own.
   goes, and through doorways, while walls, posts and roofs stop it and a lee stays dry. A floor
   without `under` (made by `create`, or baked before it existed) takes all it holds as solid to
   the ground, as do moving covers. `floor_at()` and the rain sound go straight down.
+- **Lying snow is a field**: with a rain floor, the snow is held cell by cell, metres deep over
+  where rain stops, and the ground's snow and the drifts both draw from it
+  (`overcast_snow_field`). It heaps up toward how deep it lies once settled, wears away as it
+  melts, and is stepped a few rows a frame, not at all once it has come to rest. `melt(point,
+  radius)` digs it out, bare in the middle and thinning to the edge, on what lies near the point's
+  height; it fills in again while snow keeps settling. Call it where something hot lands. A
+  headless peer keeps no field.
 - **Snow drifts** (`snow_drifts`, on by default): in a wind, lying snow heaps up in the lee of
   whatever stands solid from the ground up and banks against its windward side, while the open is
   scoured thin; a roof on posts lets the wind through and drifts nothing. `OvercastSnowDrift` bakes
   the depths from the rain floor and the steady wind, on a worker thread, again whenever the wind
-  turns by 1 m/s and holds for a second, and the weather draws the heaps as a surface of their own
-  (`shaders/drift.gdshader`) that rises and melts with the lying snow and is lit as the ground's
-  snow is. `bake_drifts()` bakes them at once. The drift material's `contours` colour them by depth,
-  to tune by (the demo's **Drift depth** switch).
+  turns by 1 m/s and holds for a second; the field comes round to them as fast as snow settles,
+  and the weather draws what heaps past the even layer as a surface of its own
+  (`shaders/drift.gdshader`), lit as the ground's snow is. `bake_drifts()` bakes them at once. The
+  drift material's `contours` colour them by depth, to tune by (the demo's **Drift depth** switch).
 - **Covers** are things that move and keep the rain off: lifts, trains, drawbridges, a wall that
   can be knocked down. `add_cover(node)` rasterizes the node's own meshes onto the rain floor
   wherever it goes, so each cell takes the highest of it over that cell: something rotated,

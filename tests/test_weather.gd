@@ -247,17 +247,16 @@ func test_snow_drifts_behind_a_wall_in_a_wind() -> void:
 	assert_true(drifts.visible, "while the snow lies")
 	var mesh: ArrayMesh = drifts.mesh
 	assert_true(mesh != null, "a heap behind the wall")
-	var raise := 0.0
-	var uvs: PackedVector2Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV]
-	var verts: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	for c in verts.size():
-		if verts[c].distance_to(Vector3(11.5, 0, 10.5)) < 0.1:
-			raise = uvs[c].x
-	assert_gt(raise, 0.8, "heaped deep against its lee (%s m over the even layer)" % raise)
-	assert_true(mesh.custom_aabb.end.y >= raise, "and its bounds reach the top of the heap")
+	var lee: float = w._field.depth_at(Vector3(11.5, 0, 10.5))
+	assert_gt(lee - Weather.DRIFT_LAYER, 0.8, "heaped deep against its lee (%s m of snow)" % lee)
+	assert_true(mesh.custom_aabb.end.y >= lee - Weather.DRIFT_LAYER, "and its bounds reach the top of the heap")
+	assert_eq(Globals.value("overcast_has_snow_field"), true, "the field goes to every shader")
+	assert_eq(Globals.value("overcast_snow_field"), w._field.texture, "as its texture")
 	w.rain = 0.0
-	w._process(w.melt_time * 2.0)
+	for i in 100:
+		w._process(w.melt_time / 50.0)
 	assert_false(drifts.visible, "melted, nothing is drawn")
+	assert_eq(w._field.depth_at(Vector3(11.5, 0, 10.5)), 0.0, "and none lies")
 
 
 func test_snow_drifts_bake_off_the_main_thread_as_the_wind_turns() -> void:
@@ -286,7 +285,7 @@ func test_snow_drifts_bake_off_the_main_thread_as_the_wind_turns() -> void:
 	assert_true(w.get_node("SnowDrifts").mesh != null, "then the drifts are baked again for it")
 
 
-func test_drifts_wear_away_as_new_ones_heap_up_in_a_turned_wind() -> void:
+func test_the_snow_comes_round_to_a_turned_wind() -> void:
 	var w := _weather()
 	_keep(w)
 	w.rain_floor = _walled_floor()
@@ -296,26 +295,51 @@ func test_drifts_wear_away_as_new_ones_heap_up_in_a_turned_wind() -> void:
 	w.wind = Vector3(10, 0, 0)
 	w.settle()
 	w.bake_drifts()
-	var old: MeshInstance3D = w.get_node("SnowDrifts")
-	var old_mesh := old.mesh
+	var east := Vector3(11.5, 0, 10.5)
+	var west := Vector3(8.5, 0, 10.5)
+	var deep: float = w._field.depth_at(east)
+	assert_gt(deep, w._field.depth_at(west) + 0.5, "drifted in the east wind's lee")
 	w.wind = Vector3(-10, 0, 0)
 	for i in 400:
 		w._process(0.05)
-		if w.has_node("SnowDriftsWas"):
+		if w._drift_task < 0 and w._drift_wind.x < 0.0:
 			break
 		OS.delay_msec(5)
-	assert_true(w.has_node("SnowDriftsWas"), "the old drifts stay to wear away")
-	assert_eq(w.get_node("SnowDriftsWas"), old, "the ones there were")
-	assert_eq(old.mesh, old_mesh, "as they were")
-	var fresh: MeshInstance3D = w.get_node("SnowDrifts")
-	assert_ne(fresh, old, "beside the new")
-	assert_lt(w.drift_material.get_shader_parameter("grown"), 0.1, "which have only begun to heap up")
-	w._process(w.snow_time * 0.5)
-	assert_almost_eq(w.drift_material.get_shader_parameter("grown"), 0.5, 0.02, "half up in half the settling")
-	assert_almost_eq(old.material_override.get_shader_parameter("grown"), 0.5, 0.02, "the old half gone")
-	w._process(w.snow_time)
-	assert_true(w._drifts_was == null and old.is_queued_for_deletion(), "until they are gone")
-	assert_eq(w.drift_material.get_shader_parameter("grown"), 1.0, "and the new all heaped up")
+	assert_eq(w._drift_task, -1, "baked again for the west wind")
+	var uvs: PackedVector2Array = w.get_node("SnowDrifts").mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV]
+	var has := {}
+	for uv in uvs:
+		has[uv] = true
+	assert_true(has.has(Vector2(11, 10)) and has.has(Vector2(8, 10)),
+		"the mesh reaches over the old drift and the new")
+	for i in 100:
+		w._process(w.snow_time / 100.0)
+	assert_lt(w._field.depth_at(east), deep - 0.5, "the old drift worn down")
+	assert_gt(w._field.depth_at(west), deep - 0.3, "and the new one heaped up, as the snow settles")
+
+
+## A blast melts the snow where it lands, and the snow settling fills it in again.
+func test_a_melt_digs_out_the_snow() -> void:
+	var w := _weather()
+	_keep(w)
+	w.rain_floor = _walled_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.settle()
+	var at := Vector3(20.5, 0.1, 10.5)
+	w.melt(at, 2.0)
+	assert_eq(w._field.depth_at(at), 0.0, "bare where it struck")
+	for i in 100:
+		w._process(w.snow_time / 50.0)
+	assert_almost_eq(w._field.depth_at(at), Weather.DRIFT_LAYER, 1e-4, "snowed over again")
+	var headless := Weather.new()
+	headless.presenting = false
+	_keep(headless)
+	headless.rain_floor = _walled_floor()
+	_root().add_child(headless)
+	headless.melt(at, 2.0)
+	assert_eq(headless._field, null, "a peer that draws nothing keeps no snow to melt")
 
 
 func test_a_snow_storm_greys_the_sky_pale() -> void:

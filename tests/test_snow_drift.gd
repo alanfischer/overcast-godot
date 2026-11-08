@@ -40,7 +40,8 @@ func test_a_wall_drifts_deep_in_its_lee_and_runs_out_downwind() -> void:
 	var f := _floor({Rect2i(20, 10, 1, 10): 2.0})
 	var d := Drift.bake(f, Vector3(10, 0, 0), 0.3)
 	var behind := _at(d, 21, 15)
-	assert_almost_eq(behind, 2.0 * Drift.LEE_FILL - Drift.LEE_SLOPE, 1e-4, "against its lee it fills most of the way up")
+	assert_almost_eq(behind, minf(2.0 * Drift.LEE_FILL, Drift.DEEPEST) - Drift.LEE_SLOPE, 1e-4,
+		"against its lee it fills most of the way up")
 	assert_gt(behind, _at(d, 25, 15), "and is shallower further off")
 	assert_gt(_at(d, 25, 15), _at(d, 30, 15), "and shallower still")
 	assert_almost_eq(_at(d, 40, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5, "it has run out by 10 heights off")
@@ -50,6 +51,15 @@ func test_a_wall_drifts_deep_in_its_lee_and_runs_out_downwind() -> void:
 	assert_lt(_at(d, 17, 15), bank, "falling off upwind")
 	assert_almost_eq(_at(d, 20, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5, "its top is scoured too")
 	assert_lt(_at(d, 25, 22), _at(d, 25, 15), "past its end the drift falls away sideways")
+
+
+func test_a_cliff_drifts_no_deeper_than_a_wall() -> void:
+	var f := _floor({Rect2i(20, 0, 1, 30): 20.0})
+	var d := Drift.bake(f, Vector3(10, 0, 0), 0.3)
+	assert_almost_eq(_at(d, 21, 15), Drift.DEEPEST - Drift.LEE_SLOPE, 1e-4, "a 20 m cliff's lee starts as deep as DEEPEST")
+	assert_almost_eq(_at(d, 40, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5,
+		"and runs out as soon as a drift that deep would, not across the map")
+	assert_lt(_at(d, 19, 15), Drift.DEEPEST, "its windward bank is no deeper")
 
 
 func test_the_drift_follows_the_wind() -> void:
@@ -98,3 +108,31 @@ func test_a_wind_off_the_grid_drifts_as_far() -> void:
 	var off := Vector2(21, 15) + Vector2(dir.x, dir.z) * 6.0
 	assert_almost_eq(_at(slanted, roundi(off.x), roundi(off.y)), _at(square, 27, 15), 0.15,
 		"6 m downwind, as deep as straight behind it in a square wind")
+
+
+func test_a_game_can_drift_shallower() -> void:
+	var f := _floor({Rect2i(20, 0, 1, 30): 20.0})
+	var d := Drift.bake(f, Vector3(10, 0, 0), 0.3, 0.6)
+	assert_almost_eq(_at(d, 21, 15), 0.6 - Drift.LEE_SLOPE, 1e-4, "a lee starts no deeper than it is told")
+
+
+func test_a_broad_block_drifts_no_deeper_than_a_wall() -> void:
+	# A building 10 m deep and 20 m tall: its top is not a drift to spread over the ground past it.
+	var f := _floor({Rect2i(10, 5, 10, 20): 20.0})
+	var d := Drift.bake(f, Vector3(10, 0, 0), 0.3)
+	assert_almost_eq(_at(d, 20, 15), Drift.DEEPEST - Drift.LEE_SLOPE, 1e-4, "its lee starts as deep as a wall's")
+	for x in range(21, 40):
+		assert_lt(_at(d, x, 15), Drift.DEEPEST, "and is no deeper %d m downwind" % (x - 19))
+	assert_almost_eq(_at(d, 15, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5, "its top is scoured, not buried")
+
+
+func test_a_drift_does_not_carry_on_over_a_drop() -> void:
+	# A step 0.5 m up at x 10..29, falling 8 m at x 30 to ground at -7.5.
+	var img := Image.create_empty(W, H, false, Image.FORMAT_RF)
+	img.fill_rect(Rect2i(10, 0, 20, H), Color(0.5, 0, 0))
+	img.fill_rect(Rect2i(30, 0, W - 30, H), Color(-7.5, 0, 0))
+	var f := RainFloor.create(img, Vector3.ZERO, Vector2(W, H), 10.0)
+	var d := Drift.bake(f, Vector3(10, 0, 0), 0.3)
+	for x in range(30, W):
+		assert_lt(_at(d, x, 15), Drift.DEEPEST + 1e-4, "no deeper than a wall's past the drop, %d m on" % (x - 29))
+	assert_almost_eq(_at(d, 45, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5, "and run out by 15 m")

@@ -29,6 +29,8 @@ const GLOBALS := {
 	"overcast_puddles": ["float", 0.0],
 	"overcast_rain_sky": ["vec3", Vector3.ZERO],
 	"overcast_snow_cover": ["float", 0.0],
+	"overcast_has_snow_field": ["bool", false],
+	"overcast_snow_field": ["sampler2D", ""],
 	"overcast_rainfall": ["float", 0.0],
 	"overcast_rain_slant": ["vec2", Vector2.ZERO],
 	"overcast_ground_slant": ["vec4", Vector4.ZERO],

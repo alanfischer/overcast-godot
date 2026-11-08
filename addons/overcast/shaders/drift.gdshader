@@ -1,29 +1,27 @@
 shader_type spatial;
 // Drifted snow (OvercastSnowDrift.surface_mesh): the mesh lies on the ground, and each vertex rises
-// by its depth over the even layer (UV.x) as the snow settles, so it heaps up and melts away with
-// overcast_snow_cover, and by `grown` as the wind turns and they shift. Thinner than THIN it is not
-// drawn: the ground's own snow is there.
+// by the snow its field cell (UV, in texels) holds over the even layer, so drifts heap up, shift
+// with the wind and melt as the field does. Thinner than OVERCAST_DRIFT_THIN it is not drawn: the
+// ground's own snow is there. A game that lights its world its own way writes its own fragment over
+// drift.gdshaderinc's overcast_drift.
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
-#include "res://addons/overcast/shaders/snow.gdshaderinc"
+#include "res://addons/overcast/shaders/drift.gdshaderinc"
 
-const float THIN = 0.02;
 // Depth in colour, with a contour every `contour` metres: to tune drifts by.
 uniform bool contours = false;
 uniform float contour = 0.25;
-uniform float grown = 1.0;  // how far these drifts have heaped up (or, the old, worn away)
 varying float thick;
 varying vec3 world_pos;
 varying float footprint;  // overcast_snow_footprint, for light()'s glints
 
 void vertex() {
-	thick = UV.x * overcast_snow_cover * grown;
-	VERTEX.y += thick;
+	thick = overcast_drift(VERTEX, NORMAL, UV);
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
 	footprint = overcast_snow_footprint(world_pos);  // before any branch
-	if (thick < THIN) {
+	if (thick < OVERCAST_DRIFT_THIN) {
 		discard;
 	}
 	ALBEDO = overcast_snow_albedo(world_pos);

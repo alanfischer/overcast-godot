@@ -24,8 +24,12 @@ uniform vec3 haze_color = vec3(0.4, 0.43, 0.48);
 uniform vec3 streak_color = vec3(0.0);  // as the drops', lit
 uniform float streak_opacity = 0.0;
 uniform float presence = 1.0;  // the share of streak slots holding a drop
-uniform float fall_speed = 9.0;
-// Metres the wind carries a drop sideways per metre it falls: the columns lean with it.
+// Metres a streak has fallen at its speed, and the wind has carried it, as OvercastWeather
+// integrates them: a gust or a change of speed moves them on from where they are. `carried` wraps
+// every WRAP_CELLS cells, where the grid's pattern repeats.
+uniform float fallen = 0.0;
+uniform vec2 carried = vec2(0.0);
+// Metres the wind carries a drop sideways per metre it falls: each streak leans with it.
 uniform vec2 slant = vec2(0.0);
 uniform float streak_length = 0.4;
 uniform float streak_width = 0.006;
@@ -47,6 +51,7 @@ const float MAX_DIST = 160.0;
 const float FAR_NEAR = 12.0;
 const float FAR_END = 50.0;
 const float CELL = 0.9;
+const float WRAP_CELLS = 1024.0;  // as OvercastWeather.FAR_WRAP
 const int MAX_CELLS = 96;
 
 void vertex() {
@@ -66,22 +71,26 @@ vec3 hash3(float a, float b, float c) {
 	return vec3(v) / 4294967295.0;
 }
 
-// The streak, if any, in the column of grid cell `cell` (whose drops sit at xz `column`) where a
-// ray passes `miss` metres from it at height `y`. `footprint` is a pixel's width there (m); a
-// streak thinner than that is spread over it, fainter.
-float column_streak(vec2 cell, float y, float miss, float footprint) {
+vec3 cell_hash(vec2 cell, float c) {
+	vec2 id = mod(cell, WRAP_CELLS);
+	return hash3(id.x, id.y, c);
+}
+
+// In column `cell`, the streak slot height `y` falls in: metres above the slot's head, and its index.
+vec2 streak_slot(vec2 cell, float y) {
+	vec3 hc = cell_hash(cell, 1.0);
+	float yy = y + fallen * mix(0.85, 1.15, hc.x) + hc.y * streak_gap;
+	return vec2(fract(yy / streak_gap) * streak_gap, floor(yy / streak_gap));
+}
+
+// The streak, if any, in `slot` of column `cell` where a ray passes `miss` metres from it.
+// `footprint` is a pixel's width there (m); a streak thinner than that is spread over it, fainter.
+float column_streak(vec2 cell, vec2 slot, float miss, float footprint) {
 	float w = max(streak_width, footprint);
-	if (miss >= w) {
+	if (miss >= w || cell_hash(cell, slot.y).x > presence) {
 		return 0.0;
 	}
-	vec3 hc = hash3(cell.x, cell.y, 1.0);
-	float slot = streak_gap;
-	float yy = y + fall_speed * mix(0.85, 1.15, hc.x) * TIME + hc.y * slot;
-	float k = floor(yy / slot);
-	if (hash3(cell.x, cell.y, k).x > presence) {
-		return 0.0;
-	}
-	float along = fract(yy / slot) * slot / streak_length;  // 0 at the head, 1 at the tail
+	float along = slot.x / streak_length;  // 0 at the head, 1 at the tail
 	float profile = smoothstep(0.0, 0.25, along) * smoothstep(1.0, 0.6, along);
 	return profile * (streak_width / w) * (1.0 - miss / w);
 }
@@ -120,10 +129,9 @@ void fragment() {
 	float haze = 1.0 - exp(-density * rainy);
 
 	float streak = 0.0;
-	// Walked in a frame sheared along the slant (x + slant * (y - cam.y)), where every column of
-	// falling drops stands straight.
-	vec2 o = cam.xz;
-	vec2 d = dir.xz + slant * dir.y;
+	// Walked in the frame the wind carries them in, where every column stands still.
+	vec2 o = cam.xz - carried;
+	vec2 d = dir.xz;
 	float flat_len = length(d);
 	// A ray through no rain-filled air has no far rain on it either.
 	if (streak_opacity > 0.0 && rainy > 0.0 && flat_len > 0.001) {
@@ -140,11 +148,13 @@ void fragment() {
 		float t = t0;
 		float dd = dot(d, d);
 		for (int i = 0; i < MAX_CELLS && t < t1; i++) {
-			vec2 jitter = hash3(cell.x, cell.y, 0.0).xy;
-			vec2 column = (cell + mix(vec2(0.15), vec2(0.85), jitter)) * CELL;
+			vec2 column = (cell + mix(vec2(0.15), vec2(0.85), cell_hash(cell, 0.0).xy)) * CELL;
 			float tc = clamp(dot(column - o, d) / dd, t0, t1);
-			float miss = length(o + d * tc - column);
-			float a = column_streak(cell, cam.y + dir.y * tc, miss, tc * pixel);
+			// A streak leans back upwind from its head: aimed again at where it is at that height.
+			vec2 leaned = column - slant * streak_slot(cell, cam.y + dir.y * tc).x;
+			tc = clamp(dot(leaned - o, d) / dd, t0, t1);
+			float miss = length(o + d * tc - leaned);
+			float a = column_streak(cell, streak_slot(cell, cam.y + dir.y * tc), miss, tc * pixel);
 			if (a > 0.0 && raining_at(cam + dir * tc)) {
 				float flat_dist = tc * flat_len;
 				streak += a * exp(-density * tc)

@@ -75,6 +75,24 @@ func test_the_wind_rises_falls_and_turns() -> void:
 	assert_true(worst_step < dt, "the wind never jumps, at most 1 m/s a second (worst %.4f per %.2f s)" % [worst_step, dt])
 
 
+
+func test_the_breeze_alone_leaves_the_showers_out() -> void:
+	var cycle := Cycle.new(1234)
+	var t := 0.0
+	var gap := 0.0
+	var hardest := 0.0
+	var same_way := true
+	while t < 3.0 * 3600.0:
+		t += 1.0
+		var calm := cycle.breeze_at(t)
+		var full := cycle.wind_at(t)
+		hardest = maxf(hardest, calm.length())
+		gap = maxf(gap, full.length() - calm.length())
+		same_way = same_way and calm.normalized().is_equal_approx(full.normalized())
+	assert_true(same_way, "it blows the way the full wind does")
+	assert_lt(hardest, Cycle.BREEZE.y + 1e-4, "no harder than a breeze (%.1f m/s)" % hardest)
+	assert_gt(gap, 1.0, "where the showers would have blown harder")
+
 func test_one_seed_one_weather() -> void:
 	var a := Cycle.new(77)
 	var b := Cycle.new(77)

@@ -6,9 +6,38 @@
 // the ground under a roof stays bare, and only on what faces up: a dusting in patches first, then
 // a layer over all of it. Where the sun reaches it, it glitters (overcast_snow_glint).
 global uniform float overcast_snow_cover;  // 0 bare, 1 all covered
+// Metres of snow per rain floor cell (OvercastSnowField): drifted, scoured and melted where it is.
+// Without one, the snow lies as overcast_snow_cover says everywhere.
+global uniform bool overcast_has_snow_field;
+global uniform sampler2D overcast_snow_field : filter_nearest;
 uniform float snow_scale : hint_range(0.0, 1.0) = 1.0;  // how readily this surface holds snow
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
+
+// The even layer a calm leaves (OvercastWeather.DRIFT_LAYER): this deep, the ground is all under it.
+const float OVERCAST_SNOW_LAYER = 0.3;
+
+// Metres of snow at world xz, blended between the four cells around it.
+float overcast_snow_depth(vec2 xz) {
+	ivec2 res = textureSize(overcast_snow_field, 0);
+	vec2 texel = (xz - overcast_rain_floor_origin.xz) / overcast_rain_floor_size * vec2(res) - 0.5;
+	ivec2 c = ivec2(floor(texel));
+	vec2 f = fract(texel);
+	vec4 d;
+	for (int i = 0; i < 4; i++) {
+		d[i] = texelFetch(overcast_snow_field, clamp(c + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
+	}
+	return mix(mix(d.x, d.y, f.x), mix(d.z, d.w, f.x), f.y);
+}
+
+// How far the snow at world_pos has settled, 0 to 1: the field's depth over the even layer, or
+// overcast_snow_cover off it.
+float overcast_snow_lying(vec3 world_pos) {
+	if (!overcast_has_snow_field || !rain_floor_covers(rain_floor_uv(world_pos))) {
+		return overcast_snow_cover;
+	}
+	return clamp(overcast_snow_depth(world_pos.xz) / OVERCAST_SNOW_LAYER, 0.0, 1.0);
+}
 
 const vec3 OVERCAST_SNOW_ALBEDO = vec3(0.8, 0.82, 0.85);
 // Glints: one candidate per cell of this many per metre (across the ground), of which this share
@@ -33,7 +62,7 @@ float overcast_snow_amount(vec3 world_pos, vec3 world_normal) {
 	// short there, not the roof's outline.
 	vec2 warp = vec2(overcast_vnoise(q * 0.9 + 5.3), overcast_vnoise(q * 0.9 + 11.7)) - 0.5;
 	vec3 off = vec3(warp.x * 0.9, rain_slope_lift(world_normal, abs(warp) * 0.9), warp.y * 0.9);
-	float s = overcast_snow_cover * snow_scale * slope
+	float s = overcast_snow_lying(world_pos) * snow_scale * slope
 		* rain_reaches(world_pos + world_normal * 0.02 + off);
 	if (s <= 0.0) {
 		return 0.0;

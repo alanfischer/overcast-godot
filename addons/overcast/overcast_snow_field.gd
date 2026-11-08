@@ -165,10 +165,11 @@ func fill(fraction: float) -> void:
 	_upload_in = 0.0
 
 
-## Melts the snow within `radius` of `at` on the surfaces near its height, bare in the middle and
-## thinning out to the edge. It fills in again while snow settles.
-func melt(at: Vector3, radius: float) -> void:
-	if radius <= 0.0:
+## Melts `amount` (1 all) of the snow within `radius` of `at` on the surfaces near its height, in
+## full in the middle and thinning out to the edge. It fills in again while snow settles.
+func melt(at: Vector3, radius: float, amount := 1.0) -> void:
+	amount = clampf(amount, 0.0, 1.0)
+	if radius <= 0.0 or amount <= 0.0:
 		return
 	var lo := Vector2i(((Vector2(at.x, at.z) - Vector2(origin.x, origin.z) - Vector2.ONE * radius) / cell).floor())
 	var hi := Vector2i(((Vector2(at.x, at.z) - Vector2(origin.x, origin.z) + Vector2.ONE * radius) / cell).ceil())
@@ -184,7 +185,7 @@ func melt(at: Vector3, radius: float) -> void:
 			var r := middle.distance_to(Vector2(at.x, at.z)) / radius
 			if r >= 1.0:
 				continue
-			depth[c] *= smoothstep(MELT_CORE, 1.0, r)
+			depth[c] *= 1.0 - (1.0 - smoothstep(MELT_CORE, 1.0, r)) * amount
 			_speed[c] = maxf(target[c], layer)
 			any = true
 	if any:

@@ -33,8 +33,12 @@ shader_type spatial;
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
 #include "res://addons/overcast/shaders/wet.gdshaderinc"
 #include "res://addons/overcast/shaders/snow.gdshaderinc"
+#include "res://addons/overcast/shaders/drift.gdshaderinc"
 varying vec3 world_pos;
-void vertex() { world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void vertex() {
+	overcast_drift(VERTEX, NORMAL, UV);
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
 void fragment() {
 	vec3 lit = vec3(0.5) * cloud_sunlight(world_pos);
 	vec3 albedo = vec3(0.5);

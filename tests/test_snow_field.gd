@@ -104,3 +104,23 @@ func test_the_drift_mesh_reads_its_cells_from_the_field() -> void:
 	assert_almost_eq(baked[1], 1.2 - LAYER, 1e-6, "as deep as it heaps over the layer")
 	assert_false((arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).is_empty(), "faces where it heaps")
 
+
+
+func test_snow_is_kept_off_what_lies_in_a_snowless_box() -> void:
+	# A pool over x 5..7 whose bed, 1 m down, the rain floor takes for the ground.
+	var img := Image.create_empty(10, 8, false, Image.FORMAT_RF)
+	img.fill_rect(Rect2i(5, 0, 3, 8), Color(-1.0, 0, 0))
+	var f := Field.new(RainFloor.create(img, Vector3.ZERO, Vector2(10, 8), 10.0), LAYER, false)
+	f.fill(1.0)
+	f.keep_off([AABB(Vector3(5, -1, 0), Vector3(3, 0.9, 8))])
+	assert_eq(f.depth_at(Vector3(6.5, -1, 4.5)), 0.0, "none on the pool's bed")
+	assert_almost_eq(f.depth_at(Vector3(3.5, 0, 4.5)), LAYER, 1e-6, "the bank keeps its snow")
+	var drifted := f.target.duplicate()
+	drifted.fill(1.0)
+	f.set_target(drifted)
+	_run_for(f, 11.0, true, 0.1)
+	assert_eq(f.depth_at(Vector3(6.5, -1, 4.5)), 0.0, "nor does a wind drift any into it")
+	assert_almost_eq(f.depth_at(Vector3(3.5, 0, 4.5)), 1.0, 1e-6, "while it drifts the bank")
+	assert_eq(f.bare_cells().size(), 3 * 8, "the pool's cells, once each")
+	f.keep_off([AABB(Vector3(5, -1, 0), Vector3(3, 0.9, 8))])
+	assert_eq(f.bare_cells().size(), 3 * 8, "however often it is asked")

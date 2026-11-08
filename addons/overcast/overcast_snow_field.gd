@@ -12,6 +12,8 @@ const PASS := 0.25
 const UPLOAD_EVERY := 0.05
 ## Of a melt's radius, the share in the middle melted bare; it thins to nothing at the edge.
 const MELT_CORE := 0.35
+## How far past a snowless box's top and bottom a cell's floor still counts as inside it.
+const KEEP_OFF_REACH := 0.1
 
 var dims := Vector2i.ZERO
 var origin := Vector3.ZERO
@@ -25,6 +27,8 @@ var image: Image
 var texture: ImageTexture
 
 var _heights := PackedFloat32Array()
+var _bare := PackedInt32Array()  # cells no snow lies on (keep_off)
+var _is_bare := PackedByteArray()
 var _speed := PackedFloat32Array()  # metres a unit of rate moves each cell: fixed while it heads somewhere
 var _row := 0
 var _row_time := PackedFloat64Array()
@@ -48,6 +52,7 @@ func _init(rain_floor: OvercastRainFloor, even: float, drawn: bool) -> void:
 	depth.resize(dims.x * dims.y)
 	target.resize(dims.x * dims.y)
 	target.fill(even)
+	_is_bare.resize(dims.x * dims.y)
 	_speed.resize(dims.x * dims.y)
 	_speed.fill(even)
 	_row_time.resize(dims.y)
@@ -110,7 +115,40 @@ func _wake(speeds := true) -> void:
 ## it as fast as it settles.
 func set_target(heights: PackedFloat32Array) -> void:
 	target = heights
+	for c in _bare:
+		target[c] = 0.0
 	_wake()
+
+
+## Keeps snow off every cell whose floor lies inside one of `boxes` (AABBs): a pool or a moat,
+## whose bed the rain floor takes for the ground, or lava.
+func keep_off(boxes: Array) -> void:
+	for box: AABB in boxes:
+		var lo := Vector2i(((Vector2(box.position.x, box.position.z) - Vector2(origin.x, origin.z)) / cell).floor())
+		var hi := Vector2i(((Vector2(box.end.x, box.end.z) - Vector2(origin.x, origin.z)) / cell).ceil())
+		lo = lo.clamp(Vector2i.ZERO, dims)
+		hi = hi.clamp(Vector2i.ZERO, dims)
+		for j in range(lo.y, hi.y):
+			for i in range(lo.x, hi.x):
+				var c := j * dims.x + i
+				var middle := Vector2(origin.x + (i + 0.5) * cell.x, origin.z + (j + 0.5) * cell.y)
+				var floor_y := _heights[c]
+				if _is_bare[c] or middle.x < box.position.x or middle.x > box.end.x \
+						or middle.y < box.position.z or middle.y > box.end.z \
+						or floor_y < box.position.y - KEEP_OFF_REACH or floor_y > box.end.y + KEEP_OFF_REACH:
+					continue
+				_is_bare[c] = 1
+				_bare.append(c)
+				target[c] = 0.0
+				depth[c] = 0.0
+	_wake(false)
+	_dirty = true
+	_upload_in = 0.0
+
+
+## The cells keep_off keeps bare.
+func bare_cells() -> PackedInt32Array:
+	return _bare
 
 
 ## Straight to `fraction` of the target everywhere, for a scene that starts mid-snowfall.

@@ -318,6 +318,21 @@ func test_the_snow_comes_round_to_a_turned_wind() -> void:
 	assert_gt(w._field.depth_at(west), deep - 0.3, "and the new one heaped up, as the snow settles")
 
 
+func test_snowless_boxes_hold_for_every_floor() -> void:
+	var w := _weather()
+	_keep(w)
+	w.add_snowless(AABB(Vector3(20, -1, 0), Vector3(5, 2, 20)))
+	w.rain_floor = _walled_floor()
+	_root().add_child(w)
+	w.rain = 1.0
+	w.snow = 1.0
+	w.settle()
+	assert_eq(w._field.depth_at(Vector3(22.5, 0, 10.5)), 0.0, "a box given before the floor keeps it bare")
+	assert_gt(w._field.depth_at(Vector3(15.5, 0, 10.5)), 0.0, "and only there")
+	w.add_snowless(AABB(Vector3(0, -1, 0), Vector3(5, 2, 20)))
+	assert_eq(w._field.depth_at(Vector3(2.5, 0, 10.5)), 0.0, "one given after it at once")
+
+
 ## A blast melts the snow where it lands, and the snow settling fills it in again.
 func test_a_melt_digs_out_the_snow() -> void:
 	var w := _weather()

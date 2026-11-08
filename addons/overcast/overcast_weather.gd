@@ -353,6 +353,7 @@ var _drifts: MeshInstance3D
 var _field: Field  # the snow lying on the rain floor, cell by cell; none undrawn
 var _field_drifted := false  # its target is a wind's drifts, not the even layer
 var _drift_target := PackedFloat32Array()
+var _snowless: Array[AABB] = []
 var _drift_floor: OvercastRainFloor  # what the drifts were baked for, and in what wind
 var _drift_wind := Vector3.INF
 var _drift_wait := DRIFT_WAIT
@@ -578,6 +579,8 @@ func _bake_in_editor() -> void:
 func _take_floor() -> void:
 	_live.set_floor(rain_floor, presenting)
 	_field = Field.new(rain_floor, DRIFT_LAYER, true) if presenting and _live.image else null
+	if _field:
+		_field.keep_off(_snowless)
 	_field_drifted = false
 	_drift_floor = null
 	if is_node_ready():
@@ -632,7 +635,7 @@ func bake_drifts() -> void:
 	_field.set_target(_drift_target)
 	_field_drifted = true
 	_field.fill(_snow_lying)
-	_show_drifts(Drift.surface_arrays(rain_floor, _drift_target, DRIFT_LAYER))
+	_show_drifts(Drift.surface_arrays(rain_floor, _field.target, DRIFT_LAYER))
 
 
 func _drifting() -> bool:
@@ -682,11 +685,14 @@ func _update_drifts(delta: float) -> void:
 	_drift_wind = steady
 	var source := rain_floor
 	var lying := _field.depth.duplicate()
+	var bare := _field.bare_cells().duplicate()
 	_drift_task = WorkerThreadPool.add_task(func() -> void:
 		var drifted := _drifted(source, steady)
 		var heap := drifted.duplicate()
 		for i in heap.size():
 			heap[i] = maxf(heap[i], lying[i])
+		for c in bare:
+			heap[c] = 0.0
 		_drift_target = drifted
 		_drift_arrays = Drift.surface_arrays(source, heap, DRIFT_LAYER))
 
@@ -699,6 +705,15 @@ func _show_drifts(baked: Array) -> void:
 		add_child(_drifts)
 	_drifts.mesh = Drift.surface_mesh(baked, drift_material)
 	_drifts.visible = _snow_lying > 0.0
+
+
+## Keeps lying snow off the ground inside `box`: a pool, a moat, lava. The rain floor stops at
+## what is solid, so under a liquid it is the bed, and snow would lie there and drift up through the
+## surface. Kept for every floor this weather takes.
+func add_snowless(box: AABB) -> void:
+	_snowless.append(box)
+	if _field:
+		_field.keep_off([box])
 
 
 ## Melts the lying snow within `radius` metres of `at`, on what lies near its height: bare in the

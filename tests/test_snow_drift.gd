@@ -136,3 +136,123 @@ func test_a_drift_does_not_carry_on_over_a_drop() -> void:
 	for x in range(30, W):
 		assert_lt(_at(d, x, 15), Drift.DEEPEST + 1e-4, "no deeper than a wall's past the drop, %d m on" % (x - 29))
 	assert_almost_eq(_at(d, 45, 15), 0.3 * (1.0 - Drift.SCOUR), 1e-5, "and run out by 15 m")
+
+
+## A box's faces, wound as Godot draws them.
+func _box(size: Vector3, middle: Vector3) -> PackedVector3Array:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	return Transform3D(Basis(), middle) * mesh.get_faces()
+
+
+## The snow a vertex of `g` takes from `heap` over `layer`.
+func _thick(g: Drift.Ground, v: int, heap: PackedFloat32Array, layer := 0.3) -> float:
+	var t := 0.0
+	for k in 4:
+		t += g.weights[v * 4 + k] * maxf(heap[g.cells[v * 4 + k]] - layer, 0.0)
+	return t
+
+
+func _heap(f: RainFloor, cells: Dictionary, layer := 0.3) -> PackedFloat32Array:
+	var heap := PackedFloat32Array()
+	heap.resize(W * H)
+	heap.fill(layer)
+	for rect: Rect2i in cells:
+		for j in range(rect.position.y, rect.end.y):
+			for i in range(rect.position.x, rect.end.x):
+				heap[j * W + i] = cells[rect]
+	return heap
+
+
+## Ground at 0 to a ledge at x 20.4, off a cell's line, and 2 m down past it: the cells across the
+## ledge read the ground above, as rain stops on its highest point.
+func _ledge() -> Array:
+	var f := _floor({Rect2i(21, 0, W - 21, H): -2.0})
+	var faces := _box(Vector3(20.4, 1, H), Vector3(10.2, -0.5, H * 0.5))
+	faces.append_array(_box(Vector3(W - 20.4, 1, H), Vector3(20.4 + (W - 20.4) * 0.5, -2.5, H * 0.5)))
+	return [f, Drift.lay(f, faces)]
+
+
+func test_a_drift_ends_where_its_ledge_does() -> void:
+	var laid := _ledge()
+	var g: Drift.Ground = laid[1]
+	var heap := _heap(laid[0], {Rect2i(15, 0, 6, H): 0.8})
+	var furthest := -INF
+	for v in g.verts.size():
+		if g.uv2s[v].x == 0.0 and g.verts[v].y > -1.0 and _thick(g, v, heap) > 0.0:
+			furthest = maxf(furthest, g.verts[v].x)
+	assert_almost_eq(furthest, 20.4, 1e-4, "the drift on the ledge reaches its edge and no further")
+	var side := false
+	for v in g.verts.size():
+		if g.uv2s[v].x == Drift.SIDE_TOP and absf(g.verts[v].x - 20.4) < 1e-4 and g.verts[v].y > -1.0:
+			side = side or (g.normals[v].x > 0.99 and _thick(g, v, heap) > 0.4)
+	assert_true(side, "where a side stands flush with the ledge's face, facing off it")
+
+
+func test_the_floor_under_a_ledge_takes_none_of_the_snow_on_it() -> void:
+	var laid := _ledge()
+	var g: Drift.Ground = laid[1]
+	var heap := _heap(laid[0], {Rect2i(15, 0, 6, H): 0.8})
+	for v in g.verts.size():
+		if g.verts[v].y < -1.0:
+			assert_almost_eq(_thick(g, v, heap), 0.0, 1e-6, "none at %s, 2 m below" % g.verts[v])
+
+
+func test_a_drift_meets_the_wall_it_lies_against() -> void:
+	# A wall over x 10.3..11.3; the cells across its faces read its top.
+	var f := _floor({Rect2i(10, 0, 2, H): 2.0})
+	var faces := _box(Vector3(W, 1, H), Vector3(W * 0.5, -0.5, H * 0.5))
+	faces.append_array(_box(Vector3(1, 2, H), Vector3(10.8, 1.0, H * 0.5)))
+	var g := Drift.lay(f, faces)
+	var heap := _heap(f, {Rect2i(12, 0, 1, H): 1.2})
+	var at_face := -1.0
+	for v in g.verts.size():
+		if g.uv2s[v].x == 0.0 and absf(g.verts[v].y) < 1e-4 and g.verts[v].x > 11.0 and g.verts[v].x < 11.8:
+			at_face = maxf(at_face, _thick(g, v, heap))
+	assert_almost_eq(at_face, 0.9, 1e-3, "the floor up to the wall's face takes the lee's snow, all of it")
+
+
+func test_no_drift_lies_on_the_floor_under_a_roof() -> void:
+	var f := _floor({}, {Rect2i(30, 5, 10, 10): 3.0})
+	var g := Drift.lay(f, _box(Vector3(W, 1, H), Vector3(W * 0.5, -0.5, H * 0.5)))
+	for t in range(0, g.tris.size(), 3):
+		var mid := (g.verts[g.tris[t]] + g.verts[g.tris[t + 1]] + g.verts[g.tris[t + 2]]) / 3.0
+		assert_false(mid.x > 31.0 and mid.x < 39.0 and mid.z > 6.0 and mid.z < 14.0,
+			"no face under the roof (%s)" % mid)
+
+
+func test_no_drift_lies_on_a_steep_face() -> void:
+	var f := _floor()
+	var ramp := Transform3D(Basis(Vector3.BACK, deg_to_rad(60.0)), Vector3(30, 0, 15)) \
+		* _box(Vector3(4, 0.1, 4), Vector3.ZERO)
+	assert_true(Drift.lay(f, ramp).tris.is_empty(), "the snow slides off it")
+
+
+func test_the_drift_faces_up() -> void:
+	var laid := _ledge()
+	var g: Drift.Ground = laid[1]
+	var up := 0
+	for t in range(0, g.tris.size(), 3):
+		var a := g.verts[g.tris[t]]
+		if g.uv2s[g.tris[t]].x == 0.0:
+			var n := (g.verts[g.tris[t + 2]] - a).cross(g.verts[g.tris[t + 1]] - a)
+			assert_gt(n.y, 0.0, "wound to face up, as Godot draws a front face")
+			up += 1
+	assert_gt(up, 0, "it has faces")
+
+
+func test_the_drift_mesh_draws_only_where_snow_heaps() -> void:
+	var laid := _ledge()
+	var g: Drift.Ground = laid[1]
+	var baked := Drift.surface_arrays(g, _heap(laid[0], {Rect2i(15, 0, 6, H): 0.8}), 0.3)
+	var arrays: Array = baked[0]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	assert_false(indices.is_empty(), "faces where it heaps")
+	for i in indices:
+		assert_true(g.verts[i].x > 13.9 and g.verts[i].x < 21.6, "and none far from it (%s)" % g.verts[i])
+	assert_almost_eq(baked[1], 0.5, 1e-6, "as deep as it heaps over the layer")
+	var mesh := Drift.surface_mesh(baked, null)
+	assert_eq(mesh.surface_get_format(0) & (Mesh.ARRAY_FORMAT_CUSTOM_MASK << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT),
+		Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT, "each vertex's shares as four floats")
+	assert_true(Drift.surface_arrays(g, _heap(laid[0], {}), 0.3)[0][Mesh.ARRAY_INDEX].is_empty(),
+		"and nothing over the even layer")

@@ -245,6 +245,12 @@ const GROUND_REACH := 1.0
 @export var snow_drifts := true
 ## The deepest a drift starts against a wall or a cliff (m); it slopes away downwind from there.
 @export_range(0.3, 5.0, 0.05, "or_greater", "suffix:m") var drift_deepest := Drift.DEEPEST
+## Drifts lie on the faces of the meshes under this (the level's standing geometry), where they
+## face up and rain reaches them, and so end where those faces do. None: this weather's parent.
+@export var drift_ground: Node3D:
+	set(node):
+		drift_ground = node
+		_faces_taken = false
 ## Flakes around the camera at the lightest snow and at a blizzard.
 @export_range(0, 100000, 100) var flakes_light := 8000
 @export_range(0, 100000, 100) var flakes_heavy := 50000
@@ -368,6 +374,11 @@ var _drift_wind := Vector3.INF
 var _drift_wait := DRIFT_WAIT
 var _drift_task := -1
 var _drift_arrays := []
+var _faces := PackedVector3Array()  # drift_ground's faces, in the world
+var _faces_taken := false
+var _ground: Drift.Ground  # what the drifts lie on, laid for _ground_floor
+var _ground_floor: OvercastRainFloor
+var _ground_laid: Drift.Ground  # what the bake under way laid them on
 var _rain_db := 0.0
 var _exposure := 1.0
 var _exposure_target := 1.0
@@ -599,6 +610,7 @@ func _take_floor() -> void:
 		_field.keep_off(_snowless)
 	_field_drifted = false
 	_drift_floor = null
+	_faces_taken = false  # a new floor: the level may have changed under it
 	if is_node_ready():
 		_push_floor()
 	if rain > 0.0 and _live.image:
@@ -651,11 +663,45 @@ func bake_drifts() -> void:
 	_field.set_target(_drift_target)
 	_field_drifted = true
 	_field.fill(_snow_lying)
-	_show_drifts(Drift.surface_arrays(rain_floor, _field.target, DRIFT_LAYER))
+	_show_drifts(Drift.surface_arrays(_laid(rain_floor, _ground_faces()), _field.target, DRIFT_LAYER))
 
 
 func _drifting() -> bool:
 	return snow_drifts and lying_snow and rain_floor != null and rain_floor.image != null
+
+
+## The faces of drift_ground's meshes, in the world, taken once for each floor (main thread only:
+## it reads the meshes). Leaves out this weather's own.
+func _ground_faces() -> PackedVector3Array:
+	if _faces_taken:
+		return _faces
+	_faces_taken = true
+	_faces = PackedVector3Array()
+	_ground = null
+	var root := drift_ground if drift_ground else get_parent() as Node3D
+	if root == null or not root.is_inside_tree():
+		return _faces
+	var meshes := root.find_children("*", "MeshInstance3D", true, false)
+	if root is MeshInstance3D:
+		meshes.push_front(root)
+	for mi: MeshInstance3D in meshes:
+		if mi.mesh and mi != self and not is_ancestor_of(mi) and _drifts_on(mi):
+			_faces.append_array(mi.global_transform * mi.mesh.get_faces())
+	return _faces
+
+
+## Whether drifts lie on `mesh`, one of drift_ground's: a game leaves out what is not ground to it
+## (a liquid's surface, the sky).
+func _drifts_on(_mesh: MeshInstance3D) -> bool:
+	return true
+
+
+## What the drifts lie on for `source`, laid from `faces` the first time.
+func _laid(source: OvercastRainFloor, faces: PackedVector3Array) -> Drift.Ground:
+	if _ground_floor != source or _ground == null:
+		_ground = Drift.lay(source, faces)
+		_ground_floor = source
+	return _ground
 
 
 ## The snow `rain_floor` holds once it has all settled in `wind`, rounded off.
@@ -672,6 +718,8 @@ func _update_drifts(delta: float) -> void:
 			return
 		WorkerThreadPool.wait_for_task_completion(_drift_task)
 		_drift_task = -1
+		_ground = _ground_laid
+		_ground_floor = _drift_floor
 		if _field and rain_floor == _drift_floor:
 			_field.set_target(_drift_target)
 			_field_drifted = true
@@ -703,6 +751,8 @@ func _update_drifts(delta: float) -> void:
 	var lying := _field.depth.duplicate()
 	var bare := _field.bare_cells().duplicate()
 	var deepest := drift_deepest
+	var faces := _ground_faces()
+	var laid := _ground if _ground_floor == source else null
 	_drift_task = WorkerThreadPool.add_task(func() -> void:
 		var drifted := _drifted(source, steady, deepest)
 		var heap := drifted.duplicate()
@@ -710,8 +760,10 @@ func _update_drifts(delta: float) -> void:
 			heap[i] = maxf(heap[i], lying[i])
 		for c in bare:
 			heap[c] = 0.0
+		var ground := laid if laid else Drift.lay(source, faces)
 		_drift_target = drifted
-		_drift_arrays = Drift.surface_arrays(source, heap, DRIFT_LAYER))
+		_ground_laid = ground
+		_drift_arrays = Drift.surface_arrays(ground, heap, DRIFT_LAYER))
 
 
 func _show_drifts(baked: Array) -> void:

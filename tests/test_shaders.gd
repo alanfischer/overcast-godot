@@ -36,7 +36,7 @@ shader_type spatial;
 #include "res://addons/overcast/shaders/drift.gdshaderinc"
 varying vec3 world_pos;
 void vertex() {
-	overcast_drift(VERTEX, NORMAL, UV);
+	overcast_drift(VERTEX, NORMAL, UV, CUSTOM0, UV2.x);
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {

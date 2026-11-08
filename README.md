@@ -145,7 +145,9 @@ and go on their own.
   budget. A hidden cover keeps nothing off. Drops, haze, wet ground and rain sound all follow it.
 - **Showers:** turn on the weather's `cycle` and rain comes and goes on its own, building,
   wandering and dying away (`OvercastCycle`), in a wind that rises, falls and slowly turns and
-  blows harder in a shower (`cycle_wind`). The same `cycle_seed` gives the same weather.
+  blows harder in a shower (`cycle_wind`). The same `cycle_seed` gives the same weather. A game
+  that sets the rain itself can still take the cycle's wind without the showers' gusts, from
+  `OvercastCycle.breeze_at(t)`.
 - **Tuning** that a game would want to change is in the inspector: haze, drop and flake counts,
   how fast ground soaks and dries and snow settles and melts, the gaps between strikes, how dark cloud shadows are, how high the
   clouds sit.
@@ -162,9 +164,9 @@ Overcast has no networking of its own; you sync two things.
 
 A headless server draws nothing, but `floor_at(point)` still answers where rain stops there,
 moving covers included, for gameplay that cares whether something is out in the rain. It soaks and
-dries the ground too: for gameplay on wet ground (a slick floor), send the server's `wetness` and
-ask `rains_on(point)` on both ends. Each peer soaks its own from when it joined, so set a client's
-`wetness` to the server's when they part.
+dries the ground too: for gameplay on wet ground (a slick floor), send the server's `wetness`, turn
+`soaks` off on the clients so they hold what they are sent, and ask `rains_on(point)` on both ends.
+`snow_depth_at(point)` says how deep the snow lies, on any peer.
 
 ## Lighting the scene
 

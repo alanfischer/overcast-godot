@@ -244,6 +244,9 @@ const GROUND_REACH := 1.0
 ## Flakes around the camera at the lightest snow and at a blizzard.
 @export_range(0, 100000, 100) var flakes_light := 8000
 @export_range(0, 100000, 100) var flakes_heavy := 50000
+## Whether the ground soaks and dries by itself. Off, `wetness` stays as it is set: a client's, as
+## its server sends it, so the two agree on footing.
+@export var soaks := true
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var soak_time := 20.0
@@ -310,7 +313,7 @@ var snow_lying: float:
 	get:
 		return _snow_lying
 ## How wet the ground is, 0 dry to 1 soaked (overcast_wetness), as rain soaks it and it dries: on a
-## headless server too. Set it to agree with another peer; it soaks and dries on from there.
+## headless server too. Set it to agree with another peer: with `soaks` off it holds what it is set to.
 var wetness: float:
 	get:
 		return _wetness
@@ -734,7 +737,8 @@ func _ground_rate() -> float:
 
 
 func _soak() -> void:
-	_wetness = 1.0 if rainfall() > 0.0 else 0.0
+	if soaks:
+		_wetness = 1.0 if rainfall() > 0.0 else 0.0
 	_puddles = heaviness(rainfall())
 	_snow_lying = 1.0 if _settling() else 0.0
 	if _field:
@@ -982,6 +986,14 @@ func rains_on(p: Vector3) -> bool:
 	return floor_at(p) < p.y + GROUND_REACH
 
 
+## Metres of snow lying at world point `p`: the field's, drifts and melts and all, on a peer that
+## draws one; else the even layer as far as it has settled, where snow falls.
+func snow_depth_at(p: Vector3) -> float:
+	if _field:
+		return _field.depth_at(p)
+	return _snow_lying * DRIFT_LAYER if rains_on(p) else 0.0
+
+
 ## Where rain stops at world XZ `q`, covers included: off the floor INF, where no rain falls, or
 ## -INF with rain_beyond_floor; -INF with no floor.
 func floor_at(q: Vector3) -> float:
@@ -1135,8 +1147,9 @@ func _weather_ground(delta: float) -> void:
 	var melting := _snow_lying > 0.0 and not _settling()
 	var wet_target := 1.0 if (rainfall() > 0.0 or melting) and wet_ground else 0.0
 	var puddle_target := heaviness(rainfall()) if wet_ground else 0.0
-	_wetness = move_toward(_wetness, wet_target,
-		(lerpf(0.35, 1.0, puddle_target) / soak_time if wet_target > _wetness else 1.0 / dry_time) * delta)
+	if soaks:
+		_wetness = move_toward(_wetness, wet_target,
+			(lerpf(0.35, 1.0, puddle_target) / soak_time if wet_target > _wetness else 1.0 / dry_time) * delta)
 	_puddles = move_toward(_puddles, puddle_target,
 		(1.0 / puddle_time if puddle_target > _puddles else 1.0 / puddle_dry_time) * delta)
 
@@ -1219,7 +1232,8 @@ func _process(delta: float) -> void:
 			var strike_seed := randi()
 			strike(strike_seed)
 			struck.emit(strike_seed)
-	var on_ground := rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0
+	# Or still showing some: wetness set to none from outside is drawn as none.
+	var on_ground := rain > 0.0 or _wetness > 0.0 or _snow_lying > 0.0 or _wet_pushed.x > 0.0
 	if on_ground:
 		_weather_ground(delta)
 	if _field:

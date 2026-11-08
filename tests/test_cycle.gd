@@ -84,7 +84,7 @@ func test_the_breeze_alone_leaves_the_showers_out() -> void:
 	var same_way := true
 	while t < 3.0 * 3600.0:
 		t += 1.0
-		var calm := cycle.wind_at(t, false)
+		var calm := cycle.breeze_at(t)
 		var full := cycle.wind_at(t)
 		hardest = maxf(hardest, calm.length())
 		gap = maxf(gap, full.length() - calm.length())

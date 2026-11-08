@@ -2,7 +2,8 @@ class_name OvercastCycle
 extends RefCounted
 ## Weather that comes and goes on its own: showers of a few minutes that swell, wander and die
 ## away, with dry spells between, and a wind that rises, falls and turns, blowing harder in them.
-## rain_at(t) and wind_at(t) are the weather `t` seconds in, for OvercastWeather.rain and .wind;
+## rain_at(t) and wind_at(t) are the weather `t` seconds in, for OvercastWeather.rain and .wind
+## (breeze_at(t) for the wind without the showers);
 ## the same seed gives the same weather, so peers that share one agree without talking.
 
 ## Dry spell between showers, and how long one lasts (s).
@@ -71,13 +72,26 @@ func rain_at(t: float) -> float:
 	return maxf(_peak * _envelope(t) * wander, 0.01)
 
 
-## Wind across the ground at `t` seconds since restart() (m/s), blowing harder in a shower, or
-## without `showers` only the breeze between them: for a wind that comes and goes on its own while
-## the rain is set some other way. Times must not go backwards.
-func wind_at(t: float, showers := true) -> Vector3:
+## Wind across the ground at `t` seconds since restart() (m/s), blowing harder in a shower. Times
+## must not go backwards.
+func wind_at(t: float) -> Vector3:
 	_reach(t)
-	var rise := smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / WIND_WANDER))
-	var speed := lerpf(BREEZE.x, BREEZE.y, rise) + (SHOWER_WIND * _peak * _envelope(t) if showers else 0.0)
+	return _blowing(t, _breeze(t) + SHOWER_WIND * _peak * _envelope(t))
+
+
+## The breeze alone at `t`: wind_at without what a shower adds, for a wind that comes and goes on
+## its own while the rain is set some other way. Times must not go backwards.
+func breeze_at(t: float) -> Vector3:
+	_reach(t)
+	return _blowing(t, _breeze(t))
+
+
+func _breeze(t: float) -> float:
+	return lerpf(BREEZE.x, BREEZE.y, smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / WIND_WANDER)))
+
+
+## `speed` along the way the wind blows at `t`.
+func _blowing(t: float, speed: float) -> Vector3:
 	var angle := _prevailing + TURN * _wind_noise.get_noise_2d(t / TURN_WANDER, 100.0)
 	return Vector3(sin(angle), 0.0, cos(angle)) * speed
 

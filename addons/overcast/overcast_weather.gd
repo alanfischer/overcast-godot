@@ -836,7 +836,8 @@ func _ground_rate() -> float:
 
 
 func _soak() -> void:
-	if soaks:
+	# Frozen, the wet holds as ice.
+	if soaks and not (_freezing() and rainfall() <= 0.0):
 		_wetness = 1.0 if rainfall() > 0.0 else 0.0
 	_puddles = heaviness(rainfall())
 	if _settling():

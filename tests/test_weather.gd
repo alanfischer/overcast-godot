@@ -447,6 +447,11 @@ func test_wet_ground_freezes_over_and_thaws() -> void:
 	assert_almost_eq(w.wetness, 1.0, 1e-6, "the wet held in it, not dried")
 	assert_almost_eq(w.ice_at(open), 1.0, 1e-6, "on every cell")
 	assert_eq(w.ice_at(roofed), 0.0, "but none where no rain fell")
+	w.wetness = 0.5
+	w.settle()
+	assert_almost_eq(w.ice, 0.5, 1e-6, "settled while freezing, the wet holds as ice")
+	w.wetness = 1.0
+	w.settle()
 	w.temperature = Weather.ICE_DEGREES
 	for i in 10:
 		w._process(w.thaw_time / 20.0)

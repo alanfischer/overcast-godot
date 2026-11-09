@@ -12,9 +12,9 @@ const SHOWER := Vector2(90.0, 240.0)
 ## Peak rain a shower can reach, weighted toward the light end: a downpour is the rare one.
 const PEAK := Vector2(0.1, 1.0)
 ## Seconds a shower takes to build and to die away.
-const RAMP := 30.0
+const _RAMP := 30.0
 ## How far the rain wanders below its peak mid-shower.
-const WANDER := 0.4
+const _WANDER := 0.4
 ## Wind between showers (m/s), from near still to a breeze, and how much a shower adds at its
 ## peak by how hard it rains.
 const BREEZE := Vector2(0.5, 5.0)
@@ -22,8 +22,8 @@ const SHOWER_WIND := 6.0
 ## How far the wind turns either way from where it prevails (rad), and the seconds its speed and
 ## its direction take to wander.
 const TURN := PI * 0.5
-const WIND_WANDER := 90.0
-const TURN_WANDER := 600.0
+const _WIND_WANDER := 90.0
+const _TURN_WANDER := 600.0
 
 var _rng := RandomNumberGenerator.new()
 var _noise := FastNoiseLite.new()
@@ -68,7 +68,7 @@ func rain_at(t: float) -> float:
 	_reach(t)
 	if t <= _start:
 		return 0.0
-	var wander := 1.0 - WANDER * (0.5 + 0.5 * _noise.get_noise_1d(t))
+	var wander := 1.0 - _WANDER * (0.5 + 0.5 * _noise.get_noise_1d(t))
 	return maxf(_peak * _envelope(t) * wander, 0.01)
 
 
@@ -87,12 +87,12 @@ func breeze_at(t: float) -> Vector3:
 
 
 func _breeze(t: float) -> float:
-	return lerpf(BREEZE.x, BREEZE.y, smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / WIND_WANDER)))
+	return lerpf(BREEZE.x, BREEZE.y, smoothstep(-0.6, 0.6, _wind_noise.get_noise_1d(t / _WIND_WANDER)))
 
 
 ## `speed` along the way the wind blows at `t`.
 func _blowing(t: float, speed: float) -> Vector3:
-	var angle := _prevailing + TURN * _wind_noise.get_noise_2d(t / TURN_WANDER, 100.0)
+	var angle := _prevailing + TURN * _wind_noise.get_noise_2d(t / _TURN_WANDER, 100.0)
 	return Vector3(sin(angle), 0.0, cos(angle)) * speed
 
 
@@ -104,4 +104,4 @@ func _reach(t: float) -> void:
 func _envelope(t: float) -> float:
 	if t <= _start:
 		return 0.0
-	return smoothstep(0.0, RAMP, t - _start) * smoothstep(0.0, RAMP, _end - t)
+	return smoothstep(0.0, _RAMP, t - _start) * smoothstep(0.0, _RAMP, _end - t)

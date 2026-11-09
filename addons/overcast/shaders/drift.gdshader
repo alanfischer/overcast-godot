@@ -1,5 +1,5 @@
 shader_type spatial;
-// Drifted snow (OvercastSnowDrift.surface_mesh): the mesh lies on the ground's faces, and each
+// Drifted snow (surface_mesh in overcast_snow_drift.gd): the mesh lies on the ground's faces, and each
 // vertex rises by the snow the field cells about it hold over the even layer, so drifts heap up,
 // shift with the wind and melt as the field does. Thinner than OVERCAST_DRIFT_THIN it is not
 // drawn: the ground's own snow is there. A game that lights its world its own way writes its own

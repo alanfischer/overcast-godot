@@ -71,15 +71,15 @@ func test_rain_can_fall_past_the_floors_edges() -> void:
 
 func test_rain_sounds_muffled_under_the_roof() -> void:
 	var w := _weather()
-	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "no floor: in the open everywhere")
+	assert_eq(w._rain_exposure(Vector3.ZERO), 1.0, "no floor: in the open everywhere")
 	var img := Image.create_empty(64, 64, false, Image.FORMAT_RF)
 	img.fill(Color(0, 0, 0))
 	for y in range(28, 36):
 		for x in range(28, 36):
 			img.set_pixel(x, y, Color(3, 0, 0))  # an 8 m roof at 3 m in the middle of 64 m
 	w.rain_floor = RainFloor.create(img, Vector3(-32, 0, -32), Vector2(64, 64))
-	var under := w.rain_exposure(Vector3(0, 1.5, 0))
-	var open := w.rain_exposure(Vector3(-14, 1.5, -14))
+	var under := w._rain_exposure(Vector3(0, 1.5, 0))
+	var open := w._rain_exposure(Vector3(-14, 1.5, -14))
 	assert_lt(under, 0.6, "under the roof most of the rain is out of reach (%.2f)" % under)
 	assert_gt(open, 0.9, "out in the open it is all around (%.2f)" % open)
 	w.free()
@@ -387,8 +387,10 @@ func test_snowless_boxes_hold_for_every_floor() -> void:
 	assert_gt(w.snow_depth_at(Vector3(15.5, 0, 10.5)), 0.0, "and only there")
 	var later := AABB(Vector3(0, -1, 0), Vector3(5, 2, 20))
 	w.add_snowless(later)
+	assert_true(w.has_snowless(later), "held")
 	assert_eq(w.snow_depth_at(Vector3(2.5, 0, 10.5)), 0.0, "one given after it at once")
 	w.remove_snowless(later)
+	assert_false(w.has_snowless(later), "and let go of")
 	for i in 100:
 		w._process(w.snow_time / 50.0)
 	assert_almost_eq(w.snow_depth_at(Vector3(2.5, 0, 10.5)), Weather.DRIFT_LAYER, 1e-4, "let go of, it snows over")
@@ -406,11 +408,12 @@ func test_a_melt_digs_out_the_snow() -> void:
 	w.temperature = -5.0
 	w.settle()
 	var at := Vector3(20.5, 0.1, 10.5)
-	assert_true(w.melt(at, 2.0, 0.5), "a melt says it melted some")
+	assert_true(w.heat(at, 2.0, 0.5), "a warm heat says it melted some")
 	assert_almost_eq(w.snow_depth_at(at), Weather.DRIFT_LAYER * 0.5, 1e-6, "half melted")
-	w.melt(at, 2.0)
+	w.heat(at, 2.0)
 	assert_eq(w.snow_depth_at(at), 0.0, "bare where it struck")
-	assert_false(w.melt(Vector3(-50, 0, -50), 2.0), "and none off the floor, with nothing to melt")
+	assert_false(w.heat(Vector3(-50, 0, -50), 2.0), "and none off the floor, with nothing to melt")
+	assert_false(w.heat(at + Vector3(4, 0, 0), 2.0, -1.0), "cold leaves the snow be")
 	for i in 100:
 		w._process(w.snow_time / 50.0)
 	assert_almost_eq(w.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-4, "snowed over again")
@@ -428,7 +431,7 @@ func test_a_headless_peer_keeps_the_snow() -> void:
 	server.settle()
 	var at := Vector3(20.5, 0.1, 10.5)
 	assert_almost_eq(server.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-6, "a server snows over")
-	assert_true(server.melt(at, 2.0), "and melts it")
+	assert_true(server.heat(at, 2.0), "and melts it")
 	assert_eq(server.snow_depth_at(at), 0.0, "bare where it struck")
 	var client := _weather()
 	_keep(client)
@@ -559,6 +562,14 @@ func test_cold_freezes_wet_ground_where_it_lands_and_heat_thaws_it() -> void:
 	assert_almost_eq(_ice_at(w, at), 0.6, 1e-6, "and holds while it freezes")
 	w.heat(at, 2.0, 1.0)
 	assert_eq(_ice_at(w, at), 0.0, "fire thaws it")
+	w.rain = 1.0
+	w.settle()
+	assert_gt(w.snow_depth_at(at), 0.0, "snowed over")
+	assert_gt(_ice_at(w, at), 0.0, "the ice")
+	assert_true(w.heat(at, 2.0, 1.0), "and one blast")
+	assert_eq(w.snow_depth_at(at), 0.0, "melts the snow")
+	assert_eq(_ice_at(w, at), 0.0, "and thaws the ice under it")
+	w.rain = 0.0
 	for i in 20:
 		w._process(w.freeze_time)
 	assert_almost_eq(_ice_at(w, at), 0.6, 1e-6, "and it freezes over again with the rest")
@@ -599,12 +610,12 @@ func test_a_snow_storm_greys_the_sky_pale() -> void:
 	w.rain = 1.0
 	w.settle()
 	w._process(0.1)
-	var dark := SkyScript.luma(sky.horizon_now())
+	var dark := SkyScript._luma(sky.horizon_now())
 	w.temperature = -5.0
 	for i in 100:
 		w._process(0.1)
 	assert_eq(sky.snowy, 1.0, "the sky follows the snow")
-	assert_gt(SkyScript.luma(sky.horizon_now()), dark * 1.5, "paler at the horizon than a rain storm's")
+	assert_gt(SkyScript._luma(sky.horizon_now()), dark * 1.5, "paler at the horizon than a rain storm's")
 	assert_eq(w._haze_base(sky, Color.WHITE), sky.horizon_now(), "and the haze fades into it")
 
 
@@ -841,6 +852,70 @@ func test_the_sun_is_let_go_of_as_it_was() -> void:
 	assert_lt(second.light_energy, 1.0, "the new sun is dimmed from its own light")
 	_root().remove_child(w)
 	assert_almost_eq(second.light_energy, 1.0, 1e-6, "and let go of when the weather leaves")
+	_root().add_child(w)
+
+
+func test_the_editor_drives_the_sun_and_saves_it_as_it_was() -> void:
+	var scene := Node3D.new()
+	_keep(scene)
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	sun.light_color = Color(1.0, 0.9, 0.8)
+	sun.rotation = Vector3(-0.5, 0.3, 0.0)
+	var basis := sun.basis
+	scene.add_child(sun)
+	sun.owner = scene
+	var w := _weather()
+	w._editor = true
+	w.sky = SkyScript.new({"drawing": false, "time_of_day": 18.2})
+	w.sun = sun
+	scene.add_child(w)
+	_root().add_child(scene)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	assert_lt(sun.light_energy, 2.0, "previewed: the storm dims the sun")
+	assert_ne(sun.light_color, Color(1.0, 0.9, 0.8), "dusk tints it")
+	assert_false(sun.basis.is_equal_approx(basis), "and it turns with the time")
+	w.notification(Node.NOTIFICATION_EDITOR_PRE_SAVE)
+	var packed := PackedScene.new()
+	packed.pack(scene)
+	w.notification(Node.NOTIFICATION_EDITOR_POST_SAVE)
+	assert_lt(sun.light_energy, 2.0, "saved, the preview carries on")
+	var saved: DirectionalLight3D = packed.instantiate().get_child(0)
+	assert_almost_eq(saved.light_energy, 2.0, 1e-6, "but the scene keeps the sun's own light")
+	assert_eq(saved.light_color, Color(1.0, 0.9, 0.8), "its own colour")
+	assert_true(saved.basis.is_equal_approx(basis), "and its own direction")
+	saved.free()
+	w._process(0.1)
+	assert_lt(sun.light_energy, 2.0, "and the save is not taken for an edit")
+	_root().remove_child(scene)
+	assert_almost_eq(sun.light_energy, 2.0, 1e-6, "let go of as it was")
+
+
+func test_a_change_to_the_sun_from_outside_is_its_own() -> void:
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	_keep(sun)
+	_root().add_child(sun)
+	var w := _weather()
+	_keep(w)
+	w.sky = SkyScript.new({"drawing": false, "time_of_day": 12.0})
+	w.sun = sun
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	var dimmed := sun.light_energy
+	assert_lt(dimmed, 2.0, "the storm dims it")
+	sun.light_energy = 4.0
+	sun.light_color = Color(1.0, 0.5, 0.5)
+	w._process(0.1)
+	assert_almost_eq(sun.light_energy, dimmed * 2.0, 1e-4, "an energy set from outside is the sun's own, dimmed in turn")
+	assert_eq(sun.light_color, Color(1.0, 0.5, 0.5), "and so is a colour, white at noon")
+	_root().remove_child(w)
+	assert_almost_eq(sun.light_energy, 4.0, 1e-6, "let go of with it")
+	assert_eq(sun.light_color, Color(1.0, 0.5, 0.5), "and its colour")
 	_root().add_child(w)
 
 
@@ -1096,7 +1171,7 @@ func test_clearing_the_floor_lets_rain_fall_everywhere() -> void:
 	w.rain_floor = _roofed_floor()
 	w.rain_floor = null
 	assert_eq(w.floor_at(Vector3(-1.5, 0, -0.5)), -INF, "no floor, no roof")
-	assert_eq(w.rain_exposure(Vector3.ZERO), 1.0, "and the rain all around")
+	assert_eq(w._rain_exposure(Vector3.ZERO), 1.0, "and the rain all around")
 
 
 func test_the_sun_light_turns_with_the_sky() -> void:
@@ -1162,8 +1237,8 @@ func test_a_sky_is_let_go_of_clear() -> void:
 	var w := _weather()
 	_keep(w)
 	var sky := FakeSky.new({"drawing": false})
-	var flashes: Array[float] = []
-	w.flash_changed.connect(func(k: float) -> void: flashes.append(k))
+	var flashes: Array[Color] = []
+	w.flash_changed.connect(func(light: Color) -> void: flashes.append(light))
 	w.sky = sky
 	_root().add_child(w)
 	w.rain = 1.0
@@ -1173,11 +1248,12 @@ func test_a_sky_is_let_go_of_clear() -> void:
 	w._process(0.01)
 	assert_gt(sky.storm, 0.9, "the storm is on the sky")
 	assert_ne(sky.flash, Color.BLACK, "and so is the flash")
+	assert_gt(flashes[-1].b, flashes[-1].r, "the scene's flash is a bluish light")
 	_root().remove_child(w)
 	assert_eq(sky.storm, 0.0, "gone, the weather takes its storm")
 	assert_eq(sky.snowy, 0.0, "and its snow")
 	assert_eq(sky.flash, Color.BLACK, "and its flash")
-	assert_eq(flashes[-1], 0.0, "which ends on 0 for the scene's light too")
+	assert_eq(flashes[-1], Color.BLACK, "which ends on black for the scene's light too")
 	_root().add_child(w)
 	w._process(0.01)
 	assert_gt(sky.storm, 0.9, "back, it brings them again")

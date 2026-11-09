@@ -11,27 +11,27 @@ extends Node3D
 ##
 ## Any material whose shader includes shaders/wet.gdshaderinc gets wet, and one that includes
 ## shaders/snow.gdshaderinc gets snowed on: the weather reaches it through global uniforms
-## (OvercastGlobals), so one weather drives a scene at a time.
+## (overcast_globals.gd), so one weather drives a scene at a time.
 ##
 ## Networked games: let one peer time the strikes (times_strikes), send the seed `struck` hands
 ## you, and call strike(seed) with it on the others. Everything about a strike comes from its
 ## seed, so every peer sees the same bolt.
 
-## Lightning, every frame of a strike: `k` is its light, 0 to 1, ending on 0. Add it to the light
-## the sky puts on your scene (FLASH * k) to light the open ground and not a torch-lit room.
-signal flash_changed(k: float)
+## Lightning, every frame of a strike: the linear light it adds to what the sky puts on your scene,
+## ending on black. Add it there to light the open ground and not a torch-lit room.
+signal flash_changed(light: Color)
 ## A strike timed here (times_strikes); strike(seed) has already been called.
 signal struck(strike_seed: int)
 
-const Cycle = preload("res://addons/overcast/overcast_cycle.gd")
-const Globals = preload("res://addons/overcast/overcast_globals.gd")
-const Live = preload("res://addons/overcast/rain_floor_live.gd")
-const Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
-const Field = preload("res://addons/overcast/overcast_snow_field.gd")
-const Ice = preload("res://addons/overcast/overcast_ice_field.gd")
+const _Cycle = preload("res://addons/overcast/overcast_cycle.gd")
+const _Globals = preload("res://addons/overcast/overcast_globals.gd")
+const _Live = preload("res://addons/overcast/rain_floor_live.gd")
+const _Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
+const _Field = preload("res://addons/overcast/overcast_snow_field.gd")
+const _Ice = preload("res://addons/overcast/overcast_ice_field.gd")
 
 ## Lightning's light at the peak of a strike, as linear light added to the sky's.
-const FLASH := Vector3(2.0, 2.1, 2.6)
+const _FLASH := Color(2.0, 2.1, 2.6)
 ## What it lights the sky itself with, brightest toward the bolt. A day sky is already bright, and
 ## the full flash would white it out and hide the bolt, so it takes _SKY_FLASH_DAY of it, rising to
 ## all of it at the sky's full night.
@@ -218,8 +218,10 @@ const _GROUND_REACH := 1.0
 
 @export_group("Scene light")
 ## A sun to dim under the storm and light with the flash, and, while the sky's sun follows the
-## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional. Let go
-## of, as it was, when replaced or when the weather leaves the tree.
+## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional. Its own
+## energy, colour and direction, as set, are the noon sun's: a change made to them from outside
+## (the inspector, code) is its own from then on. Let go of, as it was, when replaced or when the
+## weather leaves the tree. In the editor it is driven too, for the preview, and saved as it was.
 @export var sun: DirectionalLight3D:
 	set(light):
 		if light == sun:
@@ -249,11 +251,11 @@ const _GROUND_REACH := 1.0
 ## Snow covers every material that includes shaders/snow.gdshaderinc.
 @export var lying_snow := true
 ## In a wind, lying snow heaps up in the lee of walls and banks against them, drawn as a surface of
-## its own over the ground's snow (OvercastSnowDrift). Baked off the main thread from the rain
+## its own over the ground's snow (overcast_snow_drift.gd). Baked off the main thread from the rain
 ## floor, and again when the steady wind turns.
 @export var snow_drifts := true
 ## The deepest a drift starts against a wall or a cliff (m); it slopes away downwind from there.
-@export_range(0.3, 5.0, 0.05, "or_greater", "suffix:m") var drift_deepest := Drift.DEEPEST
+@export_range(0.3, 5.0, 0.05, "or_greater", "suffix:m") var drift_deepest := _Drift.DEEPEST
 ## Drifts lie on the faces of the meshes under this (the level's standing geometry), where they
 ## face up and rain reaches them, and so end where those faces do. None: this weather's parent.
 @export var drift_ground: Node3D:
@@ -324,8 +326,10 @@ var cover_budget_usec: int:
 		return _live.budget_usec
 	set(v):
 		_live.budget_usec = v
-## Whether this draws and plays the weather. Off on a headless server, which only times the
-## strikes and answers floor_at. Set before it enters the tree.
+## Whether this draws and plays the weather. Off on a headless server, which still times the
+## strikes, keeps the ground's wet, ice and snow and answers the *_at queries, but draws and plays
+## nothing. Set before it enters the tree. (Not OvercastSky.drawing, which is which sky holds the
+## cloud layer.)
 var presenting := DisplayServer.get_name() != "headless"
 ## Draws a bolt instead of the built-in one: (points: PackedVector3Array, width: float,
 ## brightness: float, fade: float) -> void. Called for each stroke.
@@ -370,7 +374,9 @@ var wind_now: Vector3:
 	get:
 		return _wind_now
 ## How far the sky has closed over, 0 to 1: follows the rain at _STORM_RATE.
-var storm := 0.0
+var storm: float:
+	get:
+		return _storm
 ## Seconds into the showers (cycle). Peers that share cycle_seed and this agree on the rain; set
 ## back, the showers are planned afresh from the start.
 var cycle_time := 0.0:
@@ -378,13 +384,16 @@ var cycle_time := 0.0:
 		if t < cycle_time:
 			_cycle = null
 		cycle_time = t
-var _cycle: Cycle
+var _cycle: _Cycle
 var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
 var _sky_storm := Vector2(NAN, NAN)
 ## How much of the storm is snow: follows snow_share at _STORM_RATE, as the sky turns pale.
-var snowy := 0.0
-## In the editor it draws, for a preview, but makes no sound, times no strikes and leaves the
-## scene's own nodes (the sun) as they are saved.
+var snowy: float:
+	get:
+		return _snowy
+var _storm := 0.0
+var _snowy := 0.0
+## In the editor it draws, for a preview, but makes no sound and times no strikes.
 var _editor := Engine.is_editor_hint()
 var _flash_t := -1.0
 var _flash_k := 0.0
@@ -401,12 +410,12 @@ var _haze_material: ShaderMaterial
 var _rain_audio: AudioStreamPlayer
 var _wind_audio: AudioStreamPlayer
 var _linear_output := true
-var _live := Live.new()
+var _live := _Live.new()
 ## The drifts' material (shaders/drift.gdshader): its `contours` show how deep they are.
 var drift_material: ShaderMaterial
 var _drifts: MeshInstance3D
-var _field: Field  # the snow lying on the rain floor, cell by cell, drawn or not
-var _ice_field: Ice  # the ice, drawn or not
+var _field: _Field  # the snow lying on the rain floor, cell by cell, drawn or not
+var _ice_field: _Ice  # the ice, drawn or not
 var _field_drifted := false  # its target is a wind's drifts, not the even layer
 var _drift_target := PackedFloat32Array()
 var _snowless: Array[AABB] = []
@@ -417,9 +426,9 @@ var _drift_task := -1
 var _drift_arrays := []
 var _faces := PackedVector3Array()  # drift_ground's faces, in the world
 var _faces_taken := false
-var _ground: Drift.Ground  # what the drifts lie on, laid for _ground_floor
+var _ground: _Drift.Ground  # what the drifts lie on, laid for _ground_floor
 var _ground_floor: OvercastRainFloor
-var _ground_laid: Drift.Ground  # what the bake under way laid them on
+var _ground_laid: _Drift.Ground  # what the bake under way laid them on
 var _rain_db := 0.0
 var _exposure := 1.0
 var _exposure_target := 1.0
@@ -454,9 +463,13 @@ var _slant_pushed := Vector2.INF
 var _ground_slant := Vector4.INF
 var _ground_shift := 1.0
 var _ground_pushed := -1.0
-var _sun_energy := -1.0  # the sun's own light while taken; -1 when not
+var _sun_taken := false
+var _sun_energy := 1.0  # the sun's own light, colour and direction, while taken
 var _sun_color := Color.WHITE
 var _sun_basis := Basis()
+var _sun_set_energy := 0.0  # what this last left the sun at, to tell a change from outside
+var _sun_set_color := Color.WHITE
+var _sun_set_basis := Basis()
 ## The instance id of the weather whose rain the globals carry.
 static var _globals_owner := 0
 
@@ -468,7 +481,7 @@ func _ready() -> void:
 		update_configuration_warnings.call_deferred()  # once the environment is in
 	if not presenting:
 		return
-	_linear_output = OvercastSky.renderer_is_linear()
+	_linear_output = OvercastSky._renderer_is_linear()
 	_drop_material = _falling_material(preload("res://addons/overcast/shaders/rain.gdshader"), _DROP_BOX)
 	_drops = _falling("RainDrops", _drop_material)
 	_flake_material = _falling_material(preload("res://addons/overcast/shaders/snow.gdshader"), _FLAKE_BOX)
@@ -562,7 +575,7 @@ func _exit_tree() -> void:
 	if _flash_t >= 0.0:  # a flash ends on 0, whatever cuts it short
 		_flash_t = -1.0
 		_flash_k = 0.0
-		flash_changed.emit(0.0)
+		flash_changed.emit(Color.BLACK)
 	if _globals_owner == get_instance_id():
 		_globals_owner = 0
 		for key in ["overcast_has_rain_floor", "overcast_rain_beyond_floor", "overcast_rain_floor",
@@ -572,37 +585,60 @@ func _exit_tree() -> void:
 				"overcast_snow_field", "overcast_rainfall", "overcast_rain_slant",
 				"overcast_ground_slant", "overcast_ground_shift", "overcast_ice",
 				"overcast_has_ice_field", "overcast_ice_field"]:
-			Globals.reset(key)
+			_Globals.reset(key)
 
 
 func _take_sun() -> void:
-	if sun and _sun_energy < 0.0 and presenting and not _editor and is_inside_tree():
+	if sun and not _sun_taken and presenting and is_inside_tree():
+		_sun_taken = true
 		_sun_energy = sun.light_energy
 		_sun_color = sun.light_color
 		_sun_basis = sun.basis
+		_note_sun()
 
 
 func _let_sun_go() -> void:
-	if _sun_energy >= 0.0 and is_instance_valid(sun):
-		sun.light_energy = _sun_energy
-		sun.light_color = _sun_color
-		sun.basis = _sun_basis
-	_sun_energy = -1.0
+	if _sun_taken and is_instance_valid(sun):
+		_restore_sun()
+	_sun_taken = false
+
+
+func _restore_sun() -> void:
+	sun.light_energy = _sun_energy
+	sun.light_color = _sun_color
+	sun.basis = _sun_basis
+	_note_sun()
+
+
+func _note_sun() -> void:
+	_sun_set_energy = sun.light_energy
+	_sun_set_color = sun.light_color
+	_sun_set_basis = sun.basis
+
+
+## The editor saves the sun as it was, not as the preview drives it: what is saved is what the
+## next run takes for the noon sun.
+func _notification(what: int) -> void:
+	if not _sun_taken or not is_instance_valid(sun):
+		return
+	if what == NOTIFICATION_EDITOR_PRE_SAVE:
+		_restore_sun()
+	elif what == NOTIFICATION_EDITOR_POST_SAVE:
+		_drive_sun(current_sky())
 
 
 ## The sky this has been closing over, back to clear: no storm, no snow, no flash.
 func _let_sky_go() -> void:
 	var told := instance_from_id(_sky_told) as OvercastSky
 	if told:
-		told.storm = 0.0
-		told.snowy = 0.0
+		told.set_weather(0.0, 0.0)
 		told.set_flash(Color.BLACK, Vector3.UP)
 	_sky_told = 0
 
 
 func _get_configuration_warnings() -> PackedStringArray:
 	var warnings := PackedStringArray()
-	if not Globals.declared():
+	if not _Globals.declared():
 		warnings.append("Overcast's global shader uniforms are not declared: enable the Overcast plugin in Project Settings > Plugins.")
 	if current_sky() == null:
 		warnings.append("No OvercastSky to close over: set `sky`, or give the WorldEnvironment's Sky an OvercastSky material. Rain still falls.")
@@ -649,8 +685,8 @@ func _bake_in_editor() -> void:
 ## A scene loaded into rain already falling starts soaked.
 func _take_floor() -> void:
 	_live.set_floor(rain_floor, presenting)
-	_field = Field.new(rain_floor, DRIFT_LAYER, presenting) if _live.image else null
-	_ice_field = Ice.new(rain_floor, presenting) if _live.image else null
+	_field = _Field.new(rain_floor, DRIFT_LAYER, presenting) if _live.image else null
+	_ice_field = _Ice.new(rain_floor, presenting) if _live.image else null
 	if _field:
 		_field.keep_off(_snowless)
 	if _ice_field:
@@ -675,24 +711,24 @@ func _push_floor() -> void:
 	_rainfall_pushed = -1.0
 	_slant_pushed = Vector2.INF
 	_ground_pushed = -1.0
-	Globals.set_value("overcast_has_rain_floor", _live.texture != null)
-	Globals.set_value("overcast_rain_beyond_floor", rain_beyond_floor)
-	Globals.set_value("overcast_rain_floor", _live.texture)
-	Globals.set_value("overcast_rain_under", _live.under_texture)
-	Globals.set_value("overcast_rain_floor_origin", _live.origin)
-	Globals.set_value("overcast_rain_floor_size", _live.size)
-	Globals.set_value("overcast_rain_top", _live.top)
-	Globals.set_value("overcast_has_snow_field", _field != null)
-	Globals.set_value("overcast_snow_field", _field.texture if _field else null)
-	Globals.set_value("overcast_has_ice_field", _ice_field != null)
-	Globals.set_value("overcast_ice_field", _ice_field.texture if _ice_field else null)
+	_Globals.set_value("overcast_has_rain_floor", _live.texture != null)
+	_Globals.set_value("overcast_rain_beyond_floor", rain_beyond_floor)
+	_Globals.set_value("overcast_rain_floor", _live.texture)
+	_Globals.set_value("overcast_rain_under", _live.under_texture)
+	_Globals.set_value("overcast_rain_floor_origin", _live.origin)
+	_Globals.set_value("overcast_rain_floor_size", _live.size)
+	_Globals.set_value("overcast_rain_top", _live.top)
+	_Globals.set_value("overcast_has_snow_field", _field != null)
+	_Globals.set_value("overcast_snow_field", _field.texture if _field else null)
+	_Globals.set_value("overcast_has_ice_field", _ice_field != null)
+	_Globals.set_value("overcast_ice_field", _ice_field.texture if _ice_field else null)
 
 
 ## Straight to the weather the current rain is heading for: the storm closed over as far as it
 ## goes, the ground soaked or snowed over. For a scene that starts mid-shower, and for screenshots.
 func settle() -> void:
-	storm = _storm_target()
-	snowy = snow_share
+	_storm = _storm_target()
+	_snowy = snow_share
 	_soak()
 	_ground_shift = 1.0
 	_ground_slant = Vector4.INF
@@ -714,7 +750,7 @@ func bake_drifts() -> void:
 	_field_drifted = true
 	_field.fill(_snow_cover)
 	if presenting:
-		_show_drifts(Drift.surface_arrays(_laid(rain_floor, _ground_faces()), _field.target, DRIFT_LAYER))
+		_show_drifts(_Drift.surface_arrays(_laid(rain_floor, _ground_faces()), _field.target, DRIFT_LAYER))
 
 
 func _drifting() -> bool:
@@ -748,16 +784,16 @@ func _drifts_on(_mesh: MeshInstance3D) -> bool:
 
 
 ## What the drifts lie on for `source`, laid from `faces` the first time.
-func _laid(source: OvercastRainFloor, faces: PackedVector3Array) -> Drift.Ground:
+func _laid(source: OvercastRainFloor, faces: PackedVector3Array) -> _Drift.Ground:
 	if _ground_floor != source or _ground == null:
-		_ground = Drift.lay(source, faces)
+		_ground = _Drift.lay(source, faces)
 		_ground_floor = source
 	return _ground
 
 
 ## The snow `rain_floor` holds once it has all settled in `wind`, rounded off.
 static func _drifted(source: OvercastRainFloor, steady: Vector3, deepest: float) -> PackedFloat32Array:
-	return Drift.rounded(source, Drift.bake(source, steady, DRIFT_LAYER, deepest).get_data().to_float32_array())
+	return _Drift.rounded(source, _Drift.bake(source, steady, DRIFT_LAYER, deepest).get_data().to_float32_array())
 
 
 ## Shows the drifts while snow lies, and bakes them again for a new floor, or a wind that has
@@ -814,9 +850,9 @@ func _update_drifts(delta: float) -> void:
 			heap[i] = maxf(heap[i], lying[i])
 		for c in bare:
 			heap[c] = 0.0
-		var ground := laid if laid else Drift.lay(source, faces)
+		var ground := laid if laid else _Drift.lay(source, faces)
 		_ground_laid = ground
-		_drift_arrays = Drift.surface_arrays(ground, heap, DRIFT_LAYER))
+		_drift_arrays = _Drift.surface_arrays(ground, heap, DRIFT_LAYER))
 
 
 func _even_target() -> PackedFloat32Array:
@@ -832,7 +868,7 @@ func _show_drifts(baked: Array) -> void:
 		_drifts.name = "SnowDrifts"
 		_drifts.top_level = true
 		add_child(_drifts)
-	_drifts.mesh = Drift.surface_mesh(baked, drift_material)
+	_drifts.mesh = _Drift.surface_mesh(baked, drift_material)
 	_drifts.visible = _snow_cover > 0.0
 
 
@@ -862,22 +898,21 @@ func remove_snowless(box: AABB) -> void:
 		_ice_field.keep_only(_snowless)
 
 
-## Melts `amount` (1 all) of the lying snow within `radius` metres of `at`, on what lies near its
-## height: in full in the middle, thinning out to the edge. It fills in again as snow keeps
-## settling. For fire and explosions, with heat() for the ice. Drawn or not, for footing
-## (snow_depth_at): one peer says where, and the others take the same melt. Whether any snow
-## changed.
-func melt(at: Vector3, radius: float, amount := 1.0) -> bool:
-	return _field != null and _field.melt(at, radius, amount)
+func has_snowless(box: AABB) -> bool:
+	return _snowless.has(box)
 
 
-## Heats the ground's ice within `radius` metres of `at`, as melt() does the snow. Warm (`amount`
-## > 0, fire) thaws that share of it, and while it is freezing it freezes over again. Cold
-## (`amount` < 0) freezes that share of the wet ground, which holds while it is freezing and thaws
-## once it is not; dry ground has nothing to freeze. Drawn or not, for footing (ice_at): one
-## peer says where, and the others take the same heat. Whether any ice changed.
-func heat(at: Vector3, radius: float, amount: float) -> bool:
-	return _ice_field != null and _ice_field.heat(at, radius, amount, _wetness)
+## Heat on the ground within `radius` metres of `at`, on what lies near its height: in full in the
+## middle, thinning out to the edge. Warm (`amount` > 0, fire) melts that share of the lying snow
+## and thaws that share of the ice; snow fills in again while it keeps settling, and ice freezes
+## over again while it is freezing. Cold (`amount` < 0) freezes that share of the wet ground, which
+## holds while it is freezing and thaws once it is not; dry ground has nothing to freeze. Drawn or
+## not, for footing (snow_depth_at, ice_at): one peer says where, and the others take the same
+## heat. Whether any snow or ice changed.
+func heat(at: Vector3, radius: float, amount := 1.0) -> bool:
+	var melted := _field != null and _field.melt(at, radius, amount)
+	var thawed := _ice_field != null and _ice_field.heat(at, radius, amount, _wetness)
+	return melted or thawed
 
 
 ## How fast lying wet or snow comes round to a new wind, per second: as snow settles where it lies,
@@ -1118,7 +1153,7 @@ func _ears(fallback := Vector3.ZERO) -> Vector3:
 ## How much of the rain around `ears` reaches them, 0 under a roof with no open sky in reach to 1
 ## in the open. Each sample point counts where rain lands below the ears there; the near ring
 ## counts most. Walls between are not seen: rain past one reads as rain through it.
-func rain_exposure(ears: Vector3) -> float:
+func _rain_exposure(ears: Vector3) -> float:
 	if _live.image == null:
 		return 1.0
 	if not presenting:
@@ -1200,7 +1235,7 @@ func _update_exposure(delta: float) -> void:
 	_sample_in -= delta
 	if _sample_in <= 0.0:
 		_sample_in = _RAIN_SAMPLE_EVERY
-		_exposure_target = rain_exposure(_ears())
+		_exposure_target = _rain_exposure(_ears())
 	if _exposure != _exposure_target:
 		_exposure = move_toward(_exposure, _exposure_target, _RAIN_EASE * delta)
 		if _rain_audio.playing:
@@ -1267,7 +1302,7 @@ func _blow(delta: float) -> void:
 	if slant != _slant_pushed:
 		_slant_pushed = slant
 		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_rain_slant", slant)
+		_Globals.set_value("overcast_rain_slant", slant)
 	_turn_ground(delta, slant)
 
 
@@ -1287,14 +1322,14 @@ func _turn_ground(delta: float, slant: Vector2) -> void:
 			_ground_shift = 0.0
 		_ground_pushed = -1.0
 		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_ground_slant", _ground_slant)
+		_Globals.set_value("overcast_ground_slant", _ground_slant)
 	if _ground_shift < 1.0:
 		_ground_shift = move_toward(_ground_shift, 1.0, _ground_rate() * delta)
 	var shift := snappedf(_ground_shift, 1.0 / 255.0) if _ground_shift < 1.0 else 1.0
 	if shift != _ground_pushed:
 		_ground_pushed = shift
 		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_ground_shift", shift)
+		_Globals.set_value("overcast_ground_shift", shift)
 
 
 func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
@@ -1371,21 +1406,21 @@ func _update_wet(reflected: Color) -> void:
 	if glaze != _ice_pushed:
 		_ice_pushed = glaze
 		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_ice", glaze)
+		_Globals.set_value("overcast_ice", glaze)
 	var falling := snappedf(_heaviness(rainfall), 1.0 / 255.0)
 	if falling != _rainfall_pushed:
 		_rainfall_pushed = falling
 		_globals_owner = get_instance_id()
-		Globals.set_value("overcast_rainfall", falling)
+		_Globals.set_value("overcast_rainfall", falling)
 	var state := Vector4(_wetness, _puddles, reflected.get_luminance(), _flash_k).snapped(Vector4.ONE / 255.0)
 	if state == _wet_pushed:
 		return
 	_wet_pushed = state
 	var srgb := reflected.linear_to_srgb()
 	_globals_owner = get_instance_id()
-	Globals.set_value("overcast_wetness", state.x)
-	Globals.set_value("overcast_puddles", state.y)
-	Globals.set_value("overcast_rain_sky", Vector3(srgb.r, srgb.g, srgb.b))
+	_Globals.set_value("overcast_wetness", state.x)
+	_Globals.set_value("overcast_puddles", state.y)
+	_Globals.set_value("overcast_rain_sky", Vector3(srgb.r, srgb.g, srgb.b))
 
 
 func _update_snow() -> void:
@@ -1394,7 +1429,7 @@ func _update_snow() -> void:
 		return
 	_snow_pushed = lying
 	_globals_owner = get_instance_id()
-	Globals.set_value("overcast_snow_cover", lying)
+	_Globals.set_value("overcast_snow_cover", lying)
 
 
 ## Drops are only seen by the light on them: dim under a storm sky, dimmer at night, and lit up
@@ -1434,12 +1469,12 @@ func current_sky() -> OvercastSky:
 func _process(delta: float) -> void:
 	if cycle and not _editor:
 		if _cycle == null:
-			_cycle = Cycle.new(cycle_seed)
+			_cycle = _Cycle.new(cycle_seed)
 		cycle_time += delta * cycle_speed
 		rain = _cycle.rain_at(cycle_time)
 		if cycle_wind:
 			wind = _cycle.wind_at(cycle_time)
-	storm = move_toward(storm, _storm_target(), _STORM_RATE * delta)
+	_storm = move_toward(_storm, _storm_target(), _STORM_RATE * delta)
 	# Snow hardly ever thunders: strikes come with the rain in it.
 	if rainfall > 0.0 and lightning and times_strikes and not _editor:
 		_next_strike -= delta
@@ -1461,10 +1496,9 @@ func _process(delta: float) -> void:
 	if not presenting:
 		return
 	var drawn := current_sky()
-	snowy = move_toward(snowy, snow_share, _STORM_RATE * delta)
+	_snowy = move_toward(_snowy, snow_share, _STORM_RATE * delta)
 	if drawn and (drawn.get_instance_id() != _sky_told or Vector2(storm, snowy) != _sky_storm):
-		drawn.storm = storm
-		drawn.snowy = snowy
+		drawn.set_weather(_storm, _snowy)
 		_sky_told = drawn.get_instance_id()
 		_sky_storm = Vector2(storm, snowy)
 	_live.update(delta)
@@ -1487,20 +1521,11 @@ func _process(delta: float) -> void:
 			k = 0.0
 			_flash_t = -1.0
 		_flash_k = k
-		flash_changed.emit(k)
+		flash_changed.emit(_FLASH * k)
 		if drawn:
 			drawn.set_flash(_SKY_FLASH * k * lerpf(_SKY_FLASH_DAY, 1.0, drawn.night), _flash_dir)
-	if sun and _sun_energy >= 0.0 and drawn and drawn.sun_follows_time:
-		var toward := drawn.light_dir()
-		if not toward.is_equal_approx(sun.global_basis.z):
-			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
-			sun.global_basis = Basis.looking_at(-toward, up)
-		# Below the horizon it lights nothing: the ground is in the way.
-		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
-			* drawn.light_strength()
-	if sun and _sun_energy >= 0.0:
-		var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
-		sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * FLASH.x
+	if _sun_taken and is_instance_valid(sun):
+		_drive_sun(drawn)
 	var light := _scene_light(drawn)
 	var drop_light := light * _DROP_LIGHT + _SKY_FLASH * _flash_k * _DROP_FLASH
 	_update_drops(drop_light)
@@ -1512,6 +1537,27 @@ func _process(delta: float) -> void:
 		_update_wet(haze_color)
 
 
+func _drive_sun(drawn: OvercastSky) -> void:
+	# Changed since this last set it: someone else's doing, and the sun's own from now on.
+	if sun.light_energy != _sun_set_energy:
+		_sun_energy = sun.light_energy
+	if sun.light_color != _sun_set_color:
+		_sun_color = sun.light_color
+	if sun.basis != _sun_set_basis:
+		_sun_basis = sun.basis
+	if drawn and drawn.sun_follows_time:
+		var toward := drawn.light_dir()
+		if not toward.is_equal_approx(sun.global_basis.z):
+			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
+			sun.global_basis = Basis.looking_at(-toward, up)
+		# Below the horizon it lights nothing: the ground is in the way.
+		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
+			* drawn.light_strength()
+	var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
+	sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * _FLASH.r
+	_note_sun()
+
+
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes
 ## from the seed, so the bolt, its flash and its thunder agree on every peer that is handed it.
 func strike(strike_seed: int) -> void:
@@ -1520,7 +1566,7 @@ func strike(strike_seed: int) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = strike_seed
 	var box := world_area()
-	var cloud: float = Globals.value("overcast_height")
+	var cloud: float = _Globals.value("overcast_height")
 	var centre := box.get_center()
 	var radius := maxf(box.size.x, box.size.z) * 0.5
 	var angle := rng.randf() * TAU

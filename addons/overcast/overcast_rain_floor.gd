@@ -19,11 +19,11 @@ extends Resource
 @export var under: Image
 
 ## Where a cell has no air under cover.
-const NO_GAP := -1e6
+const _NO_GAP := -1e6
 ## Air under a roof thinner than this does not count, and the underside is looked for at most
-## GAP_SEARCH metres under the top.
-const MIN_GAP := 0.3
-const GAP_SEARCH := 4.0
+## _GAP_SEARCH metres under the top.
+const _MIN_GAP := 0.3
+const _GAP_SEARCH := 4.0
 
 
 ## Bake by raycasting down through `box` in the world's physics, one column every `cell` metres.
@@ -92,7 +92,7 @@ static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> 
 ## whose top is the cell's has the air under it; one lower down, out from under the roof, has open
 ## air from its top up.
 static func _cell_gap(y: float, tops: Array, airs: Array) -> Vector2:
-	var none := Vector2(NO_GAP, NO_GAP)
+	var none := Vector2(_NO_GAP, _NO_GAP)
 	var solid := 0
 	var hi := INF
 	var lo := -INF
@@ -109,7 +109,7 @@ static func _cell_gap(y: float, tops: Array, airs: Array) -> Vector2:
 			lo = maxf(lo, tops[k])
 	if solid >= 2 or hi == INF:
 		return none
-	return Vector2(hi, lo) if hi - lo >= MIN_GAP else none
+	return Vector2(hi, lo) if hi - lo >= _MIN_GAP else none
 
 
 ## The open air under `top` at x, z: the underside of what rain stops on there, found by looking up
@@ -117,10 +117,10 @@ static func _cell_gap(y: float, tops: Array, airs: Array) -> Vector2:
 ## under that. A wall, or the inside of a closed mesh, is none.
 static func _gap(space: PhysicsDirectSpaceState3D, up: PhysicsRayQueryParameters3D,
 		down: PhysicsRayQueryParameters3D, x: float, z: float, top: float, bottom: float) -> Vector2:
-	var none := Vector2(NO_GAP, NO_GAP)
+	var none := Vector2(_NO_GAP, _NO_GAP)
 	var under := NAN
 	var depth := 0.5
-	while depth <= GAP_SEARCH:
+	while depth <= _GAP_SEARCH:
 		up.from = Vector3(x, top - depth, z)
 		up.to = Vector3(x, top - 0.01, z)
 		var hit := space.intersect_ray(up)
@@ -143,7 +143,7 @@ static func _gap(space: PhysicsDirectSpaceState3D, up: PhysicsRayQueryParameters
 	if ground and (ground["normal"] == Vector3.ZERO or ground["normal"].y < -0.1):
 		return none
 	var floor_y: float = ground["position"].y if ground else bottom
-	return Vector2(under, floor_y) if under - floor_y >= MIN_GAP else none
+	return Vector2(under, floor_y) if under - floor_y >= _MIN_GAP else none
 
 
 ## A rain floor from heights of your own: `image` FORMAT_RF, row 0 at min Z, and the air under

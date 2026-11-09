@@ -8,20 +8,20 @@ extends Object
 ##
 ##     OvercastMaterials.apply($Level)
 
-const INCLUDE := "res://addons/overcast/shaders/standard.gdshaderinc"
-const FILTERS := ["filter_nearest", "filter_linear", "filter_nearest_mipmap", "filter_linear_mipmap",
+const _INCLUDE := "res://addons/overcast/shaders/standard.gdshaderinc"
+const _FILTERS := ["filter_nearest", "filter_linear", "filter_nearest_mipmap", "filter_linear_mipmap",
 	"filter_nearest_mipmap_anisotropic", "filter_linear_mipmap_anisotropic"]
-const CHANNELS := [Vector4(1, 0, 0, 0), Vector4(0, 1, 0, 0), Vector4(0, 0, 1, 0), Vector4(0, 0, 0, 1),
+const _CHANNELS := [Vector4(1, 0, 0, 0), Vector4(0, 1, 0, 0), Vector4(0, 0, 1, 0), Vector4(0, 0, 0, 1),
 	Vector4(0.333333, 0.333333, 0.333333, 0)]
 ## Flags the shader does not draw: a material with any of them set is not converted.
-const UNSUPPORTED: Array[StringName] = [&"rim_enabled", &"clearcoat_enabled", &"anisotropy_enabled",
+const _UNSUPPORTED: Array[StringName] = [&"rim_enabled", &"clearcoat_enabled", &"anisotropy_enabled",
 	&"heightmap_enabled", &"subsurf_scatter_enabled", &"subsurf_scatter_transmittance_enabled",
 	&"backlight_enabled", &"refraction_enabled", &"detail_enabled", &"bent_normal_enabled",
 	&"uv1_triplanar", &"emission_on_uv2", &"ao_on_uv2", &"albedo_texture_msdf", &"use_point_size",
 	&"fixed_size", &"proximity_fade_enabled", &"shadow_to_opacity", &"use_particle_trails",
 	&"use_z_clip_scale", &"use_fov_override", &"grow"]
 ## Modes the shader draws, by property: any other value is not converted.
-const ALLOWED := {
+const _ALLOWED := {
 	&"shading_mode": [BaseMaterial3D.SHADING_MODE_PER_PIXEL],
 	&"diffuse_mode": [BaseMaterial3D.DIFFUSE_BURLEY, BaseMaterial3D.DIFFUSE_LAMBERT],
 	&"specular_mode": [BaseMaterial3D.SPECULAR_SCHLICK_GGX, BaseMaterial3D.SPECULAR_DISABLED],
@@ -32,7 +32,7 @@ const ALLOWED := {
 		BaseMaterial3D.BLEND_MODE_SUB, BaseMaterial3D.BLEND_MODE_MUL],
 }
 
-const SOURCE := &"overcast_source"
+const _SOURCE := &"overcast_source"
 
 ## Source material id -> its twin, held weakly: a twin lives as long as something draws with it,
 ## and holds its source. And shader code -> Shader.
@@ -44,43 +44,46 @@ static var _shaders := {}
 ## Converts the materials of every GeometryInstance3D under `root`, root included: each surface
 ## and the override. The meshes are not touched; the conversions go on as surface overrides, so a
 ## mesh shared with something not converted stays as it is. `puddle_scale` is how readily they
-## pool (see wet.gdshaderinc). Returns how many surfaces it converted.
-static func apply(root: Node, puddle_scale := 1.0) -> int:
+## pool (wet.gdshaderinc), `snow_scale` how readily they hold snow (snow.gdshaderinc). Returns how
+## many surfaces it converted.
+static func apply(root: Node, puddle_scale := 1.0, snow_scale := 1.0) -> int:
+	var scales := Vector2(puddle_scale, snow_scale)
 	var synced := {}
-	var count := _convert_node(root, puddle_scale, synced)
+	var count := _convert_node(root, scales, synced)
 	for node in root.find_children("*", "GeometryInstance3D", true, false):
-		count += _convert_node(node, puddle_scale, synced)
+		count += _convert_node(node, scales, synced)
 	return count
 
 
 ## apply(root), and the same for each GeometryInstance3D added under it later, once the frame it
 ## was added in is over: game code that sets materials as things spawn sets them on the originals.
 ## Until `root` leaves the tree.
-static func watch(root: Node, puddle_scale := 1.0) -> void:
-	apply(root, puddle_scale)
+static func watch(root: Node, puddle_scale := 1.0, snow_scale := 1.0) -> void:
+	apply(root, puddle_scale, snow_scale)
 	var tree := root.get_tree()
-	var on_added := _on_added.bind(root, puddle_scale)
+	var on_added := _on_added.bind(root, Vector2(puddle_scale, snow_scale))
 	tree.node_added.connect(on_added)
 	root.tree_exiting.connect(tree.node_added.disconnect.bind(on_added), CONNECT_ONE_SHOT)
 
 
-static func _on_added(node: Node, root: Node, puddle_scale: float) -> void:
+static func _on_added(node: Node, root: Node, scales: Vector2) -> void:
 	if node is GeometryInstance3D and root.is_ancestor_of(node):
-		_convert_later.call_deferred(node, puddle_scale)
+		_convert_later.call_deferred(node, scales)
 
 
-static func _convert_later(node: Node, puddle_scale: float) -> void:
+static func _convert_later(node: Node, scales: Vector2) -> void:
 	if is_instance_valid(node):
-		_convert_node(node, puddle_scale, {})
+		_convert_node(node, scales, {})
 
 
-## `synced`: sources already brought up to date in this walk, which a shared one need not be again.
-static func _convert_node(node: Node, puddle_scale: float, synced: Dictionary) -> int:
+## `scales`: puddle_scale, snow_scale. `synced`: sources already brought up to date in this walk,
+## which a shared one need not be again.
+static func _convert_node(node: Node, scales: Vector2, synced: Dictionary) -> int:
 	var gi := node as GeometryInstance3D
 	if gi == null:
 		return 0
 	if gi.material_override:
-		var to := _convert(gi.material_override, puddle_scale, synced)
+		var to := _convert(gi.material_override, scales, synced)
 		if to == gi.material_override:
 			return 0
 		gi.material_override = to
@@ -89,7 +92,7 @@ static func _convert_node(node: Node, puddle_scale: float, synced: Dictionary) -
 	if gi is MeshInstance3D:
 		for i in gi.get_surface_override_material_count():
 			var mat: Material = gi.get_active_material(i)
-			var to := _convert(mat, puddle_scale, synced)
+			var to := _convert(mat, scales, synced)
 			if to != mat:
 				gi.set_surface_override_material(i, to)
 				count += 1
@@ -99,17 +102,18 @@ static func _convert_node(node: Node, puddle_scale: float, synced: Dictionary) -
 ## The Overcast twin of a BaseMaterial3D; anything else, or one it cannot draw, comes back as it
 ## is. The same material converts to the same twin, so one shared by many meshes stays shared, and
 ## converting it again after editing it brings the twin up to date.
-static func convert_material(mat: Material, puddle_scale := 1.0) -> Material:
-	return _convert(mat, puddle_scale, {})
+static func convert_material(mat: Material, puddle_scale := 1.0, snow_scale := 1.0) -> Material:
+	return _convert(mat, Vector2(puddle_scale, snow_scale), {})
 
 
-static func _convert(mat: Material, puddle_scale: float, synced: Dictionary) -> Material:
+static func _convert(mat: Material, scales: Vector2, synced: Dictionary) -> Material:
 	if not mat is BaseMaterial3D:
 		return mat
 	var src := mat as BaseMaterial3D
 	var key := src.get_instance_id()
 	var twin: ShaderMaterial = _converted[key].get_ref() if _converted.has(key) else null
-	var current: bool = twin != null and twin.get_shader_parameter("puddle_scale") == puddle_scale
+	var current: bool = twin != null and twin.get_shader_parameter("puddle_scale") == scales.x \
+		and twin.get_shader_parameter("snow_scale") == scales.y
 	if current and synced.has(key):
 		return twin
 	if not unsupported(src).is_empty():
@@ -117,7 +121,7 @@ static func _convert(mat: Material, puddle_scale: float, synced: Dictionary) -> 
 	synced[key] = true
 	if not current:
 		twin = ShaderMaterial.new()
-		twin.set_meta(SOURCE, src)
+		twin.set_meta(_SOURCE, src)
 		if _converted.size() >= _prune_at:
 			for k in _converted.keys():
 				if _converted[k].get_ref() == null:
@@ -126,11 +130,12 @@ static func _convert(mat: Material, puddle_scale: float, synced: Dictionary) -> 
 		_converted[key] = weakref(twin)
 	var params := _params(src)
 	twin.shader = _shader(src, params)
-	params["puddle_scale"] = puddle_scale
+	params["puddle_scale"] = scales.x
+	params["snow_scale"] = scales.y
 	for name in params:
 		twin.set_shader_parameter(name, params[name])
 	twin.render_priority = src.render_priority
-	twin.next_pass = _convert(src.next_pass, puddle_scale, synced)
+	twin.next_pass = _convert(src.next_pass, scales, synced)
 	twin.resource_name = src.resource_name
 	return twin
 
@@ -138,16 +143,16 @@ static func _convert(mat: Material, puddle_scale: float, synced: Dictionary) -> 
 ## The material a twin was converted from, for code that edits materials; `mat` itself if it is
 ## not a twin.
 static func source_of(mat: Material) -> Material:
-	return mat.get_meta(SOURCE, mat) if mat else null
+	return mat.get_meta(_SOURCE, mat) if mat else null
 
 
 ## Why `mat` cannot be converted: the first property it sets that the shader lacks, or "".
 static func unsupported(mat: BaseMaterial3D) -> String:
-	for prop in UNSUPPORTED:
+	for prop in _UNSUPPORTED:
 		if mat.get(prop):
 			return prop
-	for prop in ALLOWED:
-		if mat.get(prop) not in ALLOWED[prop]:
+	for prop in _ALLOWED:
+		if mat.get(prop) not in _ALLOWED[prop]:
 			return prop
 	return ""
 
@@ -196,12 +201,12 @@ static func _code(mat: BaseMaterial3D, params: Dictionary) -> String:
 		"OV_NO_SPECULAR": mat.specular_mode == BaseMaterial3D.SPECULAR_DISABLED,
 	}
 	var code := "shader_type spatial;\nrender_mode %s;\n\n" % ", ".join(modes)
-	code += "#define OV_FILTER %s\n" % FILTERS[clampi(mat.texture_filter, 0, FILTERS.size() - 1)]
+	code += "#define OV_FILTER %s\n" % _FILTERS[clampi(mat.texture_filter, 0, _FILTERS.size() - 1)]
 	code += "#define OV_REPEAT %s\n" % ("repeat_enable" if mat.texture_repeat else "repeat_disable")
 	for flag in flags:
 		if flags[flag]:
 			code += "#define %s\n" % flag
-	return code + '#include "%s"\n' % INCLUDE
+	return code + '#include "%s"\n' % _INCLUDE
 
 
 ## The shader parameters that draw `mat`. An ORMMaterial3D's occlusion, roughness and metallic
@@ -214,16 +219,16 @@ static func _params(mat: BaseMaterial3D) -> Dictionary:
 		"roughness": mat.roughness,
 		"specular": mat.metallic_specular,
 		"texture_metallic": mat.metallic_texture,
-		"metallic_texture_channel": CHANNELS[mat.metallic_texture_channel],
+		"metallic_texture_channel": _CHANNELS[mat.metallic_texture_channel],
 		"texture_roughness": mat.roughness_texture,
-		"roughness_texture_channel": CHANNELS[mat.roughness_texture_channel],
+		"roughness_texture_channel": _CHANNELS[mat.roughness_texture_channel],
 		"texture_normal": mat.normal_texture,
 		"normal_scale": mat.normal_scale,
 		"emission": mat.emission,
 		"emission_energy": mat.emission_energy_multiplier,
 		"texture_emission": mat.emission_texture,
 		"texture_ambient_occlusion": mat.ao_texture,
-		"ao_texture_channel": CHANNELS[mat.ao_texture_channel],
+		"ao_texture_channel": _CHANNELS[mat.ao_texture_channel],
 		"ao_light_affect": mat.ao_light_affect,
 		"alpha_scissor_threshold": mat.alpha_scissor_threshold,
 		"alpha_hash_scale": mat.alpha_hash_scale,
@@ -233,8 +238,8 @@ static func _params(mat: BaseMaterial3D) -> Dictionary:
 	if mat is ORMMaterial3D:
 		var orm: Texture2D = mat.get("orm_texture")
 		params.merge({
-			"texture_ambient_occlusion": orm, "ao_texture_channel": CHANNELS[0],
-			"texture_roughness": orm, "roughness_texture_channel": CHANNELS[1],
-			"texture_metallic": orm, "metallic_texture_channel": CHANNELS[2],
+			"texture_ambient_occlusion": orm, "ao_texture_channel": _CHANNELS[0],
+			"texture_roughness": orm, "roughness_texture_channel": _CHANNELS[1],
+			"texture_metallic": orm, "metallic_texture_channel": _CHANNELS[2],
 		}, true)
 	return params

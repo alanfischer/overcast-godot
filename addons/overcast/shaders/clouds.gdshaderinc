@@ -14,7 +14,10 @@ global uniform float overcast_speed;     // noise units per second
 global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
 global uniform float overcast_shadow;    // how much of the sky's share a cloud takes off; 0 for none
+#ifndef OVERCAST_SUN_DIR  // snow.gdshaderinc reads it too
+#define OVERCAST_SUN_DIR
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
+#endif
 global uniform float overcast_volumetric; // 1 when the sky ray-marches its clouds
 const float CLOUD_TILE = 12.0;
 // Every length below is tuned at a height of 100 m and scales with it, so a higher layer looks

@@ -6,7 +6,10 @@
 // unrippled.
 global uniform float overcast_wetness;  // 0 dry, 1 soaked
 global uniform float overcast_puddles;  // how far flat ground has pooled
+#ifndef OVERCAST_RAIN_SKY  // snow.gdshaderinc reads it too
+#define OVERCAST_RAIN_SKY
 global uniform vec3 overcast_rain_sky;  // the sky colour wet surfaces reflect, sRGB
+#endif
 global uniform float overcast_rainfall;  // how hard it is raining now, 0 to 1: what ripples puddles
 global uniform float overcast_ice;  // how much of the wet ground has frozen, where no ice field says
 // How much has frozen per rain floor cell (OvercastIceField): thawed and frozen where it is.

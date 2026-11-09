@@ -106,7 +106,10 @@ and go on their own.
     (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and
     `overcast_snow()` is the version for a shader that lights itself, and lies in the light the
     surface was lit with (pass it as is: dividing it back out of a texture's lit colour prints
-    the texture's dark texels into the snow). The weather's
+    the texture's dark texels into the snow). Give it the outdoor share of that light too: there
+    the snow takes the sky's colour in the shade and only a little of the sun's in the sun, and
+    its lumps and lipped edges catch the sun from `overcast_sun_dir`; a lamp's light it takes as
+    it is. A dusting fills a texture's dark cracks first and frays where it runs out. The weather's
     `snow_lying` says how much lies, for a game to stop its exposure down by. Snow does not
     thunder.
   - rain sound that fades and low-passes under cover, and wind you hear only when it blows hard

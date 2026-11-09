@@ -47,7 +47,7 @@ void fragment() {
 	float specular = 0.5;
 	vec2 wet = overcast_wet_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
 	NORMAL = overcast_wet_normal(NORMAL, mat3(VIEW_MATRIX), world_pos, wet);
-	overcast_snow(lit, albedo, vec3(1.0), world_pos, vec3(0.0, 1.0, 0.0), NORMAL, VIEW);
+	overcast_snow(lit, albedo, vec3(1.0), 1.0, world_pos, vec3(0.0, 1.0, 0.0), NORMAL, VIEW);
 	float snow = overcast_snow_pbr(albedo, roughness, specular, world_pos, vec3(0.0, 1.0, 0.0));
 	NORMAL = overcast_snow_normal(NORMAL, vec3(0.0, 1.0, 0.0), snow);
 	float glint = overcast_snow_glint(world_pos, snow, overcast_snow_footprint(world_pos), NORMAL, VIEW, NORMAL);

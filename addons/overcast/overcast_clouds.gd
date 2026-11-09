@@ -1,7 +1,7 @@
 @tool
 class_name OvercastClouds
 extends Object
-## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc, OvercastGlobals). Global,
+## The cloud layer's global shader uniforms (shaders/clouds.gdshaderinc, overcast_globals.gd). Global,
 ## because the sky draws the clouds and everything lit under them reads the same ones for its
 ## shadows: one sky at a time. Whichever last claimed it owns it, and only the owner moves it; when
 ## it lets go, the sky that claimed it before, if still drawing, takes it back.
@@ -30,7 +30,7 @@ static func set_volumetric(enabled: bool) -> void:
 	_volumetric = enabled
 	_set_global("overcast_volumetric", 1.0 if enabled else 0.0)
 	if enabled and _owner != 0:
-		_set_global("overcast_volume", volume())
+		_set_global("overcast_volume", _volume_texture())
 
 
 ## OvercastSky's: the sky with instance id `owner` takes the layer. `sun_dir` toward the sun,
@@ -42,9 +42,9 @@ static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, sp
 		_drawing.erase(owner)
 		_drawing.append(owner)
 	_owner = owner
-	_set_global("overcast_noise", noise())
+	_set_global("overcast_noise", _noise_texture())
 	if _volumetric:
-		_set_global("overcast_volume", volume())
+		_set_global("overcast_volume", _volume_texture())
 	_set_global("overcast_sun_dir", sun_dir.normalized())
 	_set_global("overcast_height", height)
 	_set_global("overcast_scale", scale)
@@ -80,7 +80,7 @@ static func _set_cover(cover: float, shadow: float) -> void:
 	_set_global("overcast_shadow", shadow)
 
 
-static func noise() -> Texture2D:
+static func _noise_texture() -> Texture2D:
 	if _noise:
 		return _noise
 	var r := _fbm(7, false, 8.0 / 512.0, 6).get_seamless_image(512, 512)
@@ -94,7 +94,7 @@ static func noise() -> Texture2D:
 
 ## Tiling 3D noise for the volumetric clouds: perlin-worley in r (shape: billows where worley
 ## cells are), worley distance in g (detail that erodes the edges).
-static func volume() -> Texture3D:
+static func _volume_texture() -> Texture3D:
 	if _volume:
 		return _volume
 	const N := 64

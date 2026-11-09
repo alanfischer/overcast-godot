@@ -1,5 +1,4 @@
 @tool
-class_name OvercastGlobals
 extends Object
 ## The global shader uniforms every Overcast shader reads: the cloud layer (OvercastClouds) and the
 ## rain and snow (OvercastWeather). Global, so any shader that includes clouds.gdshaderinc,

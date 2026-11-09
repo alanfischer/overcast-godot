@@ -1,6 +1,6 @@
 #ifndef OVERCAST_DRIFT_GDSHADERINC
 #define OVERCAST_DRIFT_GDSHADERINC
-// Drifted snow's shape (OvercastSnowDrift.surface_mesh), for drift.gdshader or a game's own drift
+// Drifted snow's shape (surface_mesh in overcast_snow_drift.gd), for drift.gdshader or a game's own drift
 // shader: call overcast_drift(VERTEX, NORMAL, UV, CUSTOM0, UV2.x) from vertex() and discard thinner
 // than OVERCAST_DRIFT_THIN in fragment(), where the ground's own snow is.
 #include "res://addons/overcast/shaders/snow.gdshaderinc"

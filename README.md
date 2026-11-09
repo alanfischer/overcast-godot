@@ -50,7 +50,9 @@ and go on their own.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
   lightmap; `light_dir()` and `light_strength()` are where the sun or moon is and how strongly it
   shines, as the moon comes up from nothing once it takes over at dusk. It draws a gradient, a
-  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as `storm` rises. Its look is its shader parameters;
+  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
+  (`set_weather(storm, snowy)`, and `set_flash` for lightning: an OvercastWeather calls both, and
+  a sky without one can be told by hand). Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
@@ -59,7 +61,7 @@ and go on their own.
   noise. That costs about a millisecond at 720p on an M1 on Compatibility. The radiance cubemap
   pass skips the clouds, so ambient light stays cheap.
 - **`OvercastMaterials`** gives StandardMaterial3Ds cloud shadows, wet ground and snow.
-  `apply(root, puddle_scale)` swaps each one under `root` for a ShaderMaterial
+  `apply(root, puddle_scale, snow_scale)` swaps each one under `root` for a ShaderMaterial
   (`shaders/standard.gdshaderinc`) that draws it the same way and adds the clouds, rain and snow. The
   meshes keep their own materials: the swaps go on as surface overrides. Godot gives scripts no
   way to add code to a StandardMaterial3D's shader, so the converted shader redoes Godot's
@@ -131,20 +133,20 @@ and go on their own.
   where rain stops, and the ground's snow and the drifts both draw from it
   (`overcast_snow_field`), on every peer, headless included. It heaps up toward how deep it lies
   once settled, wears away as it melts, and is stepped a few rows a frame, not at all once it has
-  come to rest. `melt(point, radius)` digs it out, bare in the middle and thinning to the edge, on
+  come to rest. `heat(point, radius)` melts it out, bare in the middle and thinning to the edge, on
   what lies near the point's height; it fills in again while snow keeps settling. Call it where
-  something hot lands; it returns whether any snow melted. `add_snowless(box)` keeps snow and ice
+  something hot lands. `add_snowless(box)` keeps snow and ice
   off what lies in a box until `remove_snowless(box)`: the rain floor stops at what is solid, so
   under a pool or a moat it is the bed, and snow would lie there and drift up through the water.
 - **Ice is a field too** (`overcast_ice_field`), on every peer, headless included: each cell
   freezes up to how far the wet ground has frozen over (`ice`). `heat(point, radius, amount)`
-  warms or chills it as `melt` does the snow: warm (`amount` > 0, where fire lands) thaws that
-  share, which freezes over again while it is freezing; cold (< 0) freezes that share of the wet
-  ground, which holds while it is freezing and thaws once it is not. Dry ground has nothing to
-  freeze. It returns whether any ice changed.
+  warms or chills it: warm (`amount` > 0, where fire lands) melts that share of the snow and
+  thaws that share of the ice, which freezes over again while it is freezing; cold (< 0) freezes
+  that share of the wet ground, which holds while it is freezing and thaws once it is not. Dry
+  ground has nothing to freeze. It returns whether any snow or ice changed.
 - **Snow drifts** (`snow_drifts`, on by default): in a wind, lying snow heaps up in the lee of
   whatever stands solid from the ground up and banks against its windward side, while the open is
-  scoured thin; a roof on posts lets the wind through and drifts nothing. `OvercastSnowDrift` bakes
+  scoured thin; a roof on posts lets the wind through and drifts nothing. The weather bakes
   the depths from the rain floor and the steady wind, on a worker thread, again whenever the wind
   turns by 1 m/s and holds for a second; the field comes round to them as fast as snow settles,
   and the weather draws what heaps past the even layer as a surface of its own
@@ -189,8 +191,7 @@ floor, an icy one, deep snow):
 
 - send the server's `wetness`, `ice` and `snow_cover`, and turn `soaks` off on the clients so
   they hold what they are sent;
-- send the heats and melts that changed something (`heat()` and `melt()` say) for every peer to
-  take;
+- send the heats that changed something (`heat()` says) for every peer to take;
 - hand a peer that joins late the server's `ice_cells()` and `snow_cells()`, which it takes up
   with `set_ice_cells()` and `set_snow_cells()`;
 - ask `wetness_at(point)`, `ice_at(point)` and `snow_depth_at(point)` on both ends. Each is none
@@ -200,7 +201,7 @@ floor, an icy one, deep snow):
 
 Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 
-- `flash_changed(k)` fires every frame of a strike. Add `OvercastWeather.FLASH * k` to the sky's
+- `flash_changed(light)` fires every frame of a strike, ending on black. Add `light` to the sky's
   light on your scene.
 - The rain and haze are lit by the sky's `scene_light()`. If your scene is lit some other way,
   turn off `light_from_sky` and set `sky_light`. The sky's time of day sets how bright lightning

@@ -1,5 +1,4 @@
 @tool
-class_name OvercastSnowDrift
 extends RefCounted
 ## How deep snow lies once it has all settled, per rain floor cell, over the height rain stops at
 ## there: an even layer in a calm; in a wind, scoured thin in the open and drifted deep in the lee

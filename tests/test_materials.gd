@@ -121,13 +121,16 @@ func test_apply_overrides_surfaces_and_leaves_the_mesh() -> void:
 	var to := mi.get_surface_override_material(0) as ShaderMaterial
 	assert_ne(to, null, "the surface is overridden")
 	assert_eq(to.get_shader_parameter("puddle_scale"), 0.25)
+	assert_eq(to.get_shader_parameter("snow_scale"), 1.0)
 	assert_true(other.material_override is ShaderMaterial, "an override is replaced in place")
 	assert_eq(Materials.apply(root, 0.25), 0, "once")
+	var snowless := Materials.convert_material(src, 0.25, 0.0) as ShaderMaterial
+	assert_eq(snowless.get_shader_parameter("snow_scale"), 0.0, "snow_scale passed on")
 
 
 func test_the_include_compiles_on_its_own() -> void:
 	var shader := Shader.new()
-	shader.code = 'shader_type spatial;\n#define OV_FILTER filter_linear\n#define OV_REPEAT repeat_enable\n#include "%s"\n' % Materials.INCLUDE
+	shader.code = 'shader_type spatial;\n#define OV_FILTER filter_linear\n#define OV_REPEAT repeat_enable\n#include "%s"\n' % Materials._INCLUDE
 	var names := _uniform_names(shader)
 	assert_true(names.has("albedo"), "compiles: %s" % [names])
 

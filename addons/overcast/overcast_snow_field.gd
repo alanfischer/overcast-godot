@@ -1,7 +1,7 @@
 @tool
 extends "res://addons/overcast/overcast_ground_grid.gd"
 ## Lying snow, per rain floor cell: metres of it over where rain stops there. It heaps up toward
-## `target` (OvercastSnowDrift.bake: an even layer in a calm, drifted in a wind) while snow
+## `target` (bake in overcast_snow_drift.gd: an even layer in a calm, drifted in a wind) while snow
 ## settles, wears away while it melts, comes round to a new target as the wind turns, and is dug out
 ## where something hot melts it (melt).
 
@@ -64,7 +64,7 @@ func _wake_all() -> void:
 		_speed[i] = maxf(maxf(target[i], values[i]), layer)
 
 
-## A new target (OvercastSnowDrift.bake), laid out as the floor's image is: the snow comes round to
+## A new target (bake in overcast_snow_drift.gd), laid out as the floor's image is: the snow comes round to
 ## it as fast as it settles.
 func set_target(heights: PackedFloat32Array) -> void:
 	target = heights

@@ -10,16 +10,16 @@ func _global(name: String) -> Variant:
 
 
 func test_the_project_declares_every_global() -> void:
-	assert_true(Globals.declared(), "project.godot carries OvercastGlobals.GLOBALS")
+	assert_true(Globals.declared(), "project.godot carries GLOBALS in overcast_globals.gd")
 	Globals.declare()  # declared already: must not complain or add twice
 	assert_true(Globals.declared(), "still declared")
 
 
 func test_noise_tiles_in_two_channels() -> void:
-	var tex := Clouds.noise()
+	var tex := Clouds._noise_texture()
 	assert_eq(tex.get_width(), 512, "512 wide")
 	assert_eq(tex.get_image().get_format(), Image.FORMAT_RG8, "perlin in r, worley in g")
-	assert_true(tex == Clouds.noise(), "made once")
+	assert_true(tex == Clouds._noise_texture(), "made once")
 
 
 func test_volume_is_built_only_for_a_drawing_sky() -> void:
@@ -39,8 +39,8 @@ func test_a_storm_closes_the_sky_and_deepens_the_shadow() -> void:
 	sky.drawing = true
 	assert_almost_eq(_global("overcast_cover"), 0.3, 1e-6, "fair weather: the sky's own cover")
 	assert_almost_eq(_global("overcast_shadow"), sky.cloud_shadow, 1e-6, "and the fair shadow")
-	sky.storm = 1.0
-	assert_almost_eq(_global("overcast_cover"), SkyScript.STORM_COVER, 1e-6, "a storm closes it over")
+	sky.set_weather(1.0, sky.snowy)
+	assert_almost_eq(_global("overcast_cover"), SkyScript._STORM_COVER, 1e-6, "a storm closes it over")
 	assert_almost_eq(_global("overcast_shadow"), sky.storm_shadow, 1e-6, "and shades harder")
 	assert_eq(sky.storm, 1.0, "the sky draws the storm")
 	sky.drawing = false
@@ -51,7 +51,7 @@ func test_a_cloudless_sky_casts_no_shadow_until_it_storms() -> void:
 	var sky := SkyScript.new({"cloud_amount": 0.0})
 	sky.drawing = true
 	assert_eq(_global("overcast_shadow"), 0.0, "no clouds, no shadow")
-	sky.storm = 0.5
+	sky.set_weather(0.5, sky.snowy)
 	assert_gt(_global("overcast_shadow"), 0.0, "storm cloud shades")
 	sky.drawing = false
 
@@ -60,7 +60,7 @@ func test_a_sky_off_screen_leaves_the_globals_alone() -> void:
 	var shown := SkyScript.new({"cloud_amount": 0.4})
 	shown.drawing = true
 	var hidden := SkyScript.new({"cloud_amount": 0.9, "drawing": false})
-	hidden.storm = 1.0
+	hidden.set_weather(1.0, hidden.snowy)
 	assert_almost_eq(_global("overcast_cover"), 0.4, 1e-6, "the drawing sky keeps the layer")
 	shown.drawing = false
 
@@ -68,10 +68,10 @@ func test_a_sky_off_screen_leaves_the_globals_alone() -> void:
 func test_horizon_greys_with_the_storm() -> void:
 	var sky := SkyScript.new({"horizon_color": Color(0.3, 0.5, 0.9)})
 	var clear := sky.horizon_now()
-	sky.storm = 1.0
+	sky.set_weather(1.0, sky.snowy)
 	var storm := sky.horizon_now()
 	assert_almost_eq(storm.r, storm.b, 1e-6, "a full storm's horizon is grey")
-	assert_lt(SkyScript.luma(storm), SkyScript.luma(clear), "and darker than the clear one")
+	assert_lt(SkyScript._luma(storm), SkyScript._luma(clear), "and darker than the clear one")
 
 
 func test_only_the_sky_that_holds_the_layer_lets_it_go() -> void:
@@ -81,7 +81,7 @@ func test_only_the_sky_that_holds_the_layer_lets_it_go() -> void:
 	new.drawing = true
 	old.drawing = false
 	assert_almost_eq(_global("overcast_cover"), 0.6, 1e-6, "the old sky turning off leaves the new one's clouds")
-	old.storm = 1.0
+	old.set_weather(1.0, old.snowy)
 	assert_almost_eq(_global("overcast_cover"), 0.6, 1e-6, "and its storm does not reach them")
 	new = null  # the last reference: a sky freed while drawing
 	assert_eq(_global("overcast_shadow"), 0.0, "takes its shadows with it")
@@ -113,14 +113,14 @@ func test_a_saved_sky_loads_with_its_settings() -> void:
 	assert_false(loaded.drawing, "whether it draws")
 	assert_almost_eq(loaded.time_of_day, 19.5, 1e-6, "and its time of day")
 	assert_almost_eq(loaded.get_shader_parameter("night_amount"), SkyScript.night_at(19.5), 1e-6, "which the shader is told")
-	assert_eq(loaded.shader, SkyScript.SkyShader, "on the sky shader")
+	assert_eq(loaded.shader, SkyScript._SkyShader, "on the sky shader")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 
 func test_a_storm_and_a_flash_are_not_saved_with_the_sky() -> void:
 	var sky := SkyScript.new({"drawing": false})
-	sky.storm = 0.8
+	sky.set_weather(0.8, sky.snowy)
 	sky.set_flash(Color.WHITE, Vector3.UP)
 	var path := "user://overcast_test_storm.tres"
 	assert_eq(ResourceSaver.save(sky, path), OK, "it saves")
@@ -178,10 +178,10 @@ func test_the_day_runs_noon_to_dusk_to_night() -> void:
 func test_the_sky_follows_its_time() -> void:
 	var sky := SkyScript.new({"drawing": false, "time_of_day": 22.0})
 	assert_almost_eq(sky.get_shader_parameter("night_amount"), 1.0, 1e-6, "the shader is told it is night")
-	assert_lt(SkyScript.luma(sky.horizon_now()), 0.05, "and the horizon haze fades into is dark")
+	assert_lt(SkyScript._luma(sky.horizon_now()), 0.05, "and the horizon haze fades into is dark")
 	sky.time_of_day = 12.0
 	assert_eq(sky.get_shader_parameter("night_amount"), 0.0, "noon again")
-	assert_gt(SkyScript.luma(sky.horizon_now()), 0.3, "and a bright horizon")
+	assert_gt(SkyScript._luma(sky.horizon_now()), 0.3, "and a bright horizon")
 	sky.time_of_day = 18.0
 	var h := sky.horizon_now()
 	assert_gt(h.r, h.b, "a sunset horizon is warm")

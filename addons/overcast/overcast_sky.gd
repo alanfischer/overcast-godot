@@ -5,21 +5,21 @@ extends ShaderMaterial
 ## give it a shader built on sky.gdshaderinc to draw it on something else. Its look is the
 ## shader's parameters, as they are by day; time_of_day takes them through dusk to night. The
 ## cloud layer's settings are the properties below, and its globals follow whichever sky last
-## started drawing. Storm and lightning come in from an OvercastWeather.
+## started drawing. Storm and lightning come in from an OvercastWeather (set_weather, set_flash).
 ##
 ##     var sky := OvercastSky.new({"cloud_amount": 0.4, "sun_dir": OvercastSky.sun_dir_of($Sun)})
 ##     $WorldEnvironment.environment = sky.make_environment()
 
-const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
-const SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
+const _Clouds = preload("res://addons/overcast/overcast_clouds.gd")
+const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 
 ## Cloud cover once a storm has closed the sky over.
-const STORM_COVER := 0.97
+const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
-const LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
 ## saved with the sky.
-const TRANSIENT := [&"storm", &"snowy", &"flash_color", &"flash_dir"]
+const _TRANSIENT := [&"storm", &"snowy", &"flash_color", &"flash_dir"]
 ## What a new sky starts with where the shader's own default is not the one wanted, or where the
 ## code reads the value back.
 const DEFAULTS := {
@@ -100,18 +100,14 @@ var night: float:
 var dusk: float:
 	get:
 		return dusk_at(time_of_day)
-## How far the sky has closed over for rain, 0 to 1. OvercastWeather drives it.
-var storm := 0.0:
-	set(amount):
-		storm = amount
-		RenderingServer.material_set_param(get_rid(), &"storm", amount)
-		_push_weather()
-## How much of the storm is snow, 0 to 1: a pale sky rather than a dark one. OvercastWeather drives
-## it.
-var snowy := 0.0:
-	set(amount):
-		snowy = amount
-		RenderingServer.material_set_param(get_rid(), &"snowy", amount)
+## How far the sky has closed over for rain, 0 to 1 (set_weather).
+var storm: float:
+	get:
+		return _storm
+## How much of the storm is snow, 0 to 1: a pale sky rather than a dark one (set_weather).
+var snowy: float:
+	get:
+		return _snowy
 ## Direction toward the sun, world space: where it is at noon when it follows the time. Set it here
 ## or through the inspector, not with set_shader_parameter, or the clouds' shadows will not follow.
 var sun_dir: Vector3:
@@ -129,6 +125,8 @@ var cloud_amount: float:
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
 var _started := false
+var _storm := 0.0
+var _snowy := 0.0
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -139,11 +137,11 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 	if sky_shader:
 		shader = sky_shader
 	elif shader == null:
-		shader = SkyShader
+		shader = _SkyShader
 	for key in DEFAULTS:
 		if get_shader_parameter(key) == null:
 			set("shader_parameter/" + key, DEFAULTS[key])
-	for key in TRANSIENT:  # saved by an older version
+	for key in _TRANSIENT:  # saved by an older version
 		if get_shader_parameter(key) != null:
 			set_shader_parameter(key, null)
 	time_of_day = time_of_day
@@ -161,7 +159,7 @@ func _start() -> void:
 ## A sky must let go of the cloud layer it holds, or its clouds' shadows outlive it.
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
-		Clouds._release(_id)
+		_Clouds._release(_id)
 
 
 ## Shader parameters and properties by name, at once. An unknown name is an error rather than a
@@ -184,7 +182,7 @@ func _set(property: StringName, value: Variant) -> bool:
 	if not String(property).begins_with("shader_parameter/"):
 		return false
 	var key := StringName(String(property).trim_prefix("shader_parameter/"))
-	if not key in LAYER_UNIFORMS:
+	if not key in _LAYER_UNIFORMS:
 		return false
 	if value is Vector3:
 		value = (value as Vector3).normalized()
@@ -279,13 +277,24 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		Clouds._claim(_id, light_dir(), cloud_height, cloud_scale, cloud_speed, cloud_softness)
+		_Clouds._claim(_id, light_dir(), cloud_height, cloud_scale, cloud_speed, cloud_softness)
 		_push_weather()
 	else:
-		Clouds._release(_id)
+		_Clouds._release(_id)
 
 
-## Light the sky from within, brightest toward `dir` (world space); black puts it out.
+## The weather's say over the sky: OvercastWeather calls these, and a sky with no weather can be
+## told by hand. How far it has closed over for rain (`storm`), and how much of that is snow
+## (`snowy`, a pale sky rather than a dark one), 0 to 1 each.
+func set_weather(storm_amount: float, snowy_amount: float) -> void:
+	_storm = storm_amount
+	_snowy = snowy_amount
+	RenderingServer.material_set_param(get_rid(), &"storm", storm_amount)
+	RenderingServer.material_set_param(get_rid(), &"snowy", snowy_amount)
+	_push_weather()
+
+
+## Lightning: light the sky from within, brightest toward `dir` (world space); black puts it out.
 func set_flash(color: Color, dir: Vector3) -> void:
 	RenderingServer.material_set_param(get_rid(), &"flash_color", Vector3(color.r, color.g, color.b))
 	RenderingServer.material_set_param(get_rid(), &"flash_dir", dir)
@@ -296,19 +305,19 @@ func _push_weather() -> void:
 		return
 	var amount: float = cloud_amount
 	var casting := maxf(amount, storm) > 0.0
-	Clouds._set_weather(_id, lerpf(amount, STORM_COVER, storm),
+	_Clouds._set_weather(_id, lerpf(amount, _STORM_COVER, storm),
 		lerpf(cloud_shadow, storm_shadow, storm) if casting else 0.0)
 
 
 ## The colour the sky draws at the horizon right now, linear, flash aside: what rain haze fades
 ## into. Follows the shader's storm greying, in the space that shader works in on this renderer.
 func horizon_now() -> Color:
-	var linear := renderer_is_linear()
+	var linear := _renderer_is_linear()
 	var h := _shader_space(param("horizon_color"), linear)
 	# As the shader's, at a glow halfway round from the sun.
 	h = h.lerp(_shader_space(param("dusk_color"), linear), dusk * 0.725 * 0.8)
 	h = h.lerp(_shader_space(param("night_horizon_color"), linear), night)
-	var grey := luma(h) * lerpf(0.55, 1.0, snowy)
+	var grey := _luma(h) * lerpf(0.55, 1.0, snowy)
 	var col := h.lerp(Color(grey, grey, grey), storm)
 	return col if linear else col.srgb_to_linear()
 
@@ -318,7 +327,7 @@ static func _shader_space(c: Color, linear: bool) -> Color:
 	return c.srgb_to_linear() if linear else c
 
 
-static func luma(c: Color) -> float:
+static func _luma(c: Color) -> float:
 	return c.r * 0.299 + c.g * 0.587 + c.b * 0.114
 
 
@@ -326,7 +335,7 @@ static var _linear := -1
 
 
 ## gl_compatibility shades in the colours' own space; the RD renderers in linear. Fixed at startup.
-static func renderer_is_linear() -> bool:
+static func _renderer_is_linear() -> bool:
 	if _linear < 0:
 		_linear = 1 if RenderingServer.get_current_rendering_method() != "gl_compatibility" else 0
 	return _linear == 1

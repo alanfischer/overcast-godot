@@ -1,6 +1,6 @@
 @tool
 extends EditorPlugin
-## Declares Overcast's global shader uniforms (OvercastGlobals.GLOBALS) in the project, which every
+## Declares Overcast's global shader uniforms (GLOBALS in overcast_globals.gd) in the project, which every
 ## Overcast shader needs to compile. Checked on every editor start, so an update that adds one
 ## declares it too.
 

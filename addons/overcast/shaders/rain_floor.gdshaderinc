@@ -2,7 +2,7 @@
 #define OVERCAST_RAIN_FLOOR_GDSHADERINC
 // Where rain stops: per column, the height rain falls to before something catches it (a roof, the
 // ground), in a texture whose min-X/min-Z corner sits at overcast_rain_floor_origin. Globals that
-// OvercastWeather sets (OvercastGlobals).
+// OvercastWeather sets (overcast_globals.gd).
 global uniform bool overcast_has_rain_floor;  // without one, rain falls everywhere
 global uniform bool overcast_rain_beyond_floor;  // whether it falls off the floor's edges
 global uniform sampler2D overcast_rain_floor : filter_nearest;

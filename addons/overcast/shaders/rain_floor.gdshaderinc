@@ -63,17 +63,23 @@ bool rain_open_above(vec3 p) {
 	return p.y > textureLod(overcast_rain_floor, uv, 0.0).r;
 }
 
-// The height rain falls to at uv, blended between the four cells around it.
-float rain_floor_smooth(vec2 uv) {
-	ivec2 res = textureSize(overcast_rain_floor, 0);
+// A field laid out as the rain floor is (its own texture, or the snow's or the ice's) at uv,
+// blended between the four cells around it.
+float rain_floor_blend(sampler2D field, vec2 uv) {
+	ivec2 res = textureSize(field, 0);
 	vec2 texel = uv * vec2(res) - 0.5;
 	ivec2 cell = ivec2(floor(texel));
 	vec2 f = fract(texel);
 	vec4 h;
 	for (int i = 0; i < 4; i++) {
-		h[i] = texelFetch(overcast_rain_floor, clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
+		h[i] = texelFetch(field, clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
 	}
 	return mix(mix(h.x, h.y, f.x), mix(h.z, h.w, f.x), f.y);
+}
+
+// The height rain falls to at uv, blended between the four cells around it.
+float rain_floor_smooth(vec2 uv) {
+	return rain_floor_blend(overcast_rain_floor, uv);
 }
 
 // Where q is for rain slanting through it: in the open (over whatever catches rain there), in the

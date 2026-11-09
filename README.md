@@ -124,16 +124,18 @@ and go on their own.
 - **Lying snow is a field**: with a rain floor, the snow is held cell by cell, metres deep over
   where rain stops, and the ground's snow and the drifts both draw from it
   (`overcast_snow_field`). It heaps up toward how deep it lies once settled, wears away as it
-  melts, and is stepped a few rows a frame, not at all once it has come to rest. Ice is a field
-  beside it (`overcast_ice_field`), freezing up to how far the wet ground has frozen over (`ice`).
-  `heat(point, radius, amount)` warms or chills the ground, in full in the middle and thinning to
-  the edge, on what lies near the point's height: warm (`amount` > 0, where fire lands) melts that
-  share of the snow and thaws that share of the ice, which come back while the weather keeps laying
-  them; cold (< 0) freezes that share of the wet ground, which holds while it is freezing and thaws
-  once it is not. Dry ground has nothing to freeze. `add_snowless(box)` keeps snow and ice off what
-  lies in a box for good: the rain floor stops at what is solid, so under a pool or a moat it is
-  the bed, and snow would lie there and drift up through the water. A headless peer keeps both
-  fields too, drawing neither, and drifts none.
+  melts, and is stepped a few rows a frame, not at all once it has come to rest. `melt(point,
+  radius)` digs it out, bare in the middle and thinning to the edge, on what lies near the point's
+  height; it fills in again while snow keeps settling. Call it where something hot lands.
+  `add_snowless(box)` keeps snow and ice off what lies in a box for good: the rain floor stops at
+  what is solid, so under a pool or a moat it is the bed, and snow would lie there and drift up
+  through the water. A headless peer keeps no snow field.
+- **Ice is a field too** (`overcast_ice_field`), on every peer, headless included: each cell
+  freezes up to how far the wet ground has frozen over (`ice`). `heat(point, radius, amount)`
+  warms or chills it as `melt` does the snow: warm (`amount` > 0, where fire lands) thaws that
+  share, which freezes over again while it is freezing; cold (< 0) freezes that share of the wet
+  ground, which holds while it is freezing and thaws once it is not. Dry ground has nothing to
+  freeze. It returns whether any ice changed.
 - **Snow drifts** (`snow_drifts`, on by default): in a wind, lying snow heaps up in the lee of
   whatever stands solid from the ground up and banks against its windward side, while the open is
   scoured thin; a roof on posts lets the wind through and drifts nothing. `OvercastSnowDrift` bakes
@@ -179,9 +181,10 @@ moving covers included, for gameplay that cares whether something is out in the 
 dries the ground too: for gameplay on wet ground (a slick floor), send the server's `wetness`, turn
 `soaks` off on the clients so they hold what they are sent, and ask `rains_on(point)` on both ends.
 `snow_depth_at(point)` says how deep the snow lies, on any peer. Ice is for gameplay too (an icy
-floor): send the server's `ice` beside `wetness`, call `heat()` on every peer where the server
-does, and ask `ice_at(point)` on both ends; a peer that joins late takes up the server's
-`ice_cells()` with `set_ice_cells()`.
+floor): send the server's `ice` beside `wetness`, send the heats that changed something
+(`heat()` says) for every peer to take, and ask `ground_at(point)` (wet, ice) on both ends; a
+peer that joins late takes up the server's `ice_cells()` with `set_ice_cells()`. Snow is only
+drawn: each peer melts its own.
 
 ## Lighting the scene
 

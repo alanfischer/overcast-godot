@@ -112,8 +112,8 @@ func _set_time(hours: float) -> void:
 
 
 func _process(delta: float) -> void:
-	# The eye stops down over a snowfield, as a game would by weather.snow_lying.
-	$WorldEnvironment.environment.tonemap_exposure = lerpf(1.0, 0.75, weather.snow_lying)
+	# The eye stops down over a snowfield, as a game would by weather.snow_cover.
+	$WorldEnvironment.environment.tonemap_exposure = lerpf(1.0, 0.75, weather.snow_cover)
 	if weather.cycle:  # 20x, in the scene: a shower every half minute or so
 		rain_slider.set_value_no_signal(weather.rain)
 	var move := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")

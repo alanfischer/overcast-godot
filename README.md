@@ -212,8 +212,8 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
   Its own energy, colour and direction are the noon sun's: change them (in the inspector, or from
   code) and the weather takes the change as the sun's own. The editor previews all of it, and
   saves the scene with the sun as you set it, not as the preview left it. Tune the sun at noon in
-  clear weather, where the preview shows its own light: an undo elsewhere hands back the
-  previewed light as the sun's own.
+  clear weather, where the preview shows its own light: undoing an edit made at dusk or in a
+  storm hands back the tinted or dimmed light, which the weather then takes as the sun's own.
 
 ## Limits
 

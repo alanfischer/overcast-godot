@@ -218,8 +218,10 @@ const _GROUND_REACH := 1.0
 
 @export_group("Scene light")
 ## A sun to dim under the storm and light with the flash, and, while the sky's sun follows the
-## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional. Let go
-## of, as it was, when replaced or when the weather leaves the tree.
+## time of day, to turn with it and take its light (OvercastSky.scene_light). Optional. Its own
+## energy, colour and direction, as set, are the noon sun's: a change made to them from outside
+## (the inspector, code) is its own from then on. Let go of, as it was, when replaced or when the
+## weather leaves the tree. In the editor it is driven too, for the preview, and saved as it was.
 @export var sun: DirectionalLight3D:
 	set(light):
 		if light == sun:
@@ -391,8 +393,7 @@ var snowy: float:
 		return _snowy
 var _storm := 0.0
 var _snowy := 0.0
-## In the editor it draws, for a preview, but makes no sound, times no strikes and leaves the
-## scene's own nodes (the sun) as they are saved.
+## In the editor it draws, for a preview, but makes no sound and times no strikes.
 var _editor := Engine.is_editor_hint()
 var _flash_t := -1.0
 var _flash_k := 0.0
@@ -462,9 +463,13 @@ var _slant_pushed := Vector2.INF
 var _ground_slant := Vector4.INF
 var _ground_shift := 1.0
 var _ground_pushed := -1.0
-var _sun_energy := -1.0  # the sun's own light while taken; -1 when not
+var _sun_taken := false
+var _sun_energy := 1.0  # the sun's own light, colour and direction, while taken
 var _sun_color := Color.WHITE
 var _sun_basis := Basis()
+var _sun_set_energy := 0.0  # what this last left the sun at, to tell a change from outside
+var _sun_set_color := Color.WHITE
+var _sun_set_basis := Basis()
 ## The instance id of the weather whose rain the globals carry.
 static var _globals_owner := 0
 
@@ -584,18 +589,42 @@ func _exit_tree() -> void:
 
 
 func _take_sun() -> void:
-	if sun and _sun_energy < 0.0 and presenting and not _editor and is_inside_tree():
+	if sun and not _sun_taken and presenting and is_inside_tree():
+		_sun_taken = true
 		_sun_energy = sun.light_energy
 		_sun_color = sun.light_color
 		_sun_basis = sun.basis
+		_note_sun()
 
 
 func _let_sun_go() -> void:
-	if _sun_energy >= 0.0 and is_instance_valid(sun):
-		sun.light_energy = _sun_energy
-		sun.light_color = _sun_color
-		sun.basis = _sun_basis
-	_sun_energy = -1.0
+	if _sun_taken and is_instance_valid(sun):
+		_restore_sun()
+	_sun_taken = false
+
+
+func _restore_sun() -> void:
+	sun.light_energy = _sun_energy
+	sun.light_color = _sun_color
+	sun.basis = _sun_basis
+	_note_sun()
+
+
+func _note_sun() -> void:
+	_sun_set_energy = sun.light_energy
+	_sun_set_color = sun.light_color
+	_sun_set_basis = sun.basis
+
+
+## The editor saves the sun as it was, not as the preview drives it: what is saved is what the
+## next run takes for the noon sun.
+func _notification(what: int) -> void:
+	if not _sun_taken or not is_instance_valid(sun):
+		return
+	if what == NOTIFICATION_EDITOR_PRE_SAVE:
+		_restore_sun()
+	elif what == NOTIFICATION_EDITOR_POST_SAVE:
+		_drive_sun(current_sky())
 
 
 ## The sky this has been closing over, back to clear: no storm, no snow, no flash.
@@ -1495,17 +1524,8 @@ func _process(delta: float) -> void:
 		flash_changed.emit(_FLASH * k)
 		if drawn:
 			drawn.set_flash(_SKY_FLASH * k * lerpf(_SKY_FLASH_DAY, 1.0, drawn.night), _flash_dir)
-	if sun and _sun_energy >= 0.0 and drawn and drawn.sun_follows_time:
-		var toward := drawn.light_dir()
-		if not toward.is_equal_approx(sun.global_basis.z):
-			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
-			sun.global_basis = Basis.looking_at(-toward, up)
-		# Below the horizon it lights nothing: the ground is in the way.
-		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
-			* drawn.light_strength()
-	if sun and _sun_energy >= 0.0:
-		var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
-		sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * _FLASH.r
+	if _sun_taken and is_instance_valid(sun):
+		_drive_sun(drawn)
 	var light := _scene_light(drawn)
 	var drop_light := light * _DROP_LIGHT + _SKY_FLASH * _flash_k * _DROP_FLASH
 	_update_drops(drop_light)
@@ -1515,6 +1535,27 @@ func _process(delta: float) -> void:
 		if _haze:
 			_update_haze(delta, haze_color, drop_light)
 		_update_wet(haze_color)
+
+
+func _drive_sun(drawn: OvercastSky) -> void:
+	# Changed since this last set it: someone else's doing, and the sun's own from now on.
+	if sun.light_energy != _sun_set_energy:
+		_sun_energy = sun.light_energy
+	if sun.light_color != _sun_set_color:
+		_sun_color = sun.light_color
+	if sun.basis != _sun_set_basis:
+		_sun_basis = sun.basis
+	if drawn and drawn.sun_follows_time:
+		var toward := drawn.light_dir()
+		if not toward.is_equal_approx(sun.global_basis.z):
+			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
+			sun.global_basis = Basis.looking_at(-toward, up)
+		# Below the horizon it lights nothing: the ground is in the way.
+		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
+			* drawn.light_strength()
+	var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
+	sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * _FLASH.r
+	_note_sun()
 
 
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes

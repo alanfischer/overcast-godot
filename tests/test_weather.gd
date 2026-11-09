@@ -855,6 +855,70 @@ func test_the_sun_is_let_go_of_as_it_was() -> void:
 	_root().add_child(w)
 
 
+func test_the_editor_drives_the_sun_and_saves_it_as_it_was() -> void:
+	var scene := Node3D.new()
+	_keep(scene)
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	sun.light_color = Color(1.0, 0.9, 0.8)
+	sun.rotation = Vector3(-0.5, 0.3, 0.0)
+	var basis := sun.basis
+	scene.add_child(sun)
+	sun.owner = scene
+	var w := _weather()
+	w._editor = true
+	w.sky = SkyScript.new({"drawing": false, "time_of_day": 18.2})
+	w.sun = sun
+	scene.add_child(w)
+	_root().add_child(scene)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	assert_lt(sun.light_energy, 2.0, "previewed: the storm dims the sun")
+	assert_ne(sun.light_color, Color(1.0, 0.9, 0.8), "dusk tints it")
+	assert_false(sun.basis.is_equal_approx(basis), "and it turns with the time")
+	w.notification(Node.NOTIFICATION_EDITOR_PRE_SAVE)
+	var packed := PackedScene.new()
+	packed.pack(scene)
+	w.notification(Node.NOTIFICATION_EDITOR_POST_SAVE)
+	assert_lt(sun.light_energy, 2.0, "saved, the preview carries on")
+	var saved: DirectionalLight3D = packed.instantiate().get_child(0)
+	assert_almost_eq(saved.light_energy, 2.0, 1e-6, "but the scene keeps the sun's own light")
+	assert_eq(saved.light_color, Color(1.0, 0.9, 0.8), "its own colour")
+	assert_true(saved.basis.is_equal_approx(basis), "and its own direction")
+	saved.free()
+	w._process(0.1)
+	assert_lt(sun.light_energy, 2.0, "and the save is not taken for an edit")
+	_root().remove_child(scene)
+	assert_almost_eq(sun.light_energy, 2.0, 1e-6, "let go of as it was")
+
+
+func test_a_change_to_the_sun_from_outside_is_its_own() -> void:
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	_keep(sun)
+	_root().add_child(sun)
+	var w := _weather()
+	_keep(w)
+	w.sky = SkyScript.new({"drawing": false, "time_of_day": 12.0})
+	w.sun = sun
+	_root().add_child(w)
+	w.rain = 1.0
+	w.settle()
+	w._process(0.1)
+	var dimmed := sun.light_energy
+	assert_lt(dimmed, 2.0, "the storm dims it")
+	sun.light_energy = 4.0
+	sun.light_color = Color(1.0, 0.5, 0.5)
+	w._process(0.1)
+	assert_almost_eq(sun.light_energy, dimmed * 2.0, 1e-4, "an energy set from outside is the sun's own, dimmed in turn")
+	assert_eq(sun.light_color, Color(1.0, 0.5, 0.5), "and so is a colour, white at noon")
+	_root().remove_child(w)
+	assert_almost_eq(sun.light_energy, 4.0, 1e-6, "let go of with it")
+	assert_eq(sun.light_color, Color(1.0, 0.5, 0.5), "and its colour")
+	_root().add_child(w)
+
+
 func test_setting_the_cycle_back_plans_it_afresh() -> void:
 	var reference := Cycle.new(77)
 	var t := 0.0

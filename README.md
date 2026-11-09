@@ -20,8 +20,9 @@ global shader uniforms, which every Overcast shader needs to compile.
    as the Sky's material. Set its `sun_dir` to match your sun.
 2. Add an **OvercastWeather** node. Drag its box (`area`) to cover your level and press
    **Bake Rain Floor**. Then drag `rain` up, and `temperature` below freezing to turn it to snow. The rain, the snow,
-   the storm closing over, wet and snowy ground and the lightning (**Strike**) all show in the
-   editor. The node warns you if it has no sky or rain floor.
+   the storm closing over, wet and snowy ground, the lightning (**Strike**) and the weather's `sun`
+   turning with the sky's time of day all show in the editor. The node warns you if it has no sky
+   or rain floor.
 3. For wet and snowy ground and cloud shadows, call `OvercastMaterials.watch($Level)` once the level is
    loaded: it converts its StandardMaterial3Ds, and those of what spawns into it. Your own shaders
    take the includes instead (below).
@@ -206,8 +207,13 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
 - The rain and haze are lit by the sky's `scene_light()`. If your scene is lit some other way,
   turn off `light_from_sky` and set `sky_light`. The sky's time of day sets how bright lightning
   lights it.
-- `sun`, if set, is a `DirectionalLight3D` that dims under the storm and lights up with each
-  flash.
+- `sun`, if set, is a `DirectionalLight3D` that dims under the storm, lights up with each flash,
+  and, while the sky's sun follows the time, turns to the sun or moon and takes the sky's light.
+  Its own energy, colour and direction are the noon sun's: change them (in the inspector, or from
+  code) and the weather takes the change as the sun's own. The editor previews all of it, and
+  saves the scene with the sun as you set it, not as the preview left it. Tune the sun at noon in
+  clear weather, where the preview shows its own light: an undo elsewhere hands back the
+  previewed light as the sun's own.
 
 ## Limits
 

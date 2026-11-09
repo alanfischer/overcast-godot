@@ -37,12 +37,12 @@ func _roofed_floor() -> RainFloor:
 func test_rain_past_a_downpour_only_adds_drops() -> void:
 	var w := _weather()
 	for rain in [1.0, 2.0, 6.0]:
-		assert_almost_eq(Weather.heaviness(rain), 1.0, 1e-6, "rain %s is a downpour" % rain)
+		assert_almost_eq(Weather._heaviness(rain), 1.0, 1e-6, "rain %s is a downpour" % rain)
 		for i in 20:
-			var gap := w.strike_gap(rain)
+			var gap := w._strike_gap(rain)
 			assert_true(gap >= w.strike_gap_heavy.x and gap <= w.strike_gap_heavy.y,
 				"rain %s waits a downpour's gap between strikes (got %.1f)" % [rain, gap])
-	assert_eq(Weather.heaviness(0.0), 0.0, "dry is dry")
+	assert_eq(Weather._heaviness(0.0), 0.0, "dry is dry")
 	w.free()
 
 
@@ -216,7 +216,7 @@ func test_snow_falls_as_flakes_and_lies() -> void:
 	w.struck.connect(func(s: int) -> void: seeds.append(s))
 	w.rain = 1.0
 	w.temperature = -5.0
-	assert_eq(w.rainfall(), 0.0, "all of it falls as snow")
+	assert_eq(w.rainfall, 0.0, "all of it falls as snow")
 	assert_eq(w._drops.multimesh.visible_instance_count, 0, "no drops")
 	assert_eq(w._flakes.multimesh.visible_instance_count, w.flakes_heavy, "a blizzard's flakes")
 	for i in int(w.snow_time * 10.0) + 10:
@@ -385,8 +385,14 @@ func test_snowless_boxes_hold_for_every_floor() -> void:
 	w.settle()
 	assert_eq(w.snow_depth_at(Vector3(22.5, 0, 10.5)), 0.0, "a box given before the floor keeps it bare")
 	assert_gt(w.snow_depth_at(Vector3(15.5, 0, 10.5)), 0.0, "and only there")
-	w.add_snowless(AABB(Vector3(0, -1, 0), Vector3(5, 2, 20)))
+	var later := AABB(Vector3(0, -1, 0), Vector3(5, 2, 20))
+	w.add_snowless(later)
 	assert_eq(w.snow_depth_at(Vector3(2.5, 0, 10.5)), 0.0, "one given after it at once")
+	w.remove_snowless(later)
+	for i in 100:
+		w._process(w.snow_time / 50.0)
+	assert_almost_eq(w.snow_depth_at(Vector3(2.5, 0, 10.5)), Weather.DRIFT_LAYER, 1e-4, "let go of, it snows over")
+	assert_eq(w.snow_depth_at(Vector3(22.5, 0, 10.5)), 0.0, "while the other stays bare")
 
 
 ## A blast melts the snow where it lands, and the snow settling fills it in again.
@@ -400,28 +406,65 @@ func test_a_melt_digs_out_the_snow() -> void:
 	w.temperature = -5.0
 	w.settle()
 	var at := Vector3(20.5, 0.1, 10.5)
-	w.melt(at, 2.0, 0.5)
+	assert_true(w.melt(at, 2.0, 0.5), "a melt says it melted some")
 	assert_almost_eq(w.snow_depth_at(at), Weather.DRIFT_LAYER * 0.5, 1e-6, "half melted")
 	w.melt(at, 2.0)
 	assert_eq(w.snow_depth_at(at), 0.0, "bare where it struck")
+	assert_false(w.melt(Vector3(-50, 0, -50), 2.0), "and none off the floor, with nothing to melt")
 	for i in 100:
 		w._process(w.snow_time / 50.0)
 	assert_almost_eq(w.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-4, "snowed over again")
-	var headless := Weather.new()
-	headless.presenting = false
-	_keep(headless)
-	headless.rain_floor = _walled_floor()
-	_root().add_child(headless)
-	headless.melt(at, 2.0)
-	assert_eq(headless._field, null, "a peer that draws nothing keeps no snow to melt")
-	headless.rain = 1.0
-	headless.temperature = -5.0
-	headless.settle()
-	assert_almost_eq(headless.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-6, "but says how deep it lies, evenly")
+
+
+## A server holds the snow cell by cell, as a client does, and hands it on.
+func test_a_headless_peer_keeps_the_snow() -> void:
+	var server := Weather.new()
+	server.presenting = false
+	_keep(server)
+	server.rain_floor = _walled_floor()
+	_root().add_child(server)
+	server.rain = 1.0
+	server.temperature = -5.0
+	server.settle()
+	var at := Vector3(20.5, 0.1, 10.5)
+	assert_almost_eq(server.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-6, "a server snows over")
+	assert_true(server.melt(at, 2.0), "and melts it")
+	assert_eq(server.snow_depth_at(at), 0.0, "bare where it struck")
+	var client := _weather()
+	_keep(client)
+	client.rain_floor = _walled_floor()
+	_root().add_child(client)
+	client.soaks = false
+	client.rain = 1.0
+	client.temperature = -5.0
+	client.snow_cover = server.snow_cover
+	client.settle()
+	assert_eq(client.snow_cover, 1.0, "held as sent")
+	client.set_snow_cells(server.snow_cells())
+	assert_eq(client.snow_depth_at(at), 0.0, "a late joiner takes the server's melt")
+	assert_almost_eq(client.snow_depth_at(Vector3(5.5, 0.1, 10.5)), Weather.DRIFT_LAYER, 1e-3, "and its snow")
+	client.rain = 0.0
+	client.temperature = 5.0
+	client._process(client.melt_time)
+	assert_eq(client.snow_cover, 1.0, "with soaks off it melts none of its own cover")
+
+
+func test_snow_lies_only_where_snow_reaches() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _roofed_floor()
+	w.rain = 1.0
+	w.temperature = -5.0
+	w.settle()
+	assert_gt(w.snow_depth_at(Vector3(1, 0, 0)), 0.0, "on open ground")
+	assert_gt(w.snow_depth_at(Vector3(-1, 3, 0)), 0.0, "and on the roof")
+	assert_eq(w.snow_depth_at(Vector3(-1, 0, 0)), 0.0, "not under it")
 
 
 func _ice_at(w: Weather, p: Vector3) -> float:
-	return w.ground_at(p).y
+	return w.ice_at(p)
 
 
 ## 10 m square of ground at 0, a cell a metre, with a roof 3 m up over x 0..2.
@@ -443,7 +486,7 @@ func test_wet_ground_freezes_over_and_thaws() -> void:
 	w.settle()
 	w.rain = 0.0
 	assert_eq(_ice_at(w, open), 0.0, "wet, above freezing, is not ice")
-	w.temperature = -Weather.ICE_DEGREES
+	w.temperature = -Weather._ICE_DEGREES
 	for i in 40:
 		w._process(w.freeze_time / 20.0)
 	assert_almost_eq(w.ice, 1.0, 1e-6, "frozen over in freeze_time")
@@ -455,7 +498,7 @@ func test_wet_ground_freezes_over_and_thaws() -> void:
 	assert_almost_eq(w.ice, 0.5, 1e-6, "settled while freezing, the wet holds as ice")
 	w.wetness = 1.0
 	w.settle()
-	w.temperature = Weather.ICE_DEGREES
+	w.temperature = Weather._ICE_DEGREES
 	for i in 10:
 		w._process(w.thaw_time / 20.0)
 	assert_almost_eq(w.ice, 0.5, 0.06, "half thawed in half thaw_time")
@@ -477,7 +520,7 @@ func test_freezing_rain_glazes_the_ground() -> void:
 	_root().add_child(w)
 	w.temperature = -0.5
 	w.rain = 1.0
-	assert_gt(w.rainfall(), 0.0, "some of it rain")
+	assert_gt(w.rainfall, 0.0, "some of it rain")
 	for i in 50:
 		w._process(w.freeze_time)
 	assert_almost_eq(w.ice, 1.0, 1e-6, "glazed over, if slowly so near freezing")
@@ -571,20 +614,20 @@ func test_sleet_is_some_of_each() -> void:
 	_root().add_child(w)
 	w.rain = 1.0
 	w.temperature = lerpf(Weather.SLEET.x, Weather.SLEET.y, 0.5)
-	assert_almost_eq(w.rainfall(), 0.5, 1e-6, "half rain")
-	assert_almost_eq(w.snowfall(), 0.5, 1e-6, "half snow")
+	assert_almost_eq(w.rainfall, 0.5, 1e-6, "half rain")
+	assert_almost_eq(w.snowfall, 0.5, 1e-6, "half snow")
 	assert_gt(w._drops.multimesh.visible_instance_count, 0, "drops")
 	assert_gt(w._flakes.multimesh.visible_instance_count, 0, "and flakes")
 	w.settle()
-	assert_eq(w._snow_lying, 0.0, "above freezing, so it does not lie")
+	assert_eq(w._snow_cover, 0.0, "above freezing, so it does not lie")
 	w.temperature = Weather.FREEZING
-	assert_gt(w.snowfall(), w.rainfall(), "mostly snow at freezing")
+	assert_gt(w.snowfall, w.rainfall, "mostly snow at freezing")
 	w.settle()
-	assert_eq(w._snow_lying, 1.0, "and it lies")
+	assert_eq(w._snow_cover, 1.0, "and it lies")
 	w.temperature = Weather.SLEET.x
-	assert_eq(w.rainfall(), 0.0, "all snow below the sleet")
+	assert_eq(w.rainfall, 0.0, "all snow below the sleet")
 	w.temperature = Weather.SLEET.y
-	assert_eq(w.snowfall(), 0.0, "all rain above it")
+	assert_eq(w.snowfall, 0.0, "all rain above it")
 	w.lying_snow = false
 	w._process(w.melt_time)
 	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "unless lying snow is off")
@@ -625,6 +668,8 @@ func test_a_headless_peer_soaks_and_dries_the_ground() -> void:
 	w.wetness = 0.25
 	w._process(w.soak_time)
 	assert_eq(w.wetness, 0.25, "with soaks off it holds what it was set to")
+	assert_eq(w.wetness_at(Vector3(1, 0, 0)), 0.25, "on the open ground")
+	assert_eq(w.wetness_at(Vector3(-1, 0, 0)), 0.0, "and none under the roof")
 
 
 func test_rain_falls_on_open_ground_and_not_under_the_roof() -> void:
@@ -648,10 +693,10 @@ func test_the_rain_takes_the_skys_light() -> void:
 	var sky := FakeSky.new({"drawing": false, "time_of_day": 0.0})
 	w.sky = sky
 	_root().add_child(w)
-	assert_eq(w.scene_light(sky), sky.scene_light(), "the sky's light at midnight")
+	assert_eq(w._scene_light(sky), sky.scene_light(), "the sky's light at midnight")
 	w.light_from_sky = false
 	w.sky_light = Color(0.5, 0.5, 0.5)
-	assert_eq(w.scene_light(sky), Color(0.5, 0.5, 0.5), "or the game's own")
+	assert_eq(w._scene_light(sky), Color(0.5, 0.5, 0.5), "or the game's own")
 
 
 func test_the_area_is_the_nodes_own() -> void:
@@ -1185,7 +1230,7 @@ func test_the_fall_and_the_far_rain_move_on_from_where_they_are() -> void:
 	for i in 1000:
 		w._process(0.5)
 	carried = w._haze_material.get_shader_parameter("carried")
-	assert_true(carried.x >= 0.0 and carried.x < Weather.FAR_WRAP, "wrapped where the far grid repeats (%s)" % carried)
+	assert_true(carried.x >= 0.0 and carried.x < Weather._FAR_WRAP, "wrapped where the far grid repeats (%s)" % carried)
 
 
 func test_the_wind_carries_the_rain_and_gusts() -> void:
@@ -1196,18 +1241,18 @@ func test_the_wind_carries_the_rain_and_gusts() -> void:
 	w.wind = Vector3(6.0, 3.0, 0.0)
 	w.gustiness = 0.0
 	w._process(0.5)
-	assert_vec3_almost_eq(w.wind_now(), Vector3(6.0, 0.0, 0.0), 1e-4, "steady, it blows as set, along the ground")
+	assert_vec3_almost_eq(w.wind_now, Vector3(6.0, 0.0, 0.0), 1e-4, "steady, it blows as set, along the ground")
 	assert_vec3_almost_eq(w._drop_material.get_shader_parameter("drift"), Vector3(3.0, 0.0, 0.0), 1e-4,
 		"and carries the drops with it")
 	for i in 100:
 		w._process(0.1)
 	var drift: Vector3 = w._drop_material.get_shader_parameter("drift")
-	assert_true(drift.x >= 0.0 and drift.x < Weather.DROP_BOX.x, "wrapped into their box (%s)" % drift)
+	assert_true(drift.x >= 0.0 and drift.x < Weather._DROP_BOX.x, "wrapped into their box (%s)" % drift)
 	w.gustiness = 1.0
 	var speeds: Array[float] = []
 	for i in 200:
 		w._process(0.05)
-		speeds.append(w.wind_now().length())
+		speeds.append(w.wind_now.length())
 	assert_lt(speeds.min(), 4.0, "gusts drop it (%.1f)" % speeds.min())
 	assert_gt(speeds.max(), 8.0, "and raise it (%.1f)" % speeds.max())
 
@@ -1274,8 +1319,8 @@ func test_only_a_strong_wind_is_heard_and_louder_as_it_blows() -> void:
 		volumes.append(w._wind_audio.volume_db)
 	assert_lt(volumes[0], volumes[1], "louder as it blows harder")
 	assert_lt(volumes[1], volumes[2])
-	assert_almost_eq(volumes[2], Weather.WIND_DB, 0.01, "and no louder than WIND_DB past WIND_LOUD")
-	assert_lt(volumes[0], Weather.WIND_DB - 15.0, "a fresh breeze is only faint (%.1f dB)" % volumes[0])
+	assert_almost_eq(volumes[2], Weather._WIND_DB, 0.01, "and no louder than WIND_DB past WIND_LOUD")
+	assert_lt(volumes[0], Weather._WIND_DB - 15.0, "a fresh breeze is only faint (%.1f dB)" % volumes[0])
 	w.wind = Vector3.ZERO
 	w._process(0.1)
 	assert_false(w._wind_audio.playing, "still, it stops")
@@ -1301,9 +1346,9 @@ func test_the_wind_is_quieter_under_a_roof() -> void:
 	for i in 40:
 		w._process(0.1)
 	var open := w._wind_audio.volume_db
-	assert_almost_eq(open, Weather.WIND_DB, 0.01, "in the open, at full strength")
+	assert_almost_eq(open, Weather._WIND_DB, 0.01, "in the open, at full strength")
 	w.listener.global_position = Vector3(0.0, 1.0, 0.0)  # in the hall
 	for i in 40:
 		w._process(0.1)
-	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather.WIND_INDOOR_GAIN), 0.01,
+	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather._WIND_INDOOR_GAIN), 0.01,
 		"indoors, WIND_INDOOR_GAIN of it")

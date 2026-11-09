@@ -112,6 +112,14 @@ func keep_off(boxes: Array) -> void:
 	_changed()
 
 
+## Keeps only `boxes` off, letting the rest of what keep_off kept at none back.
+func keep_only(boxes: Array) -> void:
+	_is_bare.fill(0)
+	_bare.clear()
+	keep_off(boxes)
+	_wake()
+
+
 ## Cell `c` was just kept off.
 func _kept_off(_c: int) -> void:
 	pass

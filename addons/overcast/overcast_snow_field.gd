@@ -91,11 +91,12 @@ func fill(fraction: float) -> void:
 
 
 ## Melts `amount` (1 all) of the snow within `radius` of `at` on the surfaces near its height, in
-## full in the middle and thinning out to the edge. It fills in again while snow settles.
-func melt(at: Vector3, radius: float, amount := 1.0) -> void:
+## full in the middle and thinning out to the edge. It fills in again while snow settles. Whether
+## any snow melted.
+func melt(at: Vector3, radius: float, amount := 1.0) -> bool:
 	amount = clampf(amount, 0.0, 1.0)
 	if radius <= 0.0 or amount <= 0.0:
-		return
+		return false
 	var reach := _reach(at, radius)
 	var any := false
 	for j in range(reach.position.y, reach.end.y):
@@ -110,8 +111,29 @@ func melt(at: Vector3, radius: float, amount := 1.0) -> void:
 	if any:
 		_wake()
 		_changed()
+	return any
 
 
 ## Metres of snow on the cell under world point `p`; none off the floor.
 func depth_at(p: Vector3) -> float:
 	return value_at(p)
+
+
+## Every cell's depth in millimetres, two bytes each, for another peer to take up (set_cells).
+func cells() -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(values.size() * 2)
+	for i in values.size():
+		out.encode_u16(i * 2, mini(roundi(values[i] * 1000.0), 0xFFFF))
+	return out
+
+
+## Takes up another peer's cells, as cells() gave them. Ignored if laid out for a different floor.
+func set_cells(from: PackedByteArray) -> void:
+	if from.size() != values.size() * 2:
+		return
+	for i in values.size():
+		values[i] = 0.0 if _is_bare[i] else from.decode_u16(i * 2) / 1000.0
+		_speed[i] = maxf(maxf(target[i], values[i]), layer)
+	_wake()
+	_changed()

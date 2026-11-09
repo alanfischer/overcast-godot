@@ -93,7 +93,8 @@ and go on their own.
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's
     `puddle_scale` says how readily it pools. While it rains, ripples spread over the puddles;
     `overcast_wet_normal()` bends `NORMAL` by them too, for reflections that can show it.
-    `overcast_wet()` is the same for a shader that lights itself, such as a lightmapped one.
+    `overcast_wet()` is the same for a shader that lights itself, such as a lightmapped one; it
+    takes the light the surface was lit with as well as the lit colour.
     Below freezing (0 °C) wet ground freezes over, freezing rain glazes it, and the ice thaws
     once it is warmer, wetting the ground; the wet shaders draw it paler and glossier, unrippled.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
@@ -103,7 +104,9 @@ and go on their own.
     while it stays freezing, and melts, wetting the ground, once it is warmer; rain melts it faster. `overcast_snow_normal()` rounds the lighting over it, and
     `overcast_snow_glint()` in `light()` makes it glitter where the sun reaches it
     (`demo/ground.gdshader` shows both). `snow_scale` says how readily a material holds it, and
-    `overcast_snow()` is the version for a shader that lights itself. The weather's
+    `overcast_snow()` is the version for a shader that lights itself, and lies in the light the
+    surface was lit with (pass it as is: dividing it back out of a texture's lit colour prints
+    the texture's dark texels into the snow). The weather's
     `snow_lying` says how much lies, for a game to stop its exposure down by. Snow does not
     thunder.
   - rain sound that fades and low-passes under cover, and wind you hear only when it blows hard

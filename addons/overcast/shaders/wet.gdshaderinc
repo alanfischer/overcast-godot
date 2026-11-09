@@ -150,10 +150,11 @@ vec3 overcast_wet_normal(vec3 normal, mat3 world_to_normal, vec3 world_pos, vec2
 
 // For a shader that lights itself (a lightmap): wet is darker, and reflects overcast_rain_sky, a
 // damp surface at grazing angles only (water's Fresnel, F0 0.02), a puddle as a mirror-flat layer
-// over a darker floor, a glaze as a paler, glossier layer. `lit_srgb` is the surface's lit colour
-// and `albedo` its base colour; normal_view and view are NORMAL and VIEW.
-void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 world_normal,
-		vec3 normal_view, vec3 view) {
+// over a darker floor, a glaze as a paler, glossier layer. `lit_srgb` is the surface's lit colour,
+// `albedo` its base colour and `light` the light it was lit with (lit_srgb before any clamp, over
+// the base); normal_view and view are NORMAL and VIEW.
+void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 light, vec3 world_pos,
+		vec3 world_normal, vec3 normal_view, vec3 view) {
 	float footprint = length(fwidth(world_pos.xz));  // before any branch
 	vec3 w = overcast_wet_ice(world_pos, world_normal);
 	if (w.x <= 0.0) {
@@ -169,7 +170,7 @@ void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 w
 	vec3 lit = lit_srgb * dark;
 	if (ice > 0.0) {
 		// Ice keeps the floor's light, frosted pale in patches, and shines all over as a puddle does.
-		vec3 frost = OVERCAST_FROST * min(lit_srgb / max(albedo, vec3(0.08)), vec3(2.0));
+		vec3 frost = OVERCAST_FROST * min(light, vec3(2.0));
 		vec3 glazed = mix(lit_srgb * OVERCAST_ICE_TINT, frost, 0.35 * overcast_ice_frost(world_pos));
 		lit = mix(lit, glazed, ice * w.x);
 		mirror = mix(mirror, max(fresnel * 2.0, 0.2), ice);

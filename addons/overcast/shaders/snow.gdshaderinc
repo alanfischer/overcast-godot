@@ -128,27 +128,23 @@ float overcast_snow_glint(vec3 world_pos, float k, float footprint, vec3 normal,
 	return g * point * reach * k * OVERCAST_GLINT_BRIGHT;
 }
 
-// For a shader that lights itself (a lightmap): `lit_srgb` is the surface's lit colour and
-// `albedo` its base colour, in the renderer's native space (linear, but sRGB on
-// gl_compatibility); normal_view and view are NORMAL and VIEW.
-// The snow takes the light the surface was given: lit over base. It has no light's direction, so
-// its glints catch the eye's and are as bright as the light there.
-void overcast_snow(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 world_normal,
-		vec3 normal_view, vec3 view) {
+// For a shader that lights itself (a lightmap): `lit_srgb` is the surface's lit colour, `albedo`
+// its base colour in the renderer's native space (linear, but sRGB on gl_compatibility), and
+// `light` the light it was lit with (lit_srgb before any clamp, over the base); normal_view and
+// view are NORMAL and VIEW. The snow takes that light. It has no light's direction, so its glints
+// catch the eye's and are as bright as the light there.
+void overcast_snow(inout vec3 lit_srgb, inout vec3 albedo, vec3 light, vec3 world_pos,
+		vec3 world_normal, vec3 normal_view, vec3 view) {
 	float footprint = overcast_snow_footprint(world_pos);  // before any branch
 	float k = overcast_snow_amount(world_pos, world_normal);
 	if (k <= 0.0) {
 		return;
 	}
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
-	vec3 base = albedo;
 	vec3 white = overcast_snow_albedo(world_pos);
 #else
-	vec3 base = pow(max(albedo, vec3(0.0)), vec3(1.0 / 2.2));
 	vec3 white = pow(overcast_snow_albedo(world_pos), vec3(2.2));
 #endif
-	// A dark texel says little about its light; the floor keeps it from reading as none.
-	vec3 light = min(lit_srgb / max(base, vec3(0.08)), vec3(4.0));
 	float glint = overcast_snow_glint(world_pos, k, footprint, normal_view, view, view);
 	// Only direct light glints: what a lightmap gives past the ambient's share.
 	float direct = smoothstep(0.5, 1.2, dot(light, vec3(0.333)));

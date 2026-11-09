@@ -9,6 +9,8 @@ extends Node3D
 ## Roofs are a rain floor: press Bake Rain Floor in the inspector, or bake one at runtime
 ## (bake_rain_floor). Without one, rain falls everywhere.
 ##
+## What lies on the ground, wet, ice and snow, is its `ground` (OvercastGround).
+##
 ## Any material whose shader includes shaders/wet.gdshaderinc gets wet, and one that includes
 ## shaders/snow.gdshaderinc gets snowed on: the weather reaches it through global uniforms
 ## (overcast_globals.gd), so one weather drives a scene at a time.
@@ -27,8 +29,6 @@ const _Cycle = preload("res://addons/overcast/overcast_cycle.gd")
 const _Globals = preload("res://addons/overcast/overcast_globals.gd")
 const _Live = preload("res://addons/overcast/rain_floor_live.gd")
 const _Drift = preload("res://addons/overcast/overcast_snow_drift.gd")
-const _Field = preload("res://addons/overcast/overcast_snow_field.gd")
-const _Ice = preload("res://addons/overcast/overcast_ice_field.gd")
 
 ## Lightning's light at the peak of a strike, as linear light added to the sky's.
 const _FLASH := Color(2.0, 2.1, 2.6)
@@ -50,10 +50,6 @@ const _SNOW_STORM_LIGHT := 0.85
 const SLEET := Vector2(-1.0, 3.0)
 ## Snow lies at this and below, and melts above it; wet ground freezes, and ice thaws.
 const FREEZING := 0.0
-## Degrees C off freezing at which freeze_time and thaw_time hold: further off it goes faster, nearer
-## slower, though never as slow as _ICE_SLOWEST degrees off it would.
-const _ICE_DEGREES := 5.0
-const _ICE_SLOWEST := 0.5
 const _STORM_RATE := 0.2
 ## Snow drifts: the even layer (m) a calm leaves, which the ground's own snow draws, and how far the
 ## steady wind (m/s) moves, held for _DRIFT_WAIT seconds, before they are baked again.
@@ -265,10 +261,6 @@ const _GROUND_REACH := 1.0
 ## Flakes around the camera at the lightest snow and at a blizzard.
 @export_range(0, 100000, 100) var flakes_light := 8000
 @export_range(0, 100000, 100) var flakes_heavy := 50000
-## Whether the ground soaks and dries, freezes and thaws, and is snowed over and melts by itself.
-## Off, `wetness`, `ice` and `snow_cover` stay as they are set: a client's, as its server sends
-## them, so the two agree on footing.
-@export var soaks := true
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var soak_time := 20.0
@@ -279,7 +271,7 @@ const _GROUND_REACH := 1.0
 ## it is above freezing (rain melts it four times as fast).
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var snow_time := 90.0
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var melt_time := 600.0
-## Ice: seconds for wet ground to freeze over _ICE_DEGREES below freezing, and for its ice to thaw
+## Ice: seconds for wet ground to freeze over 5 degrees below freezing, and for its ice to thaw
 ## as far above it (rain thaws it four times as fast).
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var freeze_time := 60.0
 @export_range(0.1, 3600.0, 0.1, "or_greater", "suffix:s") var thaw_time := 30.0
@@ -327,7 +319,7 @@ var cover_budget_usec: int:
 	set(v):
 		_live.budget_usec = v
 ## Whether this draws and plays the weather. Off on a headless server, which still times the
-## strikes, keeps the ground's wet, ice and snow and answers the *_at queries, but draws and plays
+## strikes, keeps the ground (`ground`) and answers the *_at queries, but draws and plays
 ## nothing. Set before it enters the tree. (Not OvercastSky.drawing, which is which sky holds the
 ## cloud layer.)
 var presenting := DisplayServer.get_name() != "headless"
@@ -335,29 +327,9 @@ var presenting := DisplayServer.get_name() != "headless"
 ## brightness: float, fade: float) -> void. Called for each stroke.
 var bolt_drawer: Callable
 
-## How far snow has covered the ground, 0 to 1 (overcast_snow_cover), on a headless server too: for
-## a game's exposure, or its footsteps. Each rain floor cell holds its own depth (snow_depth_at).
-## Set it to agree with another peer: with `soaks` off it holds what it is set to.
-var snow_cover: float:
-	get:
-		return _snow_cover
-	set(value):
-		_snow_cover = clampf(value, 0.0, 1.0)
-## How wet the ground is, 0 dry to 1 soaked (overcast_wetness), as rain soaks it and it dries: on a
-## headless server too. Set it to agree with another peer: with `soaks` off it holds what it is set to.
-var wetness: float:
-	get:
-		return _wetness
-	set(value):
-		_wetness = clampf(value, 0.0, 1.0)
-## How far the wet ground has frozen over, 0 to 1 as `wetness` is (overcast_ice): on a headless
-## server too. Each rain floor cell has its own ice (ice_at), which follows this but for heat.
-## Set it to agree with another peer: with `soaks` off it holds what it is set to.
-var ice: float:
-	get:
-		return _ice
-	set(value):
-		_ice = clampf(value, 0.0, 1.0)
+## What lies on the ground: wet, ice and snow, kept on a headless server too. Its own object, for a
+## networked game to keep one peer's and have the others take it up.
+var ground := OvercastGround.new(self)
 ## How much of what falls is snow at `temperature`: 0 all rain, 1 all snow, sleet between.
 var snow_share: float:
 	get:
@@ -414,11 +386,8 @@ var _live := _Live.new()
 ## The drifts' material (shaders/drift.gdshader): its `contours` show how deep they are.
 var drift_material: ShaderMaterial
 var _drifts: MeshInstance3D
-var _field: _Field  # the snow lying on the rain floor, cell by cell, drawn or not
-var _ice_field: _Ice  # the ice, drawn or not
 var _field_drifted := false  # its target is a wind's drifts, not the even layer
 var _drift_target := PackedFloat32Array()
-var _snowless: Array[AABB] = []
 var _drift_floor: OvercastRainFloor  # what the drifts were baked for, and in what wind
 var _drift_wind := Vector3.INF
 var _drift_wait := _DRIFT_WAIT
@@ -450,10 +419,6 @@ var _drop_fallen := 0.0
 var _flake_fallen := 0.0
 var _far_fallen := 0.0
 var _far_carried := Vector2.ZERO
-var _wetness := 0.0
-var _ice := 0.0
-var _puddles := 0.0
-var _snow_cover := 0.0
 var _wet_pushed := Vector4(-1, -1, -1, -1)  # wetness, puddles, sky luma, flash, as last pushed
 var _snow_pushed := -1.0
 var _ice_pushed := -1.0
@@ -685,19 +650,14 @@ func _bake_in_editor() -> void:
 ## A scene loaded into rain already falling starts soaked.
 func _take_floor() -> void:
 	_live.set_floor(rain_floor, presenting)
-	_field = _Field.new(rain_floor, DRIFT_LAYER, presenting) if _live.image else null
-	_ice_field = _Ice.new(rain_floor, presenting) if _live.image else null
-	if _field:
-		_field.keep_off(_snowless)
-	if _ice_field:
-		_ice_field.keep_off(_snowless)
+	ground._take_floor(rain_floor, _live.image != null, presenting)
 	_field_drifted = false
 	_drift_floor = null
 	_faces_taken = false  # a new floor: the level may have changed under it
 	if is_node_ready():
 		_push_floor()
 	if rain > 0.0 and _live.image:
-		_soak()
+		ground._soak()
 
 
 ## The rain floor to the shaders, and so this weather's rain to the globals.
@@ -718,10 +678,12 @@ func _push_floor() -> void:
 	_Globals.set_value("overcast_rain_floor_origin", _live.origin)
 	_Globals.set_value("overcast_rain_floor_size", _live.size)
 	_Globals.set_value("overcast_rain_top", _live.top)
-	_Globals.set_value("overcast_has_snow_field", _field != null)
-	_Globals.set_value("overcast_snow_field", _field.texture if _field else null)
-	_Globals.set_value("overcast_has_ice_field", _ice_field != null)
-	_Globals.set_value("overcast_ice_field", _ice_field.texture if _ice_field else null)
+	var snow := ground._snow
+	var frozen := ground._ice_field
+	_Globals.set_value("overcast_has_snow_field", snow != null)
+	_Globals.set_value("overcast_snow_field", snow.texture if snow else null)
+	_Globals.set_value("overcast_has_ice_field", frozen != null)
+	_Globals.set_value("overcast_ice_field", frozen.texture if frozen else null)
 
 
 ## Straight to the weather the current rain is heading for: the storm closed over as far as it
@@ -729,7 +691,7 @@ func _push_floor() -> void:
 func settle() -> void:
 	_storm = _storm_target()
 	_snowy = snow_share
-	_soak()
+	ground._soak()
 	_ground_shift = 1.0
 	_ground_slant = Vector4.INF
 
@@ -741,16 +703,17 @@ func bake_drifts() -> void:
 	if _drift_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_drift_task)
 		_drift_task = -1
-	if _field == null or not _drifting():
+	var field := ground._snow
+	if field == null or not _drifting():
 		return
 	_drift_floor = rain_floor
 	_drift_wind = Vector3(wind.x, 0.0, wind.z)
 	_drift_target = _drifted(rain_floor, _drift_wind, drift_deepest)
-	_field.set_target(_drift_target)
+	field.set_target(_drift_target)
 	_field_drifted = true
-	_field.fill(_snow_cover)
+	field.fill(ground.snow_cover)
 	if presenting:
-		_show_drifts(_Drift.surface_arrays(_laid(rain_floor, _ground_faces()), _field.target, DRIFT_LAYER))
+		_show_drifts(_Drift.surface_arrays(_laid(rain_floor, _ground_faces()), field.target, DRIFT_LAYER))
 
 
 func _drifting() -> bool:
@@ -808,19 +771,18 @@ func _update_drifts(delta: float) -> void:
 		if presenting:
 			_ground = _ground_laid
 			_ground_floor = _drift_floor
-		if _field and rain_floor == _drift_floor:
-			_field.set_target(_drift_target)
+		if ground._snow and rain_floor == _drift_floor:
+			ground._snow.set_target(_drift_target)
 			_field_drifted = true
 			if presenting:
 				_show_drifts(_drift_arrays)
-	var on := _field != null and _drifting()
+	var field := ground._snow
+	var on := field != null and _drifting()
 	if _drifts:
-		_drifts.visible = on and _snow_cover > 0.0
-	if _field and not on and _field_drifted:
-		_field.set_target(_even_target())
-		_field_drifted = false
-		_drift_floor = null
-	if not on or (_snow_cover <= 0.0 and not _settling()):
+		_drifts.visible = on and ground.snow_cover > 0.0
+	if field and not on and _field_drifted:
+		_forget_drifts()
+	if not on or (ground.snow_cover <= 0.0 and not ground._settling()):
 		return
 	var steady := Vector3(wind.x, 0.0, wind.z)
 	if rain_floor == _drift_floor:
@@ -834,8 +796,8 @@ func _update_drifts(delta: float) -> void:
 	_drift_floor = rain_floor
 	_drift_wind = steady
 	var source := rain_floor
-	var lying := _field.depth.duplicate()
-	var bare := _field.bare_cells().duplicate()
+	var lying := field.depth.duplicate()
+	var bare := field.bare_cells().duplicate()
 	var deepest := drift_deepest
 	var drawn := presenting
 	var faces := _ground_faces() if drawn else PackedVector3Array()
@@ -850,14 +812,22 @@ func _update_drifts(delta: float) -> void:
 			heap[i] = maxf(heap[i], lying[i])
 		for c in bare:
 			heap[c] = 0.0
-		var ground := laid if laid else _Drift.lay(source, faces)
-		_ground_laid = ground
-		_drift_arrays = _Drift.surface_arrays(ground, heap, DRIFT_LAYER))
+		var bed := laid if laid else _Drift.lay(source, faces)
+		_ground_laid = bed
+		_drift_arrays = _Drift.surface_arrays(bed, heap, DRIFT_LAYER))
+
+
+## The snow heads for the even layer until the drifts are baked again.
+func _forget_drifts() -> void:
+	if ground._snow:
+		ground._snow.set_target(_even_target())
+	_field_drifted = false
+	_drift_floor = null
 
 
 func _even_target() -> PackedFloat32Array:
 	var even := PackedFloat32Array()
-	even.resize(_field.depth.size())
+	even.resize(ground._snow.depth.size())
 	even.fill(DRIFT_LAYER)
 	return even
 
@@ -869,87 +839,13 @@ func _show_drifts(baked: Array) -> void:
 		_drifts.top_level = true
 		add_child(_drifts)
 	_drifts.mesh = _Drift.surface_mesh(baked, drift_material)
-	_drifts.visible = _snow_cover > 0.0
-
-
-## Keeps lying snow and ice off the ground inside `box`: a pool, a moat, lava. The rain floor
-## stops at what is solid, so under a liquid it is the bed, and snow would lie there and drift up
-## through the surface. Kept for every floor this weather takes.
-func add_snowless(box: AABB) -> void:
-	_snowless.append(box)
-	if _field:
-		_field.keep_off([box])
-	if _ice_field:
-		_ice_field.keep_off([box])
-
-
-## Lets snow and ice back onto the ground inside `box`, as add_snowless was given it: a pool
-## drained, lava cooled.
-func remove_snowless(box: AABB) -> void:
-	if not _snowless.has(box):
-		return
-	_snowless.erase(box)
-	if _field:
-		_field.keep_only(_snowless)
-		_field.set_target(_even_target())
-		_field_drifted = false
-		_drift_floor = null  # baked again, onto the ground let back
-	if _ice_field:
-		_ice_field.keep_only(_snowless)
-
-
-func has_snowless(box: AABB) -> bool:
-	return _snowless.has(box)
-
-
-## Heat on the ground within `radius` metres of `at`, on what lies near its height: in full in the
-## middle, thinning out to the edge. Warm (`amount` > 0, fire) melts that share of the lying snow
-## and thaws that share of the ice; snow fills in again while it keeps settling, and ice freezes
-## over again while it is freezing. Cold (`amount` < 0) freezes that share of the wet ground, which
-## holds while it is freezing and thaws once it is not; dry ground has nothing to freeze. Drawn or
-## not, for footing (snow_depth_at, ice_at): one peer says where, and the others take the same
-## heat. Whether any snow or ice changed.
-func heat(at: Vector3, radius: float, amount := 1.0) -> bool:
-	var melted := _field != null and _field.melt(at, radius, amount)
-	var thawed := _ice_field != null and _ice_field.heat(at, radius, amount, _wetness)
-	return melted or thawed
+	_drifts.visible = ground.snow_cover > 0.0
 
 
 ## How fast lying wet or snow comes round to a new wind, per second: as snow settles where it lies,
 ## else as the ground soaks.
 func _ground_rate() -> float:
-	return 1.0 / (snow_time if _snow_cover > 0.0 or _settling() else soak_time)
-
-
-func _soak() -> void:
-	var freezing := _freezing()
-	if soaks:
-		if rainfall > 0.0 or not _wet_holds():
-			_wetness = 1.0 if rainfall > 0.0 else 0.0
-		_ice = _wetness if freezing else 0.0
-		if _settling():
-			_snow_cover = 1.0
-		elif not freezing:
-			_snow_cover = 0.0
-	_puddles = _heaviness(rainfall)
-	if _field:
-		_field.fill(_snow_cover)
-	if _ice_field:
-		_ice_field.fill(_ice)
-
-
-## Whether wet ground keeps its wet rather than drying: it is ice, turning to it, or not yet thawed.
-func _wet_holds() -> bool:
-	return _freezing() or _ice > 0.0
-
-
-func _freezing() -> bool:
-	return temperature <= FREEZING
-
-
-## Snow lies while it falls on freezing ground.
-func _settling() -> bool:
-	return _freezing() and snowfall > 0.0
+	return 1.0 / (snow_time if ground.snow_cover > 0.0 or ground._settling() else soak_time)
 
 
 func _storm_target() -> float:
@@ -1173,53 +1069,9 @@ func _rain_exposure(ears: Vector3) -> float:
 
 ## Whether rain falls on the ground at world point `p`, straight down (the wind's slant aside). A
 ## cell stops rain at the highest of its corners, so ground up to _GROUND_REACH under that still
-## counts: a slope, a stair. With `wetness`, how wet the ground is there, for gameplay.
+## counts: a slope, a stair. The ground's *_at queries (OvercastGround) go by it.
 func rains_on(p: Vector3) -> bool:
 	return floor_at(p) < p.y + _GROUND_REACH
-
-
-## How wet the ground is at world point `p`, 0 to 1: `wetness` where rain reaches it (rains_on),
-## else none.
-func wetness_at(p: Vector3) -> float:
-	return _wetness if rains_on(p) else 0.0
-
-
-## How icy the ground is at world point `p`, 0 to 1, where rain reaches it: the cell's own ice, heat
-## and all; `ice` off the rain floor.
-func ice_at(p: Vector3) -> float:
-	if not rains_on(p):
-		return 0.0
-	return _ice_field.value_at(p) if _ice_field else _ice
-
-
-## Metres of snow lying at world point `p`, where snow reaches it: the cell's own, drifts and melts
-## and all; the even layer as far as it has settled off the rain floor.
-func snow_depth_at(p: Vector3) -> float:
-	if not rains_on(p):
-		return 0.0
-	return _field.depth_at(p) if _field else _snow_cover * DRIFT_LAYER
-
-
-## Every rain floor cell's ice, for another peer to take up (set_ice_cells): what heat left
-## there, which the weather alone would not say. Empty without a rain floor.
-func ice_cells() -> PackedByteArray:
-	return _ice_field.cells() if _ice_field else PackedByteArray()
-
-
-func set_ice_cells(cells: PackedByteArray) -> void:
-	if _ice_field:
-		_ice_field.set_cells(cells)
-
-
-## Every rain floor cell's snow, for another peer to take up (set_snow_cells): what melts and the
-## drifts left there. Empty without a rain floor.
-func snow_cells() -> PackedByteArray:
-	return _field.cells() if _field else PackedByteArray()
-
-
-func set_snow_cells(cells: PackedByteArray) -> void:
-	if _field:
-		_field.set_cells(cells)
 
 
 ## Where rain stops at world XZ `q`, covers included: off the floor INF, where no rain falls, or
@@ -1311,7 +1163,7 @@ func _blow(delta: float) -> void:
 func _turn_ground(delta: float, slant: Vector2) -> void:
 	var to := Vector2(_ground_slant.z, _ground_slant.w)
 	if slant != to and (_ground_shift >= 1.0 or _ground_shift <= _GROUND_RETARGET):
-		var lying := _wetness > 0.0 or _snow_cover > 0.0
+		var lying := ground.wetness > 0.0 or ground.snow_cover > 0.0
 		var from := Vector2(_ground_slant.x, _ground_slant.y) if _ground_shift < 1.0 else to
 		if not lying or _ground_slant == Vector4.INF:
 			from = slant
@@ -1358,51 +1210,11 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	_haze_material.set_shader_parameter("flash", _flash_k * _DROP_FLASH_OPACITY)
 
 
-## Soaks and dries the ground, settles and melts the snow, and hands wet surfaces the sky they
-## reflect, lightning included. Pushed only when the state moves by a step the screen can show.
-func _snow_settles() -> bool:
-	return _settling() and lying_snow
-
-
-## How fast snow lies or melts, of all of it a second: none while it holds, freezing with none
-## falling.
-func _snow_rate() -> float:
-	if _snow_settles():
-		return lerpf(0.35, 1.0, _heaviness(snowfall)) / snow_time
-	if _freezing() and lying_snow:
-		return 0.0
-	return (1.0 + 3.0 * _heaviness(rainfall)) / melt_time
-
-
-## How fast wet ground freezes over or its ice thaws, of a full glaze a second.
-func _ice_rate() -> float:
-	var off := maxf(absf(temperature - FREEZING), _ICE_SLOWEST) / _ICE_DEGREES
-	if _freezing():
-		return off / freeze_time
-	return off * (1.0 + 3.0 * _heaviness(rainfall)) / thaw_time
-
-
-## Soaks and dries the ground, and lays and melts the snow on it; drawn or not.
-func _weather_ground(delta: float) -> void:
-	if soaks:
-		_snow_cover = move_toward(_snow_cover, 1.0 if _snow_settles() else 0.0, _snow_rate() * delta)
-	var freezing := _freezing()
-	# Melting snow keeps the ground under it wet.
-	var melting := _snow_cover > 0.0 and not freezing
-	var wet_target := 1.0 if (rainfall > 0.0 or melting) and wet_ground else 0.0
-	var puddle_target := _heaviness(rainfall) if wet_ground else 0.0
-	if soaks:
-		var dry_rate := 0.0 if _wet_holds() else 1.0 / dry_time
-		_wetness = move_toward(_wetness, wet_target,
-			(lerpf(0.35, 1.0, puddle_target) / soak_time if wet_target > _wetness else dry_rate) * delta)
-		_ice = move_toward(_ice, _wetness if freezing else 0.0, _ice_rate() * delta)
-	_puddles = move_toward(_puddles, puddle_target,
-		(1.0 / puddle_time if puddle_target > _puddles else 1.0 / puddle_dry_time) * delta)
-
-
+## Hands the shaders the ground's wet, ice and snow, and wet surfaces the sky they reflect,
+## lightning included. Pushed only when the state moves by a step the screen can show.
 func _update_wet(reflected: Color) -> void:
 	_update_snow()
-	var glaze := snappedf(_ice, 1.0 / 255.0)
+	var glaze := snappedf(ground.ice, 1.0 / 255.0)
 	if glaze != _ice_pushed:
 		_ice_pushed = glaze
 		_globals_owner = get_instance_id()
@@ -1412,7 +1224,7 @@ func _update_wet(reflected: Color) -> void:
 		_rainfall_pushed = falling
 		_globals_owner = get_instance_id()
 		_Globals.set_value("overcast_rainfall", falling)
-	var state := Vector4(_wetness, _puddles, reflected.get_luminance(), _flash_k).snapped(Vector4.ONE / 255.0)
+	var state := Vector4(ground.wetness, ground.puddles, reflected.get_luminance(), _flash_k).snapped(Vector4.ONE / 255.0)
 	if state == _wet_pushed:
 		return
 	_wet_pushed = state
@@ -1424,7 +1236,7 @@ func _update_wet(reflected: Color) -> void:
 
 
 func _update_snow() -> void:
-	var lying := snappedf(_snow_cover, 1.0 / 255.0)
+	var lying := snappedf(ground.snow_cover, 1.0 / 255.0)
 	if lying == _snow_pushed:
 		return
 	_snow_pushed = lying
@@ -1484,14 +1296,9 @@ func _process(delta: float) -> void:
 			strike(strike_seed)
 			struck.emit(strike_seed)
 	# Or still showing some: wetness set to none from outside is drawn as none.
-	var on_ground := rain > 0.0 or _wetness > 0.0 or _snow_cover > 0.0 or _ice > 0.0 \
-		or _wet_pushed.x > 0.0
-	if on_ground:
-		_weather_ground(delta)
-	if _field:
-		_field.step(delta, _snow_settles(), _snow_rate())
-	if _ice_field:
-		_ice_field.step(delta, _freezing(), _ice, _ice_rate())
+	var on_ground := rain > 0.0 or ground.wetness > 0.0 or ground.snow_cover > 0.0 \
+		or ground.ice > 0.0 or _wet_pushed.x > 0.0
+	ground._step(delta, on_ground)
 	_update_drifts(delta)
 	if not presenting:
 		return
@@ -1571,25 +1378,25 @@ func strike(strike_seed: int) -> void:
 	var radius := maxf(box.size.x, box.size.z) * 0.5
 	var angle := rng.randf() * TAU
 	var out := Vector3(cos(angle), 0.0, sin(angle))
-	var ground := centre + out * radius * rng.randf_range(0.2, 1.1)
-	ground.y = box.end.y + 2.0
-	var top := Vector3(ground.x, ground.y + rng.randf_range(_BOLT_HEIGHT.x, _BOLT_HEIGHT.y) * cloud, ground.z) \
+	var landing := centre + out * radius * rng.randf_range(0.2, 1.1)
+	landing.y = box.end.y + 2.0
+	var top := Vector3(landing.x, landing.y + rng.randf_range(_BOLT_HEIGHT.x, _BOLT_HEIGHT.y) * cloud, landing.z) \
 		+ out * rng.randf_range(-0.25, 0.25) * cloud
 
-	_bolt(ground, top, 1.0, rng)
+	_bolt(landing, top, 1.0, rng)
 	for i in rng.randi_range(1, 2):
-		var from := ground.lerp(top, rng.randf_range(0.35, 0.75))
+		var from := landing.lerp(top, rng.randf_range(0.35, 0.75))
 		var side := out.cross(Vector3.UP) * rng.randf_range(-1.0, 1.0)
 		var to := from + (side + out * 0.4 + Vector3.DOWN).normalized() * rng.randf_range(0.15, 0.35) * cloud
 		_bolt(to, from, 0.5, rng)
 
 	var eye := _ears(centre)
-	_flash_dir = (ground.lerp(top, 0.6) - eye).normalized()
+	_flash_dir = (landing.lerp(top, 0.6) - eye).normalized()
 	_flash_t = 0.0
 
 	var thunder_sound := thunder_stream if thunder_stream else _sound("thunder")
 	if thunder_sound and not _editor:
-		var dist := eye.distance_to(ground)
+		var dist := eye.distance_to(landing)
 		var thunder := AudioStreamPlayer.new()
 		thunder.stream = thunder_sound
 		thunder.bus = thunder_bus

@@ -113,7 +113,7 @@ and go on their own.
     the snow takes the sky's colour in the shade and only a little of the sun's in the sun, and
     its lumps and lipped edges catch the sun from `overcast_sun_dir`; a lamp's light it takes as
     it is. A dusting fills a texture's dark cracks first and frays where it runs out. The weather's
-    `snow_cover` says how much lies, for a game to stop its exposure down by. Snow does not
+    `ground.snow_cover` says how much lies, for a game to stop its exposure down by. Snow does not
     thunder.
   - rain sound that fades and low-passes under cover, and wind you hear only when it blows hard
     (from about 10 m/s, at full strength by 18), swelling with each gust. Snow is silent
@@ -130,17 +130,21 @@ and go on their own.
   goes, and through doorways, while walls, posts and roofs stop it and a lee stays dry. A floor
   without `under` (made by `create`, or baked before it existed) takes all it holds as solid to
   the ground, as do moving covers. `floor_at()` and the rain sound go straight down.
+- **The ground** (`weather.ground`, an `OvercastGround`) is what lies on it: how wet it is
+  (`wetness`), how far frozen over (`ice`), how much snow (`snow_cover`), and cell by cell the
+  snow's depth and the ice below. It is kept apart from what is drawn so a game can sync it (see
+  [Networked games](#networked-games)).
 - **Lying snow is a field**: with a rain floor, the snow is held cell by cell, metres deep over
   where rain stops, and the ground's snow and the drifts both draw from it
   (`overcast_snow_field`), on every peer, headless included. It heaps up toward how deep it lies
   once settled, wears away as it melts, and is stepped a few rows a frame, not at all once it has
-  come to rest. `heat(point, radius)` melts it out, bare in the middle and thinning to the edge, on
+  come to rest. `ground.heat(point, radius)` melts it out, bare in the middle and thinning to the edge, on
   what lies near the point's height; it fills in again while snow keeps settling. Call it where
-  something hot lands. `add_snowless(box)` keeps snow and ice
-  off what lies in a box until `remove_snowless(box)`: the rain floor stops at what is solid, so
+  something hot lands. `ground.add_snowless(box)` keeps snow and ice
+  off what lies in a box until `ground.remove_snowless(box)`: the rain floor stops at what is solid, so
   under a pool or a moat it is the bed, and snow would lie there and drift up through the water.
 - **Ice is a field too** (`overcast_ice_field`), on every peer, headless included: each cell
-  freezes up to how far the wet ground has frozen over (`ice`). `heat(point, radius, amount)`
+  freezes up to how far the wet ground has frozen over (`ground.ice`). `ground.heat(point, radius, amount)`
   warms or chills it: warm (`amount` > 0, where fire lands) melts that share of the snow and
   thaws that share of the ice, which freezes over again while it is freezing; cold (< 0) freezes
   that share of the wet ground, which holds while it is freezing and thaws once it is not. Dry
@@ -188,15 +192,15 @@ Overcast has no networking of its own; you sync two things.
 A headless server draws nothing, but `floor_at(point)` still answers where rain stops there,
 moving covers included, for gameplay that cares whether something is out in the rain. It soaks and
 dries the ground, freezes and thaws it, and snows it over too. For gameplay on the ground (a slick
-floor, an icy one, deep snow):
+floor, an icy one, deep snow), sync the server's `ground`:
 
-- send the server's `wetness`, `ice` and `snow_cover`, and turn `soaks` off on the clients so
-  they hold what they are sent;
-- send the heats that changed something (`heat()` says) for every peer to take;
-- hand a peer that joins late the server's `ice_cells()` and `snow_cells()`, which it takes up
-  with `set_ice_cells()` and `set_snow_cells()`;
-- ask `wetness_at(point)`, `ice_at(point)` and `snow_depth_at(point)` on both ends. Each is none
-  where rain does not reach (`rains_on(point)`).
+- send its `wetness`, `ice` and `snow_cover`, and turn `ground.soaks` off on the clients so they
+  hold what they are sent;
+- send the heats that changed something (`ground.heat()` says) for every peer to take;
+- hand a peer that joins late its `ice_cells()` and `snow_cells()`, which it takes up with
+  `set_ice_cells()` and `set_snow_cells()`;
+- ask `ground.wetness_at(point)`, `ice_at(point)` and `snow_depth_at(point)` on both ends. Each
+  is none where rain does not reach (the weather's `rains_on(point)`).
 
 ## Lighting the scene
 

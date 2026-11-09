@@ -35,6 +35,9 @@ const GLOBALS := {
 	"overcast_rain_slant": ["vec2", Vector2.ZERO],
 	"overcast_ground_slant": ["vec4", Vector4.ZERO],
 	"overcast_ground_shift": ["float", 1.0],
+	"overcast_ice": ["float", 0.0],
+	"overcast_has_ice_field": ["bool", false],
+	"overcast_ice_field": ["sampler2D", ""],
 }
 
 const _TYPES := {

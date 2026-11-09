@@ -2,11 +2,16 @@
 #define OVERCAST_WET_GDSHADERINC
 // Wet ground. Include in a surface shader and call overcast_wet_pbr (or overcast_wet, for a shader
 // that lights itself) from fragment(): it soaks and dries with OvercastWeather's rain, through
-// globals, with nothing to register.
+// globals, with nothing to register. Where the wet has frozen it is glazed: glossy, pale and
+// unrippled.
 global uniform float overcast_wetness;  // 0 dry, 1 soaked
 global uniform float overcast_puddles;  // how far flat ground has pooled
 global uniform vec3 overcast_rain_sky;  // the sky colour wet surfaces reflect, sRGB
 global uniform float overcast_rainfall;  // how hard it is raining now, 0 to 1: what ripples puddles
+global uniform float overcast_ice;  // how much of the wet ground has frozen, where no ice field says
+// How much has frozen per rain floor cell (OvercastIceField): thawed and frozen where it is.
+global uniform bool overcast_has_ice_field;
+global uniform sampler2D overcast_ice_field : filter_nearest;
 uniform float puddle_scale : hint_range(0.0, 1.0) = 1.0;  // how readily this surface pools: earth does, planks drain
 #include "res://addons/overcast/shaders/rain_floor.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
@@ -20,6 +25,27 @@ const float OVERCAST_RIPPLE_LIFE = 0.7;
 const float OVERCAST_RIPPLE_WAVE = 40.0;
 const float OVERCAST_RIPPLE_TILT = 0.35;
 const float OVERCAST_RIPPLE_REACH = 0.32;
+
+const vec3 OVERCAST_ICE_TINT = vec3(0.86, 0.93, 1.0);
+const vec3 OVERCAST_FROST = vec3(0.75, 0.82, 0.9);
+
+// How much ice glazes the ground at world_pos, 0 to 1 (as overcast_wetness is), blended between
+// the four cells around it; overcast_ice off the field.
+float overcast_ice_lying(vec3 world_pos) {
+	vec2 uv = rain_floor_uv(world_pos);
+	if (!overcast_has_ice_field || !rain_floor_covers(uv)) {
+		return overcast_ice;
+	}
+	return rain_floor_blend(overcast_ice_field, uv);
+}
+
+// Pale frost in the ice at world_pos, 0 to 1: blotches and fine streaks, so a glaze reads as one.
+float overcast_ice_frost(vec3 world_pos) {
+	vec2 q = world_pos.xz;
+	float blotch = smoothstep(0.35, 0.75, overcast_vnoise(q * 0.9 + 7.3));
+	float streak = smoothstep(0.55, 0.85, overcast_vnoise(q * vec2(6.0, 1.5) + 2.1));
+	return clamp(0.35 + 0.45 * blotch + 0.3 * streak, 0.0, 1.0);
+}
 
 // The slope rain's ripples put on standing water at world xz: d(height)/dx, d(height)/dz.
 vec2 overcast_ripple_slope(vec2 xz) {
@@ -46,25 +72,32 @@ vec2 overcast_ripple_slope(vec2 xz) {
 	return slope;
 }
 
-// How wet the surface at world_pos is (x), and how much of it is puddle (y). A ceiling stays dry;
-// a wall asks about the air a cell and a half out from it (clear of the cells the wall's top is
-// in, even on the diagonal), and takes less.
-vec2 overcast_wet_amount(vec3 world_pos, vec3 world_normal) {
+// How wet the surface at world_pos is (x), how much of it is puddle (y), and of the wet, the share
+// frozen (z). A ceiling stays dry; a wall asks about the air a cell and a half out from it (clear
+// of the cells the wall's top is in, even on the diagonal), and takes less.
+vec3 overcast_wet_ice(vec3 world_pos, vec3 world_normal) {
 	if (overcast_wetness <= 0.0 || world_normal.y < -0.3) {
-		return vec2(0.0);
+		return vec3(0.0);
 	}
 	vec2 cell = rain_floor_cell();
 	float reach = world_normal.y > 0.3
 		? rain_reaches(world_pos + world_normal * 0.02 + vec3(0.0, rain_slope_lift(world_normal, vec2(0.0)), 0.0))
 		: rain_reaches(world_pos + world_normal * 1.5 * max(cell.x, cell.y)) * 0.6;
-	float wet = overcast_wetness * reach;
+	float ice = overcast_ice_lying(world_pos);
+	float most = max(overcast_wetness, ice);
+	float wet = most * reach;
 	float pool = 0.0;
 	if (wet > 0.0 && world_normal.y > 0.95) {
 		float n = overcast_vnoise(world_pos.xz * 0.55) * 0.7 + overcast_vnoise(world_pos.xz * 2.3) * 0.3;
 		float edge = mix(1.05, 0.55, overcast_puddles * puddle_scale);
 		pool = smoothstep(edge, edge + 0.05, n) * reach;
 	}
-	return vec2(wet, pool);
+	return vec3(wet, pool, ice / most);
+}
+
+// How wet the surface at world_pos is (x), and how much of it is puddle (y).
+vec2 overcast_wet_amount(vec3 world_pos, vec3 world_normal) {
+	return overcast_wet_ice(world_pos, world_normal).xy;
 }
 
 // How much rain's ripples brighten (over 1) or dim the reflection on standing water at world_pos,
@@ -83,15 +116,21 @@ float overcast_ripple_shine(vec3 world_pos, float pool, float footprint) {
 // sky's radiance) give the sheen and a puddle its mirror, rippled while it rains. Call from
 // fragment(), outside any branch (it takes derivatives), after setting all three (SPECULAR is 0.5
 // by default). A puddle reflects more than water's Fresnel would, as overcast_wet does: the sky is
-// far brighter than the ground. Returns overcast_wet_amount.
+// far brighter than the ground. Ice is paler, smoother and unrippled. Returns how wet (x) and how
+// much open puddle, unfrozen, the rain ripples (y), for overcast_wet_normal.
 vec2 overcast_wet_pbr(inout vec3 albedo, inout float roughness, inout float specular, vec3 world_pos,
 		vec3 world_normal) {
 	float footprint = length(fwidth(world_pos.xz));
-	vec2 w = overcast_wet_amount(world_pos, world_normal);
+	vec3 w = overcast_wet_ice(world_pos, world_normal);
+	float ice = w.z * w.x;
+	vec3 glazed = ice > 0.0
+		? mix(albedo * OVERCAST_ICE_TINT, OVERCAST_FROST, 0.35 * overcast_ice_frost(world_pos)) : albedo;
 	albedo *= mix(1.0, 0.6, w.x) * mix(1.0, 0.6, w.y);
-	roughness = mix(mix(roughness, min(roughness, 0.3), w.x), 0.02, w.y);
-	specular = clamp(mix(specular, 1.0, w.y) * overcast_ripple_shine(world_pos, w.y, footprint), 0.0, 1.0);
-	return w;
+	albedo = mix(albedo, glazed, ice);
+	roughness = mix(mix(mix(roughness, min(roughness, 0.3), w.x), 0.02, w.y), 0.04, ice);
+	float shine = mix(overcast_ripple_shine(world_pos, w.y, footprint), 1.0, w.z);
+	specular = clamp(mix(mix(specular, 1.0, w.y), 0.9, ice) * shine, 0.0, 1.0);
+	return vec2(w.x, w.y * (1.0 - w.z));
 }
 
 // Bends `normal` by the ripples rain makes on the puddles, for Godot's own lighting to catch in its
@@ -111,22 +150,31 @@ vec3 overcast_wet_normal(vec3 normal, mat3 world_to_normal, vec3 world_pos, vec2
 
 // For a shader that lights itself (a lightmap): wet is darker, and reflects overcast_rain_sky, a
 // damp surface at grazing angles only (water's Fresnel, F0 0.02), a puddle as a mirror-flat layer
-// over a darker floor. `lit_srgb` is the surface's lit colour and `albedo` its base colour;
-// normal_view and view are NORMAL and VIEW.
+// over a darker floor, a glaze as a paler, glossier layer. `lit_srgb` is the surface's lit colour
+// and `albedo` its base colour; normal_view and view are NORMAL and VIEW.
 void overcast_wet(inout vec3 lit_srgb, inout vec3 albedo, vec3 world_pos, vec3 world_normal,
 		vec3 normal_view, vec3 view) {
 	float footprint = length(fwidth(world_pos.xz));  // before any branch
-	vec2 w = overcast_wet_amount(world_pos, world_normal);
+	vec3 w = overcast_wet_ice(world_pos, world_normal);
 	if (w.x <= 0.0) {
 		return;
 	}
 	float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(normal_view, view), 0.0, 1.0), 5.0);
 	// A puddle shows the floor under it darker and the sky over it brighter than its Fresnel alone
 	// would: the sky it reflects is far brighter than anything the light puts on the ground.
+	float ice = w.z;
 	float dark = mix(1.0, 0.6, w.x) * mix(1.0, 0.6, w.y);
 	float mirror = mix(w.x * 0.5 * fresnel, max(fresnel * 2.0, 0.1), w.y);
-	mirror *= overcast_ripple_shine(world_pos, w.y, footprint);
-	lit_srgb = min(lit_srgb * dark + overcast_rain_sky * mirror, vec3(1.0));
-	albedo *= dark;
+	mirror *= mix(overcast_ripple_shine(world_pos, w.y, footprint), 1.0, ice);
+	vec3 lit = lit_srgb * dark;
+	if (ice > 0.0) {
+		// Ice keeps the floor's light, frosted pale in patches, and shines all over as a puddle does.
+		vec3 frost = OVERCAST_FROST * min(lit_srgb / max(albedo, vec3(0.08)), vec3(2.0));
+		vec3 glazed = mix(lit_srgb * OVERCAST_ICE_TINT, frost, 0.35 * overcast_ice_frost(world_pos));
+		lit = mix(lit, glazed, ice * w.x);
+		mirror = mix(mirror, max(fresnel * 2.0, 0.2), ice);
+	}
+	lit_srgb = min(lit + overcast_rain_sky * mirror, vec3(1.0));
+	albedo *= mix(dark, 1.0, ice * w.x);
 }
 #endif

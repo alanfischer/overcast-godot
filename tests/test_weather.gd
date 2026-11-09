@@ -400,6 +400,8 @@ func test_a_melt_digs_out_the_snow() -> void:
 	w.temperature = -5.0
 	w.settle()
 	var at := Vector3(20.5, 0.1, 10.5)
+	w.melt(at, 2.0, 0.5)
+	assert_almost_eq(w.snow_depth_at(at), Weather.DRIFT_LAYER * 0.5, 1e-6, "half melted")
 	w.melt(at, 2.0)
 	assert_eq(w.snow_depth_at(at), 0.0, "bare where it struck")
 	for i in 100:
@@ -416,6 +418,133 @@ func test_a_melt_digs_out_the_snow() -> void:
 	headless.temperature = -5.0
 	headless.settle()
 	assert_almost_eq(headless.snow_depth_at(at), Weather.DRIFT_LAYER, 1e-6, "but says how deep it lies, evenly")
+
+
+func _ice_at(w: Weather, p: Vector3) -> float:
+	return w.ground_at(p).y
+
+
+## 10 m square of ground at 0, a cell a metre, with a roof 3 m up over x 0..2.
+func _icy_floor() -> RainFloor:
+	var img := Image.create_empty(10, 10, false, Image.FORMAT_RF)
+	img.fill_rect(Rect2i(0, 0, 3, 10), Color(3.0, 0, 0))
+	return RainFloor.create(img, Vector3.ZERO, Vector2(10, 10), 10.0)
+
+
+func test_wet_ground_freezes_over_and_thaws() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	w.rain_floor = _icy_floor()
+	_root().add_child(w)
+	var open := Vector3(7.5, 0.0, 2.5)
+	var roofed := Vector3(1.5, 0.0, 2.5)
+	w.rain = 1.0
+	w.settle()
+	w.rain = 0.0
+	assert_eq(_ice_at(w, open), 0.0, "wet, above freezing, is not ice")
+	w.temperature = -Weather.ICE_DEGREES
+	for i in 40:
+		w._process(w.freeze_time / 20.0)
+	assert_almost_eq(w.ice, 1.0, 1e-6, "frozen over in freeze_time")
+	assert_almost_eq(w.wetness, 1.0, 1e-6, "the wet held in it, not dried")
+	assert_almost_eq(_ice_at(w, open), 1.0, 1e-6, "on every cell")
+	assert_eq(_ice_at(w, roofed), 0.0, "but none where no rain fell")
+	w.wetness = 0.5
+	w.settle()
+	assert_almost_eq(w.ice, 0.5, 1e-6, "settled while freezing, the wet holds as ice")
+	w.wetness = 1.0
+	w.settle()
+	w.temperature = Weather.ICE_DEGREES
+	for i in 10:
+		w._process(w.thaw_time / 20.0)
+	assert_almost_eq(w.ice, 0.5, 0.06, "half thawed in half thaw_time")
+	assert_almost_eq(_ice_at(w, open), 0.5, 0.06, "on the cells as well")
+	assert_almost_eq(w.wetness, 1.0, 1e-6, "still wet under it")
+	for i in 12:
+		w._process(w.thaw_time / 20.0)
+	assert_eq(w.ice, 0.0, "thawed")
+	assert_eq(_ice_at(w, open), 0.0, "everywhere")
+	w._process(w.dry_time / 2.0)
+	assert_lt(w.wetness, 1.0, "and drying once it has")
+
+
+func test_freezing_rain_glazes_the_ground() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	w.rain_floor = _icy_floor()
+	_root().add_child(w)
+	w.temperature = -0.5
+	w.rain = 1.0
+	assert_gt(w.rainfall(), 0.0, "some of it rain")
+	for i in 50:
+		w._process(w.freeze_time)
+	assert_almost_eq(w.ice, 1.0, 1e-6, "glazed over, if slowly so near freezing")
+
+
+func test_cold_freezes_wet_ground_where_it_lands_and_heat_thaws_it() -> void:
+	var w := Weather.new()
+	w.presenting = false
+	_keep(w)
+	w.rain_floor = _icy_floor()
+	_root().add_child(w)
+	var at := Vector3(7.5, 0.0, 2.5)
+	var far := Vector3(7.5, 0.0, 7.5)
+	assert_false(w.heat(at, 2.0, -1.0), "dry ground has nothing to freeze")
+	assert_eq(_ice_at(w, at), 0.0, "none frozen")
+	w.wetness = 0.6
+	assert_true(w.heat(at, 2.0, -0.5), "wet ground does")
+	assert_almost_eq(_ice_at(w, at), 0.3, 1e-6, "half the wet frozen")
+	w.heat(at, 2.0, -1.0)
+	assert_almost_eq(_ice_at(w, at), 0.6, 1e-6, "all of it, and no more")
+	assert_false(w.heat(at, 0.4, -1.0), "and colder still changes nothing frozen through")
+	assert_eq(_ice_at(w, far), 0.0, "only where it landed")
+	w.heat(far + Vector3(0, 3, 0), 2.0, -1.0)
+	assert_eq(_ice_at(w, far), 0.0, "and only on the ground near it")
+	w.heat(at, 2.0, 0.25)
+	assert_almost_eq(_ice_at(w, at), 0.35, 1e-6, "warmth thaws it")
+	w.temperature = 10.0
+	for i in 20:
+		w._process(w.thaw_time / 10.0)
+	assert_eq(_ice_at(w, at), 0.0, "it thaws above freezing")
+	w.temperature = -10.0
+	w.wetness = 0.6
+	w.heat(at, 2.0, -1.0)
+	for i in 20:
+		w._process(1.0)
+	assert_almost_eq(_ice_at(w, at), 0.6, 1e-6, "and holds while it freezes")
+	w.heat(at, 2.0, 1.0)
+	assert_eq(_ice_at(w, at), 0.0, "fire thaws it")
+	for i in 20:
+		w._process(w.freeze_time)
+	assert_almost_eq(_ice_at(w, at), 0.6, 1e-6, "and it freezes over again with the rest")
+
+
+func test_a_peer_takes_up_another_peers_ice() -> void:
+	var server := Weather.new()
+	server.presenting = false
+	_keep(server)
+	server.rain_floor = _icy_floor()
+	_root().add_child(server)
+	var client := _weather()
+	_keep(client)
+	client.rain_floor = _icy_floor()
+	_root().add_child(client)
+	client.soaks = false
+	var at := Vector3(7.5, 0.0, 2.5)
+	server.wetness = 1.0
+	server.heat(at, 2.0, -1.0)
+	client.wetness = server.wetness
+	client.ice = server.ice
+	client.set_ice_cells(server.ice_cells())
+	assert_almost_eq(_ice_at(client, at), 1.0, 1.0 / 255.0, "the same ice")
+	assert_eq(_ice_at(client, Vector3(7.5, 0.0, 7.5)), 0.0, "where it is")
+	client._process(0.1)
+	assert_true(Globals.value("overcast_has_ice_field"), "drawn off a field")
+	client.ice = 0.5
+	client._process(0.1)
+	assert_almost_eq(Globals.value("overcast_ice"), 0.5, 1.0 / 255.0, "the glaze a server says is drawn")
 
 
 func test_a_snow_storm_greys_the_sky_pale() -> void:

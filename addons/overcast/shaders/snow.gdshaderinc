@@ -19,15 +19,7 @@ const float OVERCAST_SNOW_LAYER = 0.3;
 
 // Metres of snow at world xz, blended between the four cells around it.
 float overcast_snow_depth(vec2 xz) {
-	ivec2 res = textureSize(overcast_snow_field, 0);
-	vec2 texel = (xz - overcast_rain_floor_origin.xz) / overcast_rain_floor_size * vec2(res) - 0.5;
-	ivec2 c = ivec2(floor(texel));
-	vec2 f = fract(texel);
-	vec4 d;
-	for (int i = 0; i < 4; i++) {
-		d[i] = texelFetch(overcast_snow_field, clamp(c + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
-	}
-	return mix(mix(d.x, d.y, f.x), mix(d.z, d.w, f.x), f.y);
+	return rain_floor_blend(overcast_snow_field, (xz - overcast_rain_floor_origin.xz) / overcast_rain_floor_size);
 }
 
 // How far the snow at world_pos has settled, 0 to 1: the field's depth over the even layer, or

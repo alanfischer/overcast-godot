@@ -94,6 +94,8 @@ and go on their own.
     `puddle_scale` says how readily it pools. While it rains, ripples spread over the puddles;
     `overcast_wet_normal()` bends `NORMAL` by them too, for reflections that can show it.
     `overcast_wet()` is the same for a shader that lights itself, such as a lightmapped one.
+    Below freezing (0 °C) wet ground freezes over, freezing rain glazes it, and the ice thaws
+    once it is warmer, wetting the ground; the wet shaders draw it paler and glossier, unrippled.
   - lying snow on every material that includes `shaders/snow.gdshaderinc` and calls
     `overcast_snow_pbr(albedo, roughness, specular, world_pos, world_normal)` after wetting it:
     a dusting in patches first on what faces up, then a layer over all of it, never under a
@@ -125,9 +127,15 @@ and go on their own.
   melts, and is stepped a few rows a frame, not at all once it has come to rest. `melt(point,
   radius)` digs it out, bare in the middle and thinning to the edge, on what lies near the point's
   height; it fills in again while snow keeps settling. Call it where something hot lands.
-  `add_snowless(box)` keeps snow off what lies in a box for good: the rain floor stops at what is
-  solid, so under a pool or a moat it is the bed, and snow would lie there and drift up through the
-  water. A headless peer keeps no field.
+  `add_snowless(box)` keeps snow and ice off what lies in a box for good: the rain floor stops at
+  what is solid, so under a pool or a moat it is the bed, and snow would lie there and drift up
+  through the water. A headless peer keeps no snow field.
+- **Ice is a field too** (`overcast_ice_field`), on every peer, headless included: each cell
+  freezes up to how far the wet ground has frozen over (`ice`). `heat(point, radius, amount)`
+  warms or chills it as `melt` does the snow: warm (`amount` > 0, where fire lands) thaws that
+  share, which freezes over again while it is freezing; cold (< 0) freezes that share of the wet
+  ground, which holds while it is freezing and thaws once it is not. Dry ground has nothing to
+  freeze. It returns whether any ice changed.
 - **Snow drifts** (`snow_drifts`, on by default): in a wind, lying snow heaps up in the lee of
   whatever stands solid from the ground up and banks against its windward side, while the open is
   scoured thin; a roof on posts lets the wind through and drifts nothing. `OvercastSnowDrift` bakes
@@ -155,7 +163,7 @@ and go on their own.
   that sets the rain itself can still take the cycle's wind without the showers' gusts, from
   `OvercastCycle.breeze_at(t)`.
 - **Tuning** that a game would want to change is in the inspector: haze, drop and flake counts,
-  how fast ground soaks and dries and snow settles and melts, the gaps between strikes, how dark cloud shadows are, how high the
+  how fast ground soaks and dries, snow settles and melts and ice freezes and thaws, the gaps between strikes, how dark cloud shadows are, how high the
   clouds sit.
 
 ## Networked games
@@ -172,7 +180,11 @@ A headless server draws nothing, but `floor_at(point)` still answers where rain 
 moving covers included, for gameplay that cares whether something is out in the rain. It soaks and
 dries the ground too: for gameplay on wet ground (a slick floor), send the server's `wetness`, turn
 `soaks` off on the clients so they hold what they are sent, and ask `rains_on(point)` on both ends.
-`snow_depth_at(point)` says how deep the snow lies, on any peer.
+`snow_depth_at(point)` says how deep the snow lies, on any peer. Ice is for gameplay too (an icy
+floor): send the server's `ice` beside `wetness`, send the heats that changed something
+(`heat()` says) for every peer to take, and ask `ground_at(point)` (wet, ice) on both ends; a
+peer that joins late takes up the server's `ice_cells()` with `set_ice_cells()`. Snow is only
+drawn: each peer melts its own.
 
 ## Lighting the scene
 

@@ -59,8 +59,9 @@ switches, and a mode where showers come and go on their own.
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
-- **Sky lit by the air**: set the sky's `atmosphere` to 1 and its colours come from sunlight
-  scattered in the air instead of the painted gradient. Overhead it's blue, at the horizon pale.
+- **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
+  Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
+  instead. Overhead it's blue, at the horizon pale.
   Toward a low sun it turns gold and red, and after sunset the clouds stay lit red a while. Opposite
   the set sun, the planet's shadow rises with a pink band above it, and twilight fades through blue.
   `atmosphere_haze` thickens the air and `atmosphere_exposure` brightens it. The sky's night colours

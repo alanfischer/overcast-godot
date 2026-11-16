@@ -6,7 +6,6 @@
 
 [sub_resource type="ShaderMaterial" id="OvercastSky_1"]
 script = ExtResource("3")
-shader_parameter/atmosphere = 1.0
 
 [sub_resource type="Sky" id="Sky_1"]
 sky_material = SubResource("OvercastSky_1")

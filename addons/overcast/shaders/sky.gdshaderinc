@@ -59,9 +59,9 @@ uniform float storm : hint_range(0.0, 1.0) = 0.0;
 uniform float snowy : hint_range(0.0, 1.0) = 0.0;
 
 // How far the sky's colours are the air's own (atmosphere.gdshaderinc) rather than the painted
-// ones above: sunlight scattered blue overhead, reddened low, the planet's shadow rising opposite a
+// ones above, 0 for those alone: sunlight scattered blue overhead, reddened low, the planet's shadow rising opposite a
 // set sun. The night colours still come in over it, and dusk_color is the painted sky's alone.
-uniform float atmosphere : hint_range(0.0, 1.0) = 0.0;
+uniform float atmosphere : hint_range(0.0, 1.0) = 1.0;
 // Dust and droplets in the air: more pales the blue and whitens the sky round the sun.
 uniform float atmosphere_haze : hint_range(0.0, 10.0) = 1.0;
 uniform float atmosphere_exposure : hint_range(0.0, 100.0) = 20.0;
@@ -101,6 +101,9 @@ vec3 overcast_art(vec3 c) {
 #define MARCH_STEP (12.0 * CLOUD_M)
 const int MARCH_STEPS_MIN = 16;
 const int MARCH_STEPS_MAX = 48;
+// Short strides inside cloud, per long one, and the clear ones it takes to go back to long.
+const int FINE = 4;
+const int FINE_CLEAR = 4;
 
 float hg_phase(float c, float g) {
 	return (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5);   // x4π: isotropic is 1
@@ -115,8 +118,8 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	// Overhead the slab is short; toward the horizon a ray crosses a long way of it.
 	int steps = clamp(int((t1 - t0) / MARCH_STEP), MARCH_STEPS_MIN, MARCH_STEPS_MAX);
 	float dt = (t1 - t0) / float(steps);
-	// Interleaved gradient noise: the step pattern turns into a fine grain instead of bands.
-	float jitter = fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))));
+	// The step pattern turns into a fine grain instead of bands.
+	float jitter = overcast_jitter(frag);
 	float c = dot(eye_dir, sun);
 	// Forward-scattering lobe for the silver lining, plus an even share for light that has
 	// bounced around inside the cloud: the sunlit side is bright from any angle.
@@ -124,22 +127,40 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	float field = cloud_field(cp);
 	vec3 wind = cloud_volume_wind();
 	float fair = cloud_fair();
-	vec3 step_p = eye_dir * dt;
-	vec2 step_cp = eye_dir.xz * dt * (overcast_scale / CLOUD_HEIGHT);
-	vec3 p0 = cam + eye_dir * t0 + step_p * jitter;
-	vec2 cp0 = cp + step_cp * jitter;
+	vec2 cp_per_m = eye_dir.xz * (overcast_scale / CLOUD_HEIGHT);
+	vec3 p0 = cam + eye_dir * t0;
 	vec3 scattered = vec3(0.0);
 	float trans = 1.0;
 	float weight = 0.0;
-	for (int i = 0; i < steps; i++) {
-		vec3 p = p0 + step_p * float(i);
-		float weather = cloud_weather(cp0 + step_cp * float(i), field);
-		if (weather <= 0.0) {
+	// Long strides through clear air; on meeting cloud, back up one and go on in short ones. One
+	// long step through a sunlit edge is all but opaque, so which part of the edge it lands on
+	// would decide the pixel, a grain at every low sun.
+	float stride = dt;
+	float t = dt * jitter;
+	int clear_run = 0;
+	for (int i = 0; i < steps * 3; i++) {
+		if (t > t1 - t0) {
+			break;
+		}
+		vec3 p = p0 + eye_dir * t;
+		float weather = cloud_weather(cp + cp_per_m * t, field);
+		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true) : 0.0;
+		if (d <= 0.0) {
+			// Back to long strides once well clear again.
+			clear_run++;
+			if (stride < dt && clear_run >= FINE_CLEAR) {
+				stride = dt;
+			}
+			t += stride;
 			continue;
 		}
-		float d = cloud_volume_density(p, cam, wind, fair, weather, true);
-		if (d <= 0.0) {
-			continue;
+		clear_run = 0;
+		if (stride == dt) {
+			stride = dt / float(FINE);
+			if (i > 0) {
+				t -= dt - stride;
+				continue;
+			}
 		}
 		// Light march toward the sun, steps growing outward.
 		float od = 0.0;
@@ -156,16 +177,17 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		// sun, a thick cloud's body is lit by the even, many-times-scattered glow, and its thin
 		// edges blaze.
 		float light = exp(-od) * phase + 0.35 * exp(-od * 0.1);
-		float powder = 1.0 - exp(-d * dt * EXTINCTION * 2.0);
+		float powder = 1.0 - exp(-d * MARCH_STEP * EXTINCTION * 2.0);
 		vec3 amb = mix(base_col, top_col, clamp(cloud_height_frac(p, cam), 0.0, 1.0));
 		vec3 radiance = sun_col * light * mix(0.5, 1.0, powder) + amb;
-		float absorbed = 1.0 - exp(-d * EXTINCTION * dt);
+		float absorbed = 1.0 - exp(-d * EXTINCTION * stride);
 		scattered += trans * radiance * absorbed;
 		weight += trans * absorbed * d;
 		trans *= 1.0 - absorbed;
 		if (trans < 0.02) {
 			break;
 		}
+		t += stride;
 	}
 	float alpha = 1.0 - trans;
 	body = weight / max(alpha, 1e-4);

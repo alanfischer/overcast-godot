@@ -30,7 +30,7 @@ const DEFAULTS := {
 	"horizon_color": Color(0.62, 0.70, 0.82),
 	"dusk_color": Color(1.0, 0.48, 0.24),
 	"night_horizon_color": Color(0.06, 0.07, 0.12),
-	"atmosphere": 0.0,
+	"atmosphere": 1.0,
 	"atmosphere_haze": 1.0,
 	"atmosphere_exposure": 20.0,
 }
@@ -298,9 +298,12 @@ func air_sun() -> Vector3:
 
 
 func _sync_air() -> void:
-	if _air() <= 0.0:
+	var haze = param("atmosphere_haze")
+	var exposure = param("atmosphere_exposure")
+	# DEFAULTS go in one at a time: the rest may not be there yet.
+	if _air() <= 0.0 or not haze is float or not exposure is float:
 		return
-	var air := air_at(air_sun(), param("atmosphere_haze"), param("atmosphere_exposure"))
+	var air := air_at(air_sun(), haze, exposure)
 	_air_horizon = air["atmosphere_horizon"]
 	for key in air:
 		RenderingServer.material_set_param(get_rid(), key, air[key])

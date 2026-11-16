@@ -136,18 +136,20 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	// part of the edge it lands on would decide the pixel, a grain at every low sun. The map is
 	// broad and smooth, so neighbouring pixels change stride together: changing on the cloud
 	// itself left its thinnest wisps found by some pixels and not their neighbours, a sparkle.
-	// Enough steps to cross the whole slab in short ones.
+	// Short strides are no finer than MARCH_STEP's share (overhead, dt is already short), and there
+	// are enough steps to cross the whole slab in them.
+	float fine = clamp(MARCH_STEP / float(FINE), dt / float(FINE), dt);
 	float stride = dt;
 	float t = dt * jitter;
 	int clear_run = 0;
-	for (int i = 0; i < steps * (FINE + 1); i++) {
+	for (int i = 0; i < steps + int(ceil((t1 - t0) / fine)); i++) {
 		if (t > t1 - t0) {
 			break;
 		}
 		vec3 p = p0 + eye_dir * t;
 		float weather = cloud_weather(cp + cp_per_m * t, field);
 		if (weather > 0.0 && stride == dt) {
-			stride = dt / float(FINE);
+			stride = fine;
 			clear_run = 0;
 			if (i > 0) {
 				t -= dt - stride;

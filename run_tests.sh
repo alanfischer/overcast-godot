@@ -41,10 +41,10 @@ if grep -q "SCRIPT ERROR" "$log"; then
 fi
 # The engine's own errors (a callback into something freed) and leaks at exit fail no assertion
 # either; a clean run prints neither.
-if grep -qE "^ERROR:|instances were leaked" "$log"; then
+if grep -qE "^ERROR:|instances? w(as|ere) leaked" "$log"; then
     echo
     echo "The engine reported errors or leaks. First occurrences:" >&2
-    grep -m 5 -A1 -E "^ERROR:|instances were leaked" "$log" >&2
+    grep -m 5 -A1 -E "^ERROR:|instances? w(as|ere) leaked" "$log" >&2
     status=1
 fi
 rm -f "$log"

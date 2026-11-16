@@ -415,8 +415,9 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		// scaled to 1 looking straight at the sun).
 		lit += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * rim * 1.2 * (1.0 - storm) * light_strength;
 		// The air in front of distant cloud takes the blue out of its light and puts the sky's own
-		// in: lit faces go cream, shaded ones the sky's colour.
-		vec3 through = exp(-far * vec3(0.3, 0.55, 1.1));
+		// in: lit faces go cream, shaded ones the sky's colour. By day: a failing light has little
+		// blue to give, and dark cloud would glow with it.
+		vec3 through = exp(-far * mix(vec3(0.6), vec3(0.3, 0.55, 1.1), 1.0 - max(dusk_amount, night_amount)));
 		lit = lit * through + col * (1.0 - through);
 		storm_cover = cover * storm;
 		col = mix(col, lit, cover);

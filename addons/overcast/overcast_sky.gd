@@ -405,7 +405,7 @@ const _AIR_RAYLEIGH := Vector3(5.802e-6, 13.558e-6, 33.1e-6)
 const _AIR_MIE := 3.996e-6
 const _AIR_MIE_G := 0.8
 const _AIR_OZONE := Vector3(0.650e-6, 1.881e-6, 0.085e-6)
-const _AIR_VIEW_STEPS := 16
+const _AIR_VIEW_STEPS := 48
 const _AIR_MULTI := 0.6
 const _AIR_MULTI_TINT := Vector3(0.42, 0.64, 1.0)
 ## How far the eye opens up for a failing light.

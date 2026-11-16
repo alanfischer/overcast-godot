@@ -13,7 +13,7 @@ const float ATMO_MIE = 3.996e-6;   // per unit of haze
 const float ATMO_MIE_H = 1200.0;
 const float ATMO_MIE_G = 0.8;
 const vec3 ATMO_OZONE = vec3(0.650e-6, 1.881e-6, 0.085e-6);
-const int ATMO_VIEW_STEPS = 16;
+const int ATMO_VIEW_STEPS = 48;
 // Light scattered more than once, crudely: an even glow at each point, as strong as the sunlight
 // a few kilometres over it, which stays lit a while after the point itself is in shadow, and blue
 // from having been scattered by the air on its way.

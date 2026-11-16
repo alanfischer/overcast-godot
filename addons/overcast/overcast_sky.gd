@@ -139,6 +139,9 @@ var _snowy := 0.0
 var _air_horizon := Color.BLACK
 ## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
 var _lut := {}
+var _air_inputs := []
+## The noon sky's zenith, by haze: what the eye adapts against.
+static var _air_noon_zenith := {}
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -271,17 +274,24 @@ func light_dir() -> Vector3:
 	var noon: Vector3 = sun_dir
 	if not sun_follows_time:
 		return noon.normalized()
-	var sun := sun_at(noon, time_of_day)
-	return -sun if night > 0.5 else sun
+	return light_toward(sun_at(noon, time_of_day), night)
 
 
-## How strongly what light_dir points at shines, 0 to 1. The moon takes over from the sun once
-## night is half in, by then already above the horizon, so it comes up from nothing rather than
-## switching on.
+## How strongly what light_dir points at shines, 0 to 1.
 func light_strength() -> float:
-	if not sun_follows_time or night <= 0.5:
-		return 1.0
-	return smoothstep(0.5, 0.8, night)
+	return light_strength_of(night) if sun_follows_time else 1.0
+
+
+## What lights the scene with the sun at `sun` and `night` in: the sun, or once night is half in,
+## the moon opposite it.
+static func light_toward(sun: Vector3, night_amount: float) -> Vector3:
+	return -sun if night_amount > 0.5 else sun
+
+
+## How strongly light_toward's light shines, 0 to 1. The moon takes over by then already above
+## the horizon, so it comes up from nothing rather than switching on.
+static func light_strength_of(night_amount: float) -> float:
+	return 1.0 if night_amount <= 0.5 else smoothstep(0.5, 0.8, night_amount)
 
 
 func _sync_light() -> void:
@@ -298,7 +308,7 @@ func _air() -> float:
 
 
 ## Where the sun really is now, below the horizon too: what lights the air.
-func air_sun() -> Vector3:
+func _air_sun() -> Vector3:
 	var noon: Vector3 = sun_dir
 	return sun_at(noon, time_of_day) if sun_follows_time else noon.normalized()
 
@@ -309,7 +319,12 @@ func _sync_air() -> void:
 	# DEFAULTS go in one at a time: the rest may not be there yet.
 	if _air() <= 0.0 or not haze is float or not exposure is float:
 		return
-	var sun := air_sun()
+	var sun := _air_sun()
+	# The sums are a few thousand steps: only when what they depend on moved.
+	var inputs := [sun, haze, exposure]
+	if inputs == _air_inputs:
+		return
+	_air_inputs = inputs
 	var air := air_at(sun, haze, exposure)
 	_air_horizon = air["atmosphere_horizon"]
 	for key in air:
@@ -358,7 +373,9 @@ static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
 	level = level.normalized().rotated(Vector3.UP, PI * 0.5) if level.length() > 1e-4 else Vector3.RIGHT
 	# The eye opens up as the light fails, so dusk has colour rather than black; up to a point.
 	var zenith := _air_sky(Vector3.UP, sun, haze)
-	var noon_zenith := _air_sky(Vector3.UP, Vector3(0.0, 0.7, 0.7), haze)
+	if not _air_noon_zenith.has(haze):
+		_air_noon_zenith[haze] = _air_sky(Vector3.UP, Vector3(0.0, 0.7, 0.7), haze)
+	var noon_zenith: Color = _air_noon_zenith[haze]
 	var adapt := clampf(sqrt(_luma(noon_zenith) / maxf(_luma(zenith), 1e-9)), 1.0, _AIR_ADAPT)
 	var gain := exposure * adapt
 	var dark := clampf(log(adapt) / log(_AIR_ADAPT), 0.0, 1.0) * 0.6
@@ -397,14 +414,19 @@ const _AIR_MULTI_UP := 6000.0
 
 ## A low sun's light keeps most of its colour but not all its dimming: the eye makes up some of it.
 static func _air_toward_eye(light: Vector3) -> Vector3:
-	var luma := light.x * 0.2126 + light.y * 0.7152 + light.z * 0.0722
+	var luma := _luma709(light)
 	return light.lerp(Vector3.ONE * luma, 0.2) / sqrt(maxf(luma, 1e-6))
 
 
 static func _air_seen(light: Color, gain: float, dark: float) -> Color:
 	var c := Color(1.0 - exp(-light.r * gain), 1.0 - exp(-light.g * gain), 1.0 - exp(-light.b * gain))
-	var luma := c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722
+	var luma := _luma709(Vector3(c.r, c.g, c.b))
 	return c.lerp(Color(0.6, 0.8, 1.35) * luma, dark)
+
+
+## Luma by Rec. 709, as atmosphere.gdshaderinc weighs the air's light.
+static func _luma709(c: Vector3) -> float:
+	return c.dot(Vector3(0.2126, 0.7152, 0.0722))
 
 
 static func _air_density(h: float) -> Vector3:

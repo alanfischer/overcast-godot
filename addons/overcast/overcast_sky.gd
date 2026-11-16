@@ -17,6 +17,8 @@ const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
 const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+## Shader parameters the air's light, taken once here for the whole sky, follows.
+const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
 ## saved with the sky.
 const _TRANSIENT := [&"storm", &"snowy", &"flash_color", &"flash_dir"]
@@ -28,6 +30,9 @@ const DEFAULTS := {
 	"horizon_color": Color(0.62, 0.70, 0.82),
 	"dusk_color": Color(1.0, 0.48, 0.24),
 	"night_horizon_color": Color(0.06, 0.07, 0.12),
+	"atmosphere": 0.0,
+	"atmosphere_haze": 1.0,
+	"atmosphere_exposure": 20.0,
 }
 ## The light the sky puts on a scene (scene_light) at the height of dusk and at full night, as a
 ## linear multiplier on daylight.
@@ -127,6 +132,8 @@ var _id := get_instance_id()
 var _started := false
 var _storm := 0.0
 var _snowy := 0.0
+## The air's light level across the sun's bearing, linear, as _sync_air last took it.
+var _air_horizon := Color.BLACK
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -182,6 +189,10 @@ func _set(property: StringName, value: Variant) -> bool:
 	if not String(property).begins_with("shader_parameter/"):
 		return false
 	var key := StringName(String(property).trim_prefix("shader_parameter/"))
+	if key in _AIR_UNIFORMS:
+		set_shader_parameter(key, value)
+		_sync_air()
+		return true
 	if not key in _LAYER_UNIFORMS:
 		return false
 	if value is Vector3:
@@ -270,7 +281,160 @@ func light_strength() -> float:
 func _sync_light() -> void:
 	set_shader_parameter("light_dir", light_dir())
 	set_shader_parameter("light_strength", light_strength())
+	_sync_air()
 	_sync_layer()
+
+
+## How far the sky is the air's light: none from a sky shader without the uniform.
+func _air() -> float:
+	var v = param("atmosphere")
+	return v if v is float else 0.0
+
+
+## Where the sun really is now, below the horizon too: what lights the air.
+func air_sun() -> Vector3:
+	var noon: Vector3 = sun_dir
+	return sun_at(noon, time_of_day) if sun_follows_time else noon.normalized()
+
+
+func _sync_air() -> void:
+	if _air() <= 0.0:
+		return
+	var air := air_at(air_sun(), param("atmosphere_haze"), param("atmosphere_exposure"))
+	_air_horizon = air["atmosphere_horizon"]
+	for key in air:
+		RenderingServer.material_set_param(get_rid(), key, air[key])
+
+
+## The air's light the whole sky shares, by the shader parameter it goes to, for a sun at `sun`
+## (unit, below the horizon too).
+static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
+	var level := Vector3(sun.x, 0.0, sun.z)
+	level = level.normalized().rotated(Vector3.UP, PI * 0.5) if level.length() > 1e-4 else Vector3.RIGHT
+	# The eye opens up as the light fails, so dusk has colour rather than black; up to a point.
+	var zenith := _air_sky(Vector3.UP, sun, haze)
+	var noon_zenith := _air_sky(Vector3.UP, Vector3(0.0, 0.7, 0.7), haze)
+	var adapt := clampf(sqrt(_luma(noon_zenith) / maxf(_luma(zenith), 1e-9)), 1.0, _AIR_ADAPT)
+	var gain := exposure * adapt
+	var dark := clampf(log(adapt) / log(_AIR_ADAPT), 0.0, 1.0) * 0.6
+	# Level and across the sun's bearing: between the glow under it and the shadow opposite.
+	var horizon := _air_sky(level, sun, haze)
+	var ground := Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0)
+	var clouds := Vector3(0.0, _AIR_GROUND + _AIR_CLOUDS, 0.0)
+	var noon := _air_sunlight(ground, Vector3.UP, haze)
+	return {
+		&"atmosphere_sun": sun,
+		&"atmosphere_gain": gain,
+		&"atmosphere_dark": dark,
+		&"atmosphere_zenith": _air_seen(zenith, gain, dark),
+		&"atmosphere_horizon": _air_seen(horizon, gain, dark),
+		&"atmosphere_light": _air_toward_eye(_air_sunlight(ground, sun, haze) / noon),
+		&"atmosphere_cloud_light": _air_toward_eye(_air_sunlight(clouds, sun, haze) / noon),
+	}
+
+
+# atmosphere.gdshaderinc's sums, for the few directions the whole sky shares.
+const _AIR_GROUND := 6360e3
+const _AIR_TOP := 6460e3
+const _AIR_VIEWER := 200.0
+const _AIR_CLOUDS := 2000.0
+const _AIR_RAYLEIGH := Vector3(5.802e-6, 13.558e-6, 33.1e-6)
+const _AIR_MIE := 3.996e-6
+const _AIR_MIE_G := 0.8
+const _AIR_OZONE := Vector3(0.650e-6, 1.881e-6, 0.085e-6)
+const _AIR_VIEW_STEPS := 16
+const _AIR_MULTI := 0.6
+const _AIR_MULTI_TINT := Vector3(0.42, 0.64, 1.0)
+## How far the eye opens up for a failing light.
+const _AIR_ADAPT := 40.0
+const _AIR_MULTI_UP := 6000.0
+
+
+## A low sun's light keeps most of its colour but not all its dimming: the eye makes up some of it.
+static func _air_toward_eye(light: Vector3) -> Vector3:
+	var luma := light.x * 0.2126 + light.y * 0.7152 + light.z * 0.0722
+	return light.lerp(Vector3.ONE * luma, 0.2) / sqrt(maxf(luma, 1e-6))
+
+
+static func _air_seen(light: Color, gain: float, dark: float) -> Color:
+	var c := Color(1.0 - exp(-light.r * gain), 1.0 - exp(-light.g * gain), 1.0 - exp(-light.b * gain))
+	var luma := c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722
+	return c.lerp(Color(0.6, 0.8, 1.35) * luma, dark)
+
+
+static func _air_density(h: float) -> Vector3:
+	return Vector3(exp(-h / 8000.0), exp(-h / 1200.0), maxf(0.0, 1.0 - absf(h - 25e3) / 15e3))
+
+
+static func _air_extinction(dens: Vector3, haze: float) -> Vector3:
+	return _AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * 1.11 * haze * dens.y) + _AIR_OZONE * dens.z
+
+
+static func _air_exit(o: Vector3, d: Vector3, r: float) -> float:
+	var b := o.dot(d)
+	return -b + sqrt(maxf(b * b - o.dot(o) + r * r, 0.0))
+
+
+static func _vexp(v: Vector3) -> Vector3:
+	return Vector3(exp(v.x), exp(v.y), exp(v.z))
+
+
+static func _air_chapman(x: float, h: float, mu: float) -> float:
+	var c := sqrt(x + h)
+	if mu >= 0.0:
+		return c / (c * mu + 1.0) * exp(-h)
+	var x0 := sqrt(1.0 - mu * mu) * (x + h)
+	return 2.0 * sqrt(x0) * exp(x - x0) - c / (1.0 - c * mu) * exp(-h)
+
+
+static func _air_sunlight(p: Vector3, sun: Vector3, haze: float) -> Vector3:
+	var r := p.length()
+	var mu := p.dot(sun) / r
+	if mu < 0.0 and r * r * (1.0 - mu * mu) < _AIR_GROUND * _AIR_GROUND:
+		return Vector3.ZERO
+	var h := r - _AIR_GROUND
+	var depth := _AIR_RAYLEIGH * (8000.0 * _air_chapman(_AIR_GROUND / 8000.0, h / 8000.0, mu)) \
+		+ Vector3.ONE * (_AIR_MIE * 1.11 * haze * 1200.0 * _air_chapman(_AIR_GROUND / 1200.0, h / 1200.0, mu))
+	var r_oz := _AIR_GROUND + 25e3
+	var s2 := (1.0 - mu * mu) * r * r / (r_oz * r_oz)
+	var slant := 1.0 / maxf(sqrt(1.0 - s2), 0.04) if s2 < 1.0 else 0.0
+	slant *= 1.0 if r < r_oz else (2.0 if mu < 0.0 else 0.0)
+	depth += _AIR_OZONE * 15e3 * slant
+	return _vexp(-depth)
+
+
+static func _air_sky(dir: Vector3, sun: Vector3, haze: float) -> Color:
+	var o := Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0)
+	var length := _air_exit(o, dir, _AIR_TOP)
+	var trans := Vector3.ONE
+	var ray := Vector3.ZERO
+	var mie := Vector3.ZERO
+	var multi := Vector3.ZERO
+	var prev := 0.0
+	for i in _AIR_VIEW_STEPS:
+		var f := (i + 1.0) / _AIR_VIEW_STEPS
+		var t := length * f * f
+		var dt := t - prev
+		var p := o + dir * (t - dt * 0.5)
+		prev = t
+		var dens := _air_density(p.length() - _AIR_GROUND)
+		var step_trans := _vexp(-_air_extinction(dens, haze) * dt)
+		var half := Vector3(sqrt(step_trans.x), sqrt(step_trans.y), sqrt(step_trans.z))
+		var seen := trans * half * dt
+		var lit := seen * _air_sunlight(p, sun, haze)
+		var glow := seen * _air_sunlight(p * (1.0 + _AIR_MULTI_UP / p.length()), sun, haze)
+		ray += lit * dens.x
+		mie += lit * dens.y
+		multi += glow * (_AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * haze * dens.y))
+		trans *= step_trans
+	var c := dir.dot(sun)
+	var g := _AIR_MIE_G
+	var rayleigh_phase := 3.0 / (16.0 * PI) * (1.0 + c * c)
+	var mie_phase := 3.0 / (8.0 * PI) * (1.0 - g * g) / (2.0 + g * g) * (1.0 + c * c) \
+		/ pow(1.0 + g * g - 2.0 * g * c, 1.5)
+	var v := ray * _AIR_RAYLEIGH * rayleigh_phase + mie * (_AIR_MIE * haze * mie_phase) \
+		+ multi * _AIR_MULTI_TINT * (_AIR_MULTI / (4.0 * PI))
+	return Color(v.x, v.y, v.z)
 
 
 func _sync_layer() -> void:
@@ -316,7 +480,12 @@ func horizon_now() -> Color:
 	var h := _shader_space(param("horizon_color"), linear)
 	# As the shader's, at a glow halfway round from the sun.
 	h = h.lerp(_shader_space(param("dusk_color"), linear), dusk * 0.725 * 0.8)
-	h = h.lerp(_shader_space(param("night_horizon_color"), linear), night)
+	var night_horizon := _shader_space(param("night_horizon_color"), linear)
+	h = h.lerp(night_horizon, night)
+	var air := _air()
+	if air > 0.0:
+		var horizon: Color = _air_horizon if linear else _air_horizon.linear_to_srgb()
+		h = h.lerp(horizon + night_horizon * night, air)
 	var grey := _luma(h) * lerpf(0.55, 1.0, snowy)
 	var col := h.lerp(Color(grey, grey, grey), storm)
 	return col if linear else col.srgb_to_linear()

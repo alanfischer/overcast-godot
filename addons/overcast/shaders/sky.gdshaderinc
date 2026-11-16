@@ -58,11 +58,41 @@ uniform float storm : hint_range(0.0, 1.0) = 0.0;
 // How much of the storm is snow: a snow sky is a pale, flat grey, not a dark one.
 uniform float snowy : hint_range(0.0, 1.0) = 0.0;
 
+// How far the sky's colours are the air's own (atmosphere.gdshaderinc) rather than the painted
+// ones above: sunlight scattered blue overhead, reddened low, the planet's shadow rising opposite a
+// set sun. The night colours still come in over it, and dusk_color is the painted sky's alone.
+uniform float atmosphere : hint_range(0.0, 1.0) = 0.0;
+// Dust and droplets in the air: more pales the blue and whitens the sky round the sun.
+uniform float atmosphere_haze : hint_range(0.0, 10.0) = 1.0;
+uniform float atmosphere_exposure : hint_range(0.0, 100.0) = 20.0;
+// OvercastSky sets these, once for the whole sky: where the sun really is, below the horizon too;
+// the sunlight reaching the ground against the noon sun's, as the eye takes it; the air's light
+// overhead and level.
+uniform vec3 atmosphere_sun = vec3(0.0, 1.0, 0.0);
+uniform vec3 atmosphere_light = vec3(1.0);
+uniform vec3 atmosphere_cloud_light = vec3(1.0);   // as atmosphere_light, at the clouds' height
+uniform vec3 atmosphere_zenith = vec3(0.0);
+uniform vec3 atmosphere_horizon = vec3(0.0);
+// The exposure the light is seen at, and how far it has risen for a failing light, 0 to 1.
+uniform float atmosphere_gain = 24.0;
+uniform float atmosphere_dark = 0.0;
+
 #include "res://addons/overcast/shaders/flash.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
+#include "res://addons/overcast/shaders/atmosphere.gdshaderinc"
+#include "res://addons/overcast/shaders/color_space.gdshaderinc"
 
 const vec3 OVERCAST_LUMA = vec3(0.299, 0.587, 0.114);
+
+// Linear light in the space the painted colours are in on this renderer.
+vec3 overcast_art(vec3 c) {
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	return overcast_to_srgb(c);
+#else
+	return c;
+#endif
+}
 
 // Volumetric clouds: cloud_volume_density in clouds.gdshaderinc, marched here.
 // metres of slab a ray marches at most; past it is haze
@@ -160,11 +190,27 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	vec3 sun_col = mix(mix(sun_color, dusk_color * 1.3, dusk_amount), moon_color, night_amount);
 	vec3 cloud_col = mix(cloud_color, mix(night_horizon_color, vec3(1.0), 0.35), night_amount);
 	float stars = max(star_amount, night_stars * night_amount);
+	vec3 above_air = vec3(0.0);
+	if (atmosphere > 0.0) {
+		// Night's colours over the air's light, which is all but gone by then.
+		vec3 night_zen = night_zenith_color * night_amount;
+		vec3 night_hor = night_horizon_color * night_amount;
+		zen = mix(zen, overcast_art(atmosphere_zenith) + night_zen, atmosphere);
+		hor = mix(hor, overcast_art(atmosphere_horizon) + night_hor, atmosphere);
+		vec3 lit_sun = mix(sun_color * atmosphere_light, moon_color, night_amount);
+		sun_col = mix(sun_col, lit_sun, atmosphere);
+		vec3 sky_dir = normalize(vec3(eye_dir.x, max(up, 0.0), eye_dir.z));
+		vec3 air = atmo_seen(atmo_sky(sky_dir, normalize(atmosphere_sun), atmosphere_haze), atmosphere_gain,
+			atmosphere_dark);
+		above_air = overcast_art(air) + mix(night_hor, night_zen, pow(max(up, 0.0), horizon_falloff));
+	}
 
 	// Gradient. Above and below the horizon are the same expression mirrored, so the seam at
 	// y=0 is exactly the horizon colour from both sides and never shows.
 	vec3 above = mix(hor, zen, pow(clamp(up, 0.0, 1.0), horizon_falloff));
-	vec3 below = mix(hor, gnd, pow(clamp(-up, 0.0, 1.0), horizon_falloff));
+	// Below, the air's light is taken level, so it meets the ground at the horizon's colour here.
+	above = mix(above, above_air, atmosphere);
+	vec3 below = mix(up < 0.0 ? mix(hor, above_air, atmosphere) : hor, gnd, pow(clamp(-up, 0.0, 1.0), horizon_falloff));
 	vec3 col = mix(below, above, step(0.0, up));
 	// What a storm cloud is measured against: the sky it covers, not the cloud colour, which on a
 	// moonlit sky is pale and would light the deck up at night.
@@ -197,6 +243,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		vec3 ambient = mix(zen, hor, 0.5);
 		vec3 shadow_col = mix(vec3(dot(ambient, OVERCAST_LUMA)), ambient, 0.6) * 0.9;
 		vec3 lit_col = cloud_col * mix(vec3(1.0), sun_col, 0.5);
+		// Sunrise and sunset light the clouds in their full colour, and do for a while after the
+		// sun is gone from the ground.
+		lit_col = mix(lit_col, cloud_col * mix(overcast_art(atmosphere_cloud_light),
+			mix(vec3(1.0), moon_color, 0.5), night_amount), atmosphere);
 		float far = smoothstep(1.5 * CLOUD_HEIGHT, cloud_horizon(cam), dist);
 
 		if (cirrus_amount > 0.0 && cloud_amount > 0.0) {

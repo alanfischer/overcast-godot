@@ -49,6 +49,8 @@ func _ready() -> void:
 	%Drifts.toggled.connect(func(on: bool) -> void:
 		weather.drift_material.set_shader_parameter("contours", on))
 	%Volumetric.toggled.connect(Clouds.set_volumetric)
+	%Atmosphere.toggled.connect(func(on: bool) -> void:
+		sky.set("shader_parameter/atmosphere", 1.0 if on else 0.0))
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)

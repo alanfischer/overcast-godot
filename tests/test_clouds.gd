@@ -189,6 +189,47 @@ func test_the_sky_follows_its_time() -> void:
 	assert_almost_eq(sky.time_of_day, 2.0, 1e-6, "time wraps round the clock")
 
 
+func test_the_air_scatters_blue_overhead_and_red_at_sunset() -> void:
+	var noon_sun := Vector3(0.0, 0.8, -0.6)
+	var zenith := SkyScript._air_sky(Vector3.UP, noon_sun, 1.0)
+	assert_gt(zenith.b, zenith.r * 2.0, "a clear noon sky is blue overhead")
+	var level := SkyScript._air_sky(Vector3(1.0, 0.0, 0.0), noon_sun, 1.0)
+	assert_gt(SkyScript._luma(level), SkyScript._luma(zenith), "and brighter and paler level")
+	var low_sun := Vector3(0.0, 0.03, -1.0).normalized()
+	var glow := SkyScript._air_sky(Vector3(0.0, 0.0, -1.0), low_sun, 1.0)
+	assert_gt(glow.r, glow.b * 3.0, "under a setting sun the horizon is red")
+	var ground := Vector3(0.0, SkyScript._AIR_GROUND + SkyScript._AIR_VIEWER, 0.0)
+	var sunlight := SkyScript._air_sunlight(ground, low_sun, 1.0)
+	assert_gt(sunlight.x, sunlight.z * 3.0, "and its light reddened")
+	var set_sun := Vector3(0.0, -0.05, -1.0).normalized()
+	assert_eq(SkyScript._air_sunlight(ground, set_sun, 1.0), Vector3.ZERO, "the ground is in shadow once it sets")
+	var high := Vector3(0.0, SkyScript._AIR_GROUND + 20e3, 0.0)
+	assert_gt(SkyScript._air_sunlight(high, set_sun, 1.0).x, 0.0, "though the air high up is still lit")
+
+
+func test_a_sky_lit_by_the_air_keeps_its_haze_in_step() -> void:
+	var sky := SkyScript.new({"drawing": false, "atmosphere": 1.0, "time_of_day": 12.0})
+	var noon := sky.horizon_now()
+	assert_gt(SkyScript._luma(noon), 0.3, "a bright horizon at noon")
+	assert_gt(noon.b, noon.r, "and a cool one")
+	sky.time_of_day = 18.0
+	var dusk := sky.horizon_now()
+	assert_gt(dusk.r, dusk.b, "warm at sunset")
+	sky.time_of_day = 0.0
+	assert_lt(SkyScript._luma(sky.horizon_now()), 0.05, "and dark at night")
+
+
+func test_clouds_catch_the_sun_after_the_ground_loses_it() -> void:
+	var gone := SkyScript.air_at(Vector3(0.0, -0.02, -1.0).normalized(), 1.0, 20.0)
+	assert_eq(gone["atmosphere_light"], Vector3.ZERO, "the sun has set on the ground")
+	var light: Vector3 = gone["atmosphere_cloud_light"]
+	assert_gt(light.x, light.z * 2.0, "but still reaches the clouds, red")
+	var midnight := SkyScript.air_at(Vector3.DOWN, 1.0, 20.0)
+	assert_eq(midnight["atmosphere_cloud_light"], Vector3.ZERO, "and not at midnight")
+	var dusk_gain: float = gone["atmosphere_gain"]
+	assert_gt(dusk_gain, SkyScript.air_at(Vector3.UP, 1.0, 20.0)["atmosphere_gain"], "the eye opens up at dusk")
+
+
 func test_the_sun_crosses_the_sky_with_the_time() -> void:
 	var noon := Vector3(0.3, 0.8, -0.5).normalized()
 	assert_vec3_almost_eq(SkyScript.sun_at(noon, 12.0), noon, 1e-5, "at noon it is where sun_dir says")

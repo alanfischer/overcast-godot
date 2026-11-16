@@ -10,6 +10,7 @@ renderer, including Compatibility and Mobile.
 ![Fair weather, with cloud shadows on the ground](docs/clear.png)
 ![A downpour: haze, far rain, puddles](docs/rain.png)
 ![Snow: flakes, a pale sky, and snow lying everywhere but under the roofs](docs/snow.png)
+![Just after sunset, the sky lit by the air: clouds still catching the sun](docs/sunset.png)
 
 ## Quick start
 
@@ -38,8 +39,8 @@ $OvercastWeather.temperature = -5.0  # °C: snow below -1, rain above 3, sleet b
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain, temperature and the time of day, a lightning button, a volumetric-clouds switch, and a mode where showers come
-and go on their own.
+rain, temperature and the time of day, a lightning button, volumetric-clouds and lit-by-the-air
+switches, and a mode where showers come and go on their own.
 
 ## What's in it
 
@@ -58,6 +59,13 @@ and go on their own.
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
+- **Sky lit by the air**: set the sky's `atmosphere` to 1 and its colours come from sunlight
+  scattered in the air instead of the painted gradient. Overhead it's blue, at the horizon pale.
+  Toward a low sun it turns gold and red, and after sunset the clouds stay lit red a while. Opposite
+  the set sun, the planet's shadow rises with a pink band above it, and twilight fades through blue.
+  `atmosphere_haze` thickens the air and `atmosphere_exposure` brightens it. The sky's night colours
+  still take over at night. It costs up to about a millisecond at 1080p on an M1 Max on
+  Compatibility. The sunset needs the sun to set, so leave `sun_follows_time` on.
 - **Volumetric clouds**: `OvercastClouds.set_volumetric(true)` ray-marches the clouds through 3D
   noise. That costs about a millisecond at 720p on an M1 on Compatibility. The radiance cubemap
   pass skips the clouds, so ambient light stays cheap.

@@ -17,6 +17,8 @@ func _run() -> void:
 	root.add_child(demo)
 	await process_frame
 	Clouds.set_volumetric(OS.get_environment("VOL") == "1")
+	if OS.get_environment("ATMO") != "":
+		demo.sky.set("shader_parameter/atmosphere", float(OS.get_environment("ATMO")))
 	if OS.get_environment("TIME") != "":
 		demo.get_node("%Time").value = float(OS.get_environment("TIME"))
 	var rain := float(OS.get_environment("RAIN")) if OS.get_environment("RAIN") != "" else 0.0
@@ -35,6 +37,11 @@ func _run() -> void:
 	demo.get_node("UI").visible = false
 	var views := {"field": [Vector3(0, 1.7, 8), 0.12, 0.0], "up": [Vector3(0, 1.7, 8), 0.7, 0.6],
 		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9], "ground": [Vector3(0, 1.7, 8), -0.45, 0.0]}
+	if OS.get_environment("SUNVIEWS") == "1":  # level, toward the sun's bearing and away from it
+		var s: Vector3 = demo.sky.air_sun()
+		var yaw := atan2(-s.x, -s.z)
+		views = {"sun": [Vector3(0, 1.7, 8), 0.12, yaw], "anti": [Vector3(0, 1.7, 8), 0.12, yaw + PI],
+			"high": [Vector3(0, 1.7, 8), 0.9, yaw]}
 	for name in views:
 		var v: Array = views[name]
 		demo._yaw = v[2]

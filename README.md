@@ -65,8 +65,9 @@ switches, and a mode where showers come and go on their own.
   Toward a low sun it turns gold and red, and after sunset the clouds stay lit red a while. Opposite
   the set sun, the planet's shadow rises with a pink band above it, and twilight fades through blue.
   `atmosphere_haze` thickens the air and `atmosphere_exposure` brightens it. The sky's night colours
-  still take over at night. It costs up to about a millisecond at 1080p on an M1 Max on
-  Compatibility. The sunset needs the sun to set, so leave `sun_follows_time` on.
+  still take over at night. The air is summed into a small texture only when the sun or the haze
+  changes, so each pixel costs one texture read. The sunset needs the sun to set, so leave
+  `sun_follows_time` on.
 - **Volumetric clouds**: `OvercastClouds.set_volumetric(true)` ray-marches the clouds through 3D
   noise. That costs about a millisecond at 720p on an M1 on Compatibility. The radiance cubemap
   pass skips the clouds, so ambient light stays cheap.

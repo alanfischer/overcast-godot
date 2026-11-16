@@ -38,6 +38,9 @@ uniform float cirrus_amount : hint_range(0.0, 1.0) = 0.5;
 
 uniform float star_amount : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 star_color : source_color = vec3(1.0, 1.0, 1.0);
+// How far the stars have turned with the time of day, radians about the level line toward the
+// noon sun: the sun's own arc (OvercastSky sets it).
+uniform float star_turn = 0.0;
 
 // Time of day (OvercastSky.time_of_day sets the two amounts): the colours above are the day's.
 // Toward dusk they warm to dusk_color, low and on the sun's side; at night they give way to these,
@@ -211,6 +214,60 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	return vec4(scattered / max(alpha, 1e-4), alpha);
 }
 
+// Stars and the Milky Way along eye_dir, for a sky `sky_lum` bright behind them. `amount` is how
+// many are out.
+vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
+	// A sky still lit drowns them, the faint ones first.
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	float drowned = smoothstep(0.12, 0.45, sky_lum);
+#else
+	float drowned = smoothstep(0.013, 0.17, sky_lum);
+#endif
+	float up = eye_dir.y;
+	if (up <= 0.0 || drowned >= 1.0) {
+		return vec3(0.0);
+	}
+	// They turn with the sun, about the same axis.
+	vec3 axis = normalize(vec3(sun_dir.x, 0.0, sun_dir.z) + vec3(1e-5, 0.0, 0.0));
+	float sn = sin(-star_turn);
+	float cs = cos(-star_turn);
+	vec3 dir = eye_dir * cs + cross(axis, eye_dir) * sn + axis * dot(axis, eye_dir) * (1.0 - cs);
+
+	// The Milky Way: a band round the sky where the stars crowd, over their unresolved glow,
+	// mottled and split by dark dust.
+	const vec3 POLE = vec3(0.48, 0.36, 0.8);
+	float lat = dot(dir, POLE);
+	vec3 bu = normalize(cross(POLE, vec3(0.0, 1.0, 0.0)));
+	vec2 along = vec2(dot(dir, bu), dot(dir, cross(POLE, bu)));
+	float mottle = overcast_vnoise(along * 7.0 + lat * 9.0) * 0.6 + overcast_vnoise(along * 19.0 - lat * 23.0) * 0.4;
+	float dust = smoothstep(0.35, 0.7, overcast_vnoise(along * 5.0 + vec2(3.1, 9.2) + lat * 4.0));
+	float band = exp(-lat * lat * 22.0) * (0.35 + 0.65 * mottle) * (1.0 - 0.7 * dust * exp(-lat * lat * 160.0));
+
+	// The air dims what is low, and makes it flicker.
+	float low = 1.0 - smoothstep(0.0, 0.35, up);
+	float seen = smoothstep(0.0, 0.02, up) * mix(1.0, 0.35, low) * (1.0 - drowned);
+	vec3 col = mix(night_horizon_color, star_color, 0.5) * band * 0.22 * min(amount * 1.5, 1.0) * seen;
+
+	vec3 sp = dir * 320.0;
+	vec3 cell = floor(sp);
+	float h = overcast_hash13(cell);
+	// `amount` is a density, but the useful range is tiny: a cell in a few dozen.
+	float threshold = 1.0 - min(amount * 0.06 * (1.0 + 4.0 * band), 1.0);
+	if (h < threshold) {
+		return col;
+	}
+	// Few are bright and most are faint; the bright ones are the first out at dusk.
+	float rank = (h - threshold) / max(1.0 - threshold, 1e-4);
+	float bright = 0.12 + 0.88 * pow(rank, 3.5);
+	float tint = overcast_hash13(cell + 41.3);
+	vec3 star = star_color * mix(vec3(1.0, 0.82, 0.62), vec3(0.72, 0.84, 1.0), smoothstep(0.15, 0.7, tint));
+	float d = length(fract(sp) - 0.5);
+	float twinkle = 1.0 - mix(0.2, 0.6, low) * (0.5 + 0.5 * sin(TIME * mix(1.7, 5.0, tint) + h * 4217.0));
+	float faint = 1.0 - smoothstep(bright * 0.6, bright * 0.6 + 0.3, drowned);
+	float size = mix(0.3, 0.48, bright);
+	return col + star * smoothstep(size, size * 0.4, d) * bright * 1.6 * twinkle * seen * faint;
+}
+
 // The sky along eye_dir (unit, world space) seen from `cam` (world space), at pixel `frag`.
 // storm_cover and storm_body come back for overcast_sky_flash: where storm cloud is, and how
 // thick. `clouds` false skips the cloud layer, for a cheap pass such as a radiance cubemap.
@@ -261,14 +318,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 
 	// Stars before clouds and sun, so both occlude them.
 	if (stars > 0.0) {
-		vec3 sp = eye_dir * 320.0;
-		vec3 cell = floor(sp);
-		float h = overcast_hash13(cell);
-		// star_amount is a density, but the useful range is tiny — one cell in a few hundred.
-		float lit = step(1.0 - stars * 0.035, h);
-		float d = length(fract(sp) - 0.5);
-		float twinkle = 0.65 + 0.35 * sin(TIME * 1.7 + h * 217.0);
-		col += star_color * smoothstep(0.42, 0.0, d) * lit * twinkle * (1.0 - storm) * smoothstep(0.0, 0.02, up);
+		col += overcast_stars(eye_dir, stars, sky_lum) * (1.0 - storm);
 	}
 
 	storm_cover = 0.0;

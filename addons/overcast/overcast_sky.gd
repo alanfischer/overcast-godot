@@ -297,6 +297,7 @@ static func light_strength_of(night_amount: float) -> float:
 func _sync_light() -> void:
 	set_shader_parameter("light_dir", light_dir())
 	set_shader_parameter("light_strength", light_strength())
+	set_shader_parameter("star_turn", TAU * (time_of_day - 12.0) / 24.0 if sun_follows_time else 0.0)
 	_sync_air()
 	_sync_layer()
 

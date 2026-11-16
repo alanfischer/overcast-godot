@@ -93,6 +93,20 @@ vec3 overcast_art(vec3 c) {
 #endif
 }
 
+// Bright light rolled off toward white instead of clipping there, so cloud by the sun keeps its
+// shape. Below the knee a colour is untouched.
+vec3 overcast_shoulder(vec3 c) {
+	const float KNEE = 0.8;
+#if CURRENT_RENDERER != RENDERER_COMPATIBILITY
+	c = overcast_to_srgb(c);
+#endif
+	c = min(c, KNEE) + (1.0 - KNEE) * (1.0 - exp(-max(c - KNEE, 0.0) / (1.0 - KNEE)));
+#if CURRENT_RENDERER != RENDERER_COMPATIBILITY
+	c = overcast_to_linear(c);
+#endif
+	return c;
+}
+
 // Volumetric clouds: cloud_volume_density in clouds.gdshaderinc, marched here.
 // metres of slab a ray marches at most; past it is haze
 #define MARCH_MAX (900.0 * CLOUD_M)
@@ -179,7 +193,7 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		// the light scattered once keeps the sun's direction, so only it takes the phase: into the
 		// sun, a thick cloud's body is lit by the even, many-times-scattered glow, and its thin
 		// edges blaze.
-		float light = exp(-od) * phase + mix(0.35, 0.9, low_sun) * exp(-od * mix(0.1, 0.03, low_sun));
+		float light = exp(-od) * phase + mix(0.35, 0.6, low_sun) * exp(-od * mix(0.1, 0.06, low_sun));
 		float powder = 1.0 - exp(-d * MARCH_STEP * EXTINCTION * 2.0);
 		vec3 amb = mix(base_col, top_col, clamp(cloud_height_frac(p, cam), 0.0, 1.0));
 		vec3 radiance = sun_col * light * mix(0.5, 1.0, powder) + amb;
@@ -276,6 +290,11 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		lit_col = mix(lit_col, cloud_col * mix(overcast_art(atmosphere_cloud_light),
 			mix(vec3(1.0), moon_color, 0.5), night_amount), atmosphere);
 		float far = smoothstep(1.5 * CLOUD_HEIGHT, cloud_horizon(cam), dist);
+		// A low sun's light reaches the cloud toward it first, still gold, and the cloud far the other
+		// way last, through more air: pink and dimmer.
+		float low_sun = (1.0 - smoothstep(0.0, 0.3, atmosphere_sun.y)) * (1.0 - night_amount) * atmosphere;
+		float along = dot(flat_eye, flat_sun) * far;
+		lit_col *= mix(vec3(1.0), along > 0.0 ? vec3(1.15, 1.05, 0.8) : vec3(0.85, 0.62, 0.74), abs(along) * low_sun);
 
 		if (cirrus_amount > 0.0 && cloud_amount > 0.0) {
 			vec2 hp = layer * 0.6;
@@ -319,7 +338,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			float thick = max(n - edge, 0.0);
 			float sunward = max(cloud_shape(cp + sun_step * 0.25) - edge, 0.0)
 				+ max(cloud_shape(cp + sun_step * 0.6) - edge, 0.0);
-			shade = exp(-(sunward * 2.5 + thick * 2.2));
+			// A low sun shines in under the layer, so the cloud overhead is not in its way.
+			shade = exp(-(sunward * 2.5 + thick * mix(2.2, 0.5, low_sun)));
 			// Powder: a thin edge has had little chance to scatter light toward us, so with the sun
 			// behind us a cloud's rim reads darker than its body.
 			shade *= mix(1.0 - exp(-thick * 12.0 - 0.15), 1.0, toward);
@@ -344,8 +364,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		// Silver lining: thin cloud near the sun scatters it forward (Henyey-Greenstein, g 0.8,
 		// scaled to 1 looking straight at the sun).
 		lit += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * rim * 1.2 * (1.0 - storm) * light_strength;
-		// Distant cloud sinks into the horizon haze.
-		lit = mix(lit, col, far * 0.5);
+		// The air in front of distant cloud takes the blue out of its light and puts the sky's own
+		// in: lit faces go cream, shaded ones the sky's colour.
+		vec3 through = exp(-far * vec3(0.3, 0.55, 1.1));
+		lit = lit * through + col * (1.0 - through);
 		storm_cover = cover * storm;
 		col = mix(col, lit, cover);
 		sun_hidden = cover;
@@ -371,11 +393,12 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon
 	// lights little of it.
+	// The air's own light already brightens round the sun, so it takes most of the painted halo's place.
 	float horizon_band = pow(1.0 - abs(up), 8.0) * pow(sun_side, 3.0);
 	vec3 halo_color = mix(sun_col, vec3(1.0), 0.4);
 	col += halo_color * sun_halo_energy * mix(1.0, 0.25, night_amount) * light_strength * sun_through
-		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band);
-	return col;
+		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band) * (1.0 - 0.6 * atmosphere * (1.0 - night_amount));
+	return overcast_shoulder(col);
 }
 
 // Lightning over `col` (overcast_flash), and over a dark storm deck, which a multiply cannot lift,

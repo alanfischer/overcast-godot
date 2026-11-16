@@ -38,7 +38,7 @@ func _run() -> void:
 	var views := {"field": [Vector3(0, 1.7, 8), 0.12, 0.0], "up": [Vector3(0, 1.7, 8), 0.7, 0.6],
 		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9], "ground": [Vector3(0, 1.7, 8), -0.45, 0.0]}
 	if OS.get_environment("SUNVIEWS") == "1":  # level, toward the sun's bearing and away from it
-		var s: Vector3 = demo.sky.air_sun()
+		var s: Vector3 = demo.sky.sun_at(demo.sky.sun_dir, demo.sky.time_of_day)
 		var yaw := atan2(-s.x, -s.z)
 		views = {"sun": [Vector3(0, 1.7, 8), 0.12, yaw], "anti": [Vector3(0, 1.7, 8), 0.12, yaw + PI],
 			"high": [Vector3(0, 1.7, 8), 0.9, yaw]}

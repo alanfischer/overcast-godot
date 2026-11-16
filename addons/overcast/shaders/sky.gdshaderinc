@@ -53,6 +53,11 @@ uniform vec3 night_horizon_color : source_color = vec3(0.06, 0.07, 0.12);
 uniform vec3 moon_color : source_color = vec3(0.82, 0.86, 1.0);
 uniform float moon_energy : hint_range(0.0, 8.0) = 1.5;
 uniform float moon_size : hint_range(0.002, 0.5) = 0.03;   // angular radius, radians
+// Toward the moon, the direction its face is lit from, and its light on the scene, 0 to 1
+// (OvercastSky sets all three). Unset, a full moon at light_dir by night.
+uniform vec3 moon_dir = vec3(0.0);
+uniform vec3 moon_lit_from = vec3(0.0);
+uniform float moonlight = 1.0;
 uniform float night_stars : hint_range(0.0, 1.0) = 0.7;
 
 // Rain: 0 is the sky as configured, 1 a full storm — the deck closes over, its clouds go dark and
@@ -287,7 +292,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	vec3 hor = mix(mix(horizon_color, dusk_color, glow * 0.8), night_horizon_color, night_amount);
 	vec3 gnd = ground_color * mix(1.0, 0.15, night_amount);
 	vec3 sun_col = mix(mix(sun_color, dusk_color * 1.3, dusk_amount), moon_color, night_amount);
-	vec3 cloud_col = mix(cloud_color, mix(night_horizon_color, vec3(1.0), 0.35), night_amount);
+	// Cloud by night is as pale as the moon lights it.
+	vec3 cloud_col = mix(cloud_color, mix(night_horizon_color, vec3(1.0), 0.35) * mix(0.5, 1.0, moonlight), night_amount);
 	float stars = max(star_amount, night_stars * night_amount);
 	vec3 above_air = vec3(0.0);
 	if (atmosphere > 0.0) {
@@ -323,6 +329,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		smoothstep(0.0, 0.1, up));
 	col = mix(col, vec3(storm_lum) * mix(0.55, 1.0, snowy), storm);
 
+	// The air alone, for what the moon's dark side hides the stars with.
+	vec3 air_col = col;
 	// Stars before clouds and sun, so both occlude them.
 	if (stars > 0.0) {
 		col += overcast_stars(eye_dir, stars, sky_lum) * (1.0 - storm);
@@ -452,20 +460,30 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 
 	// Sun last. Thin cloud dims it and thick cloud hides the disc; the glow leaks through.
 	float sd = dot(eye_dir, sun);
-	// Past half night light_dir is the moon: a crisp disc, mottled with darker seas.
-	float moon = step(0.5, night_amount);
-	float size = mix(sun_size, moon_size, moon);
-	float disc = smoothstep(cos(size * mix(1.4, 1.08, moon)), cos(size), sd);
-	if (moon > 0.0 && disc > 0.0) {
-		vec3 mx = normalize(cross(sun, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
-		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, cross(mx, sun))) / size;
-		float seas = overcast_vnoise(q * 2.2 + 7.0) * 0.6 + overcast_vnoise(q * 5.0 + 3.0) * 0.4;
-		disc *= mix(0.3, 0.6, smoothstep(0.35, 0.65, seas));
-	}
 	// The ground hides a sun or moon below the horizon.
 	float sun_through = (1.0 - 0.95 * storm) * smoothstep(-0.02, 0.01, up);
-	float disc_energy = mix(sun_energy, moon_energy, night_amount) * light_strength;
-	col += sun_col * disc * disc_energy * sun_through * (1.0 - smoothstep(0.15, 0.75, sun_hidden));
+	float unclouded = 1.0 - smoothstep(0.15, 0.75, sun_hidden);
+	// The moon: a ball lit from one side, mottled with darker seas. Its dark side is the sky's
+	// colour with the stars put out: just seen by night, lost by day.
+	float moon = step(0.5, night_amount);
+	vec3 to_moon = length(moon_dir) > 0.0 ? normalize(moon_dir) : sun;
+	if (dot(eye_dir, to_moon) > cos(moon_size * 1.1) && (length(moon_dir) > 0.0 || moon > 0.0)) {
+		vec3 mx = normalize(cross(to_moon, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+		vec3 my = cross(mx, to_moon);
+		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, my)) / sin(moon_size);
+		float r = length(q);
+		float face = (1.0 - smoothstep(0.92, 1.0, r)) * sun_through * unclouded;
+		vec3 normal = q.x * mx + q.y * my - to_moon * sqrt(max(1.0 - r * r, 0.0));
+		vec3 lit_from = length(moon_lit_from) > 0.0 ? normalize(moon_lit_from) : -to_moon;
+		float lit = smoothstep(-0.03, 0.15, dot(normal, lit_from));
+		float seas = overcast_vnoise(q * 2.2 + 7.0) * 0.6 + overcast_vnoise(q * 5.0 + 3.0) * 0.4;
+		vec3 ball = moon_color * mix(0.3, 0.6, smoothstep(0.35, 0.65, seas));
+		col = mix(col, air_col + ball * 0.04, face);
+		col += ball * lit * face * mix(0.45, moon_energy, night_amount);
+	}
+	// The sun's disc; past half night light_dir is the moon, drawn above.
+	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd) * (1.0 - moon);
+	col += sun_col * disc * sun_energy * light_strength * sun_through * unclouded;
 	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * light_strength * sun_through
 		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon

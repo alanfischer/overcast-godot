@@ -53,6 +53,7 @@ func _ready() -> void:
 		sky.set("shader_parameter/atmosphere", 1.0 if on else 0.0))
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)
+	%Moon.value_changed.connect(func(phase: float) -> void: sky.moon_phase = phase)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
 
 

@@ -51,8 +51,11 @@ switches, and a mode where showers come and go on their own.
   moon then stay at `sun_dir`.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
   lightmap; `light_dir()` and `light_strength()` are where the sun or moon is and how strongly it
-  shines, as the moon comes up from nothing once it takes over at dusk. It draws a gradient, a
-  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
+  shines, as the moon comes up from nothing once it takes over at dusk. `moon_phase` is where the
+  moon is in its month, from new at 0 through full at 0.5: it trails the sun across the sky by
+  that share of a day, shows the crescent or disc that goes with it, by day as well, and lights
+  the night by how much of it is lit and how high it stands. It draws a gradient, a
+  sun, a moon, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
   (`set_weather(storm, snowy)`, and `set_flash` for lightning: an OvercastWeather calls both, and
   a sky without one can be told by hand). Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
@@ -236,7 +239,7 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
   when it stops, the one before takes them back.
 - The sky's sun is its `sun_dir`; it does not follow a DirectionalLight3D by itself.
 - The sun's path is an equinox's: up at 6:00, at `sun_dir` at noon, down at 18:00, with the moon
-  on the same arc at night. There are no seasons or latitude.
+  on the same arc behind it. There are no seasons or latitude.
 
 ## Origin
 

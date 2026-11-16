@@ -244,3 +244,29 @@ func test_the_sun_crosses_the_sky_with_the_time() -> void:
 	sky.sun_follows_time = false
 	assert_vec3_almost_eq(sky.light_dir(), noon, 1e-5, "a baked sun stays put, and so does its moon")
 	assert_vec3_almost_eq(sky.sun_dir, noon, 1e-5, "and sun_dir is never moved")
+
+
+func test_the_moon_keeps_its_own_time() -> void:
+	var noon := Vector3(0.3, 0.8, -0.5).normalized()
+	assert_vec3_almost_eq(SkyScript.moon_at(noon, 0.0, 0.5), noon, 1e-5, "a full moon stands at midnight where the sun did at noon")
+	assert_vec3_almost_eq(SkyScript.moon_at(noon, 15.0, 0.0), SkyScript.sun_at(noon, 15.0), 1e-5, "a new one keeps the sun's company")
+	assert_almost_eq(SkyScript.moon_at(noon, 12.0, 0.25).y, 0.0, 1e-5, "a first quarter rises at noon")
+	assert_almost_eq(SkyScript.moon_lit(0.0), 0.0, 1e-6, "new is dark")
+	assert_almost_eq(SkyScript.moon_lit(0.25), 0.5, 1e-6, "a quarter is half lit")
+	assert_almost_eq(SkyScript.moon_lit(0.5), 1.0, 1e-6, "full is all of it")
+	assert_almost_eq(SkyScript.moonlight_at(0.0, 0.5), 1.0, 1e-6, "a full moon lights midnight")
+	assert_eq(SkyScript.moonlight_at(0.0, 0.0), 0.0, "a new one does not")
+	assert_eq(SkyScript.moonlight_at(3.0, 0.25), 0.0, "nor one that has set")
+	var dark := SkyScript.scene_light_at(0.0, SkyScript.DUSK_LIGHT, SkyScript.MOON_LIGHT, 0.0)
+	assert_almost_eq(dark.r, SkyScript.MOON_LIGHT.r * SkyScript.STARLIGHT, 1e-6, "which leaves the night to the stars")
+	var sky := SkyScript.new({"drawing": false, "sun_dir": noon, "time_of_day": 3.0, "moon_phase": 0.25})
+	assert_vec3_almost_eq(sky.light_dir(), SkyScript.moon_at(noon, 3.0, 0.25), 1e-5, "the night's light is wherever the moon is")
+	assert_lt(sky.light_dir().y, 0.0, "set or not")
+	assert_eq(sky.light_strength(), 0.0, "and a set moon lights nothing")
+	assert_vec3_almost_eq(sky.get_shader_parameter("moon_dir"), sky.moon_dir(), 1e-5, "the shader draws it there")
+	sky.time_of_day = 20.0
+	var from: Vector3 = sky.get_shader_parameter("moon_lit_from")
+	assert_almost_eq(from.dot(sky.moon_dir()), 0.0, 1e-4, "a quarter is lit from square on")
+	assert_gt(from.dot(SkyScript.sun_at(noon, 20.0)), 0.0, "from the sun's side")
+	sky.moon_phase = 0.5
+	assert_vec3_almost_eq(sky.get_shader_parameter("moon_lit_from"), -sky.moon_dir(), 1e-4, "and a full one from behind us")

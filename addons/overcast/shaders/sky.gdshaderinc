@@ -251,7 +251,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		float lit = step(1.0 - stars * 0.035, h);
 		float d = length(fract(sp) - 0.5);
 		float twinkle = 0.65 + 0.35 * sin(TIME * 1.7 + h * 217.0);
-		col += star_color * smoothstep(0.42, 0.0, d) * lit * twinkle * (1.0 - storm);
+		col += star_color * smoothstep(0.42, 0.0, d) * lit * twinkle * (1.0 - storm) * smoothstep(0.0, 0.02, up);
 	}
 
 	storm_cover = 0.0;

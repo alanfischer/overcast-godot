@@ -144,13 +144,10 @@ vec3 cloud_volume_wind() {
 	return vec3(w.x, 0.0, w.y);
 }
 
-// Cloud density at world point p, 0 to 1. `weather` is cloud_weather where p's column meets
-// the shell; `detail` erodes the edges and is skipped for the light march. `wind` and `fair` are
-// cloud_volume_wind() and cloud_fair(), taken once by the caller. `crease` comes back as how deep
-// between billows a detailed p is, 0 to 1.
-float cloud_volume_density(vec3 p, vec3 viewer, vec3 wind, float fair, float weather, bool detail,
-		out float crease) {
-	crease = 0.0;
+// The cloud's bulk at world point p, 0 to 1, before detail erodes its edges: what the light on its
+// way in is dimmed by. `weather` is cloud_weather where p's column meets the shell; `wind` and
+// `fair` are cloud_volume_wind() and cloud_fair(), taken once by the caller.
+float cloud_volume_bulk(vec3 p, vec3 viewer, vec3 wind, float fair, float weather) {
 	float hf = cloud_height_frac(p, viewer);
 	// Flat bases, domed tops that rise with the weather: big clouds tower, thin ones stay low.
 	// A storm flattens them into one deck.
@@ -161,16 +158,23 @@ float cloud_volume_density(vec3 p, vec3 viewer, vec3 wind, float fair, float wea
 		return 0.0;
 	}
 	float s = texture(overcast_volume, (p + wind) / VOLUME_TILE).r;
-	float d = clamp((s - (1.0 - cov)) / max(cov, 1e-3), 0.0, 1.0) * cov;
-	if (detail && d > 0.0) {
-		float e = texture(overcast_volume, (p + wind * 1.3) / DETAIL_TILE).g;
-		// Wispy at the base, billowed higher up.
-		e = mix(1.0 - e, e, clamp(hf * 4.0, 0.0, 1.0));
-		crease = smoothstep(0.45, 0.9, e);
-		d = clamp((d - e * 0.5) / (1.0 - e * 0.5), 0.0, 1.0);
-		d = clamp(d * 2.0, 0.0, 1.0);
+	return clamp((s - (1.0 - cov)) / max(cov, 1e-3), 0.0, 1.0) * cov;
+}
+
+// Cloud density at world point p as the eye meets it, 0 to 1: cloud_volume_bulk with its edges
+// eroded, and what is left twice as dense. `crease` comes back as how deep between billows p is,
+// 0 to 1.
+float cloud_volume_density(vec3 p, vec3 viewer, vec3 wind, float fair, float weather, out float crease) {
+	crease = 0.0;
+	float d = cloud_volume_bulk(p, viewer, wind, fair, weather);
+	if (d <= 0.0) {
+		return 0.0;
 	}
-	return d;
+	float e = texture(overcast_volume, (p + wind * 1.3) / DETAIL_TILE).g;
+	// Wispy at the base, billowed higher up.
+	e = mix(1.0 - e, e, clamp(cloud_height_frac(p, viewer) * 4.0, 0.0, 1.0));
+	crease = smoothstep(0.45, 0.9, e);
+	return clamp(2.0 * (d - e * 0.5) / (1.0 - e * 0.5), 0.0, 1.0);
 }
 
 // The multiplier on the sky's share of the light at world point p: 1 in sun, less under cloud.
@@ -182,9 +186,8 @@ float cloud_sunlight(vec3 p) {
 		// One sample a third of the way up the slab, through the sun's slant of it.
 		float dq = cloud_distance_to(p, overcast_sun_dir, CLOUD_HEIGHT + CLOUD_THICK * 0.35);
 		vec2 qp = cloud_layer(p, overcast_sun_dir, dq) + cloud_wind();
-		float crease;
-		float d = cloud_volume_density(p + overcast_sun_dir * dq, p, cloud_volume_wind(), cloud_fair(),
-			cloud_weather(qp, cloud_field(qp)), false, crease);
+		float d = cloud_volume_bulk(p + overcast_sun_dir * dq, p, cloud_volume_wind(), cloud_fair(),
+			cloud_weather(qp, cloud_field(qp)));
 		float depth = d * CLOUD_THICK * 0.5 / max(overcast_sun_dir.y, 0.2) * EXTINCTION;
 		return 1.0 - overcast_shadow * (1.0 - exp(-depth));
 	}

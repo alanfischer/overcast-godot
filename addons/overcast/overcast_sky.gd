@@ -15,6 +15,8 @@ const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const _LutShader = preload("res://addons/overcast/shaders/atmosphere_lut.gdshader")
 ## The air's light, drawn into a texture this size whenever the sun or the air changes.
 const _LUT_SIZE := Vector2i(256, 128)
+## How far the sun's height (the sine of it) moves before the air's light is summed again.
+const _AIR_SUN_STEP := 0.002
 
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
@@ -246,11 +248,11 @@ static func dusk_at(hours: float) -> float:
 ## at dusk, moonlight at night. For a sun's light_color, a lightmap's sky share, the weather's
 ## sky_light.
 func scene_light() -> Color:
-	return scene_light_at(time_of_day, dusk_light, moon_light, moon_phase)
+	return scene_light_at(time_of_day, moon_phase, dusk_light, moon_light)
 
 
 ## `moon` is a night under a full moon high up; with less of one, down to STARLIGHT of it.
-static func scene_light_at(hours: float, dusk_tint := DUSK_LIGHT, moon := MOON_LIGHT, phase := 0.5) -> Color:
+static func scene_light_at(hours: float, phase := 0.5, dusk_tint := DUSK_LIGHT, moon := MOON_LIGHT) -> Color:
 	var night_light := moon * lerpf(STARLIGHT, 1.0, moonlight_at(hours, phase))
 	return Color.WHITE.lerp(dusk_tint, dusk_at(hours)).lerp(Color(night_light, 1.0), night_at(hours))
 
@@ -275,9 +277,17 @@ func make_environment() -> Environment:
 ## Where the sun is at `hours`, on an arc through `noon` (unit, toward it) that meets the horizon
 ## at 6 and 18: it turns about the level line toward noon's sun, as on an equinox.
 static func sun_at(noon: Vector3, hours: float) -> Vector3:
+	return noon.normalized().rotated(_arc_axis(noon), _arc_turn(hours))
+
+
+## The level line the sky turns about, and how far it has turned from noon at `hours`.
+static func _arc_axis(noon: Vector3) -> Vector3:
 	var flat := Vector3(noon.x, 0.0, noon.z)
-	var axis := flat.normalized() if flat.length() > 1e-4 else Vector3.RIGHT
-	return noon.normalized().rotated(axis, TAU * (hours - 12.0) / 24.0)
+	return flat.normalized() if flat.length() > 1e-4 else Vector3.RIGHT
+
+
+static func _arc_turn(hours: float) -> float:
+	return TAU * (hours - 12.0) / 24.0
 
 
 ## Where the moon is at `hours`, `phase` through its month: on the sun's arc, that share of a day
@@ -307,30 +317,24 @@ func moon_dir() -> Vector3:
 ## Both at sun_dir when the sun does not follow the time.
 func light_dir() -> Vector3:
 	var noon: Vector3 = sun_dir
-	if not sun_follows_time:
-		return noon.normalized()
-	return light_toward(sun_at(noon, time_of_day), night, moon_dir())
+	return light_dir_at(noon, time_of_day, moon_phase) if sun_follows_time else noon.normalized()
 
 
 ## How strongly what light_dir points at shines, 0 to 1.
 func light_strength() -> float:
-	if not sun_follows_time:
-		return 1.0
-	return light_strength_of(night, moonlight_at(time_of_day, moon_phase))
+	return light_strength_at(time_of_day, moon_phase) if sun_follows_time else 1.0
 
 
-## What lights the scene with the sun at `sun` and `night` in: the sun, or once night is half in,
-## the moon at `moon` (moon_at; a full one opposite the sun if not given).
-static func light_toward(sun: Vector3, night_amount: float, moon := Vector3.ZERO) -> Vector3:
-	if night_amount <= 0.5:
-		return sun
-	return moon if moon != Vector3.ZERO else -sun
+## Toward what lights the scene at `hours`: the sun, or once night is half in, the moon.
+static func light_dir_at(noon: Vector3, hours: float, phase: float) -> Vector3:
+	return sun_at(noon, hours) if night_at(hours) <= 0.5 else moon_at(noon, hours, phase)
 
 
-## How strongly light_toward's light shines, 0 to 1, the moon by its `moonlight` (moonlight_at).
-## It takes over with night half in, from nothing rather than switching on.
-static func light_strength_of(night_amount: float, moonlight := 1.0) -> float:
-	return 1.0 if night_amount <= 0.5 else smoothstep(0.5, 0.8, night_amount) * moonlight
+## How strongly light_dir_at's light shines, 0 to 1. The moon takes over with night half in, from
+## nothing rather than switching on, and shines by its moonlight_at.
+static func light_strength_at(hours: float, phase: float) -> float:
+	var night_amount := night_at(hours)
+	return 1.0 if night_amount <= 0.5 else smoothstep(0.5, 0.8, night_amount) * moonlight_at(hours, phase)
 
 
 ## The direction the moon's face is lit from: round from the moon toward the sun by its phase, so
@@ -349,7 +353,10 @@ func _sync_light() -> void:
 	set_shader_parameter("moon_dir", moon_dir())
 	set_shader_parameter("moon_lit_from", _moon_lit_from())
 	set_shader_parameter("moonlight", moonlight_at(time_of_day, moon_phase) if sun_follows_time else moon_lit(moon_phase))
-	set_shader_parameter("star_turn", TAU * (time_of_day - 12.0) / 24.0 if sun_follows_time else 0.0)
+	var noon: Vector3 = sun_dir
+	# The stars turn with the sun: this takes a view ray back to where it looked at noon.
+	set_shader_parameter("star_basis",
+		Basis(_arc_axis(noon), -_arc_turn(time_of_day)) if sun_follows_time else Basis.IDENTITY)
 	_sync_air()
 	_sync_layer()
 
@@ -373,8 +380,10 @@ func _sync_air() -> void:
 	if _air() <= 0.0 or not haze is float or not exposure is float:
 		return
 	var sun := _air_sun()
-	# The sums are a few thousand steps: only when what they depend on moved.
-	var inputs := [sun, haze, exposure]
+	RenderingServer.material_set_param(get_rid(), &"atmosphere_sun", sun)
+	# The sums are a few thousand steps, and the texture a few million: only when what they depend
+	# on has moved enough to see. They go by the sun's height alone.
+	var inputs := [snappedf(sun.y, _AIR_SUN_STEP), haze, exposure]
 	if inputs == _air_inputs:
 		return
 	_air_inputs = inputs

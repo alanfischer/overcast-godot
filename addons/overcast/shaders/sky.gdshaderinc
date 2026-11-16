@@ -38,9 +38,9 @@ uniform float cirrus_amount : hint_range(0.0, 1.0) = 0.5;
 
 uniform float star_amount : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 star_color : source_color = vec3(1.0, 1.0, 1.0);
-// How far the stars have turned with the time of day, radians about the level line toward the
-// noon sun: the sun's own arc (OvercastSky sets it).
-uniform float star_turn = 0.0;
+// Takes a view ray back to where it looked at noon, as the stars turn with the sun (OvercastSky
+// sets it).
+uniform mat3 star_basis = mat3(1.0);
 
 // Time of day (OvercastSky.time_of_day sets the two amounts): the colours above are the day's.
 // Toward dusk they warm to dusk_color, low and on the sun's side; at night they give way to these,
@@ -53,10 +53,10 @@ uniform vec3 night_horizon_color : source_color = vec3(0.06, 0.07, 0.12);
 uniform vec3 moon_color : source_color = vec3(0.82, 0.86, 1.0);
 uniform float moon_energy : hint_range(0.0, 8.0) = 1.5;
 uniform float moon_size : hint_range(0.002, 0.5) = 0.03;   // angular radius, radians
-// Toward the moon, the direction its face is lit from, and its light on the scene, 0 to 1
-// (OvercastSky sets all three). Unset, a full moon at light_dir by night.
-uniform vec3 moon_dir = vec3(0.0);
-uniform vec3 moon_lit_from = vec3(0.0);
+// Toward the moon, the direction its face is lit from (both unit), and its light on the scene,
+// 0 to 1: OvercastSky sets all three. Until it does the moon is down.
+uniform vec3 moon_dir = vec3(0.0, -1.0, 0.0);
+uniform vec3 moon_lit_from = vec3(0.0, 1.0, 0.0);
 uniform float moonlight = 1.0;
 uniform float night_stars : hint_range(0.0, 1.0) = 0.7;
 
@@ -183,19 +183,18 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 			stride = dt;
 		}
 		float crease = 0.0;
-		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true, crease) : 0.0;
+		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, crease) : 0.0;
 		if (d <= 0.0) {
 			t += stride;
 			continue;
 		}
 		// Light march toward the sun, steps growing outward.
 		float od = 0.0;
-		float unused;
 		float ls = 6.0 * CLOUD_M;
 		vec3 lp = p;
 		for (int j = 0; j < LIGHT_STEPS; j++) {
 			lp += sun * ls;
-			od += cloud_volume_density(lp, cam, wind, fair, weather, false, unused) * ls;
+			od += cloud_volume_bulk(lp, cam, wind, fair, weather) * ls;
 			ls *= 1.8;
 		}
 		od *= EXTINCTION;
@@ -222,6 +221,12 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	return vec4(scattered / max(alpha, 1e-4), alpha);
 }
 
+// How thick a storm deck reads where the flat layer's density is `n`: mottled by the noise that
+// shaped it, so a full deck still has bodies to it rather than one flat lid.
+float storm_body_of(float n) {
+	return clamp(0.55 + 0.7 * n, 0.4, 1.3);
+}
+
 // Stars and the Milky Way along eye_dir, for a sky `sky_lum` bright behind them. `amount` is how
 // many are out.
 vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
@@ -235,11 +240,7 @@ vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
 	if (up <= 0.0 || drowned >= 1.0) {
 		return vec3(0.0);
 	}
-	// They turn with the sun, about the same axis.
-	vec3 axis = normalize(vec3(sun_dir.x, 0.0, sun_dir.z) + vec3(1e-5, 0.0, 0.0));
-	float sn = sin(-star_turn);
-	float cs = cos(-star_turn);
-	vec3 dir = eye_dir * cs + cross(axis, eye_dir) * sn + axis * dot(axis, eye_dir) * (1.0 - cs);
+	vec3 dir = star_basis * eye_dir;
 
 	// The Milky Way: a band round the sky where the stars crowd, over their unresolved glow,
 	// mottled and split by dark dust.
@@ -285,7 +286,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	float up = eye_dir.y;
 	vec2 flat_eye = normalize(eye_dir.xz + vec2(1e-5));
 	vec2 flat_sun = normalize(sun.xz + vec2(1e-5));
-	float sun_side = max(dot(flat_eye, flat_sun), 0.0);
+	float sun_bearing = dot(flat_eye, flat_sun);
+	float sun_side = max(sun_bearing, 0.0);
 	// The day's colours at this time of day.
 	float glow = dusk_amount * (0.45 + 0.55 * sun_side);
 	vec3 zen = mix(zenith_color * mix(1.0, 0.6, dusk_amount), night_zenith_color, night_amount);
@@ -332,7 +334,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	// The air alone, for what the moon's dark side hides the stars with.
 	vec3 air_col = col;
 	// Stars before clouds and sun, so both occlude them.
-	if (stars > 0.0) {
+	if (stars > 0.0 && storm < 1.0) {
 		col += overcast_stars(eye_dir, stars, sky_lum) * (1.0 - storm);
 	}
 
@@ -357,9 +359,9 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		float far = smoothstep(1.5 * CLOUD_HEIGHT, cloud_horizon(cam), dist);
 		// A low sun's light reaches the cloud toward it first, still gold, and the cloud far the other
 		// way last, through more air: pink and dimmer.
-		float low_sun = (1.0 - smoothstep(0.0, 0.3, atmosphere_sun.y)) * (1.0 - night_amount) * atmosphere;
-		float along = dot(flat_eye, flat_sun) * far;
-		lit_col *= mix(vec3(1.0), along > 0.0 ? vec3(1.15, 1.05, 0.8) : vec3(0.85, 0.62, 0.74), abs(along) * low_sun);
+		float sunset = (1.0 - smoothstep(0.0, 0.3, atmosphere_sun.y)) * (1.0 - night_amount) * atmosphere;
+		float along = sun_bearing * far;
+		lit_col *= mix(vec3(1.0), along > 0.0 ? vec3(1.15, 1.05, 0.8) : vec3(0.85, 0.62, 0.74), abs(along) * sunset);
 
 		if (cirrus_amount > 0.0 && cloud_amount > 0.0) {
 			vec2 hp = layer * 0.6;
@@ -384,11 +386,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			lit = v.rgb;
 			cover = v.a * smoothstep(-0.02, 0.06, up);
 			storm_body = clamp(0.72 + 0.42 * body, 0.4, 1.3);
-			if (storm > 0.0) {
+			if (storm > 0.0 && v.a > 0.0) {
 				// A closed deck is all but one density to the march: its bellies come from the
 				// flat layer's pattern.
-				vec2 belly = cp;
-				storm_body = mix(storm_body, clamp(0.55 + 0.7 * cloud_density(belly), 0.4, 1.3), 0.75 * storm);
+				storm_body = mix(storm_body, storm_body_of(cloud_density(cp)), 0.75 * storm);
 			}
 			shade = clamp(dot(lit, OVERCAST_LUMA) / max(dot(lit_col, OVERCAST_LUMA), 1e-3), 0.0, 1.0);
 			rim = 0.0;   // the march's phase lights thin edges itself
@@ -410,7 +411,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			float sunward = max(cloud_shape(cp + sun_step * 0.25) - edge, 0.0)
 				+ max(cloud_shape(cp + sun_step * 0.6) - edge, 0.0);
 			// A low sun shines in under the layer, so the cloud overhead is not in its way.
-			shade = exp(-(sunward * 2.5 + thick * mix(2.2, 0.5, low_sun)));
+			shade = exp(-(sunward * 2.5 + thick * mix(2.2, 0.5, sunset)));
 			// Powder: a thin edge has had little chance to scatter light toward us, so with the sun
 			// behind us a cloud's rim reads darker than its body.
 			shade *= mix(1.0 - exp(-thick * 12.0 - 0.15), 1.0, toward);
@@ -423,9 +424,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			float face = clamp(mix(1.0, 0.45, toward) + top * 0.3, 0.0, 1.0);
 			shade = mix(shade, max(shade, face), side);
 			lit = mix(shadow_col, lit_col, shade);
-			// Mottled by the same noise that shaped it, so a full storm deck still has bodies to it
-			// rather than one flat lid.
-			storm_body = clamp(0.55 + 0.7 * n, 0.4, 1.3);
+			storm_body = storm_body_of(n);
 			rim = exp(-thick * 10.0);
 		}
 		// Storm cloud: grey, darker than the sky it closes over.
@@ -451,7 +450,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 
 	// Rain falling far off: dark curtains hung under the deck round the horizon, leaning with the
 	// wind and drifting with the cloud, lost in the haze before they reach the ground.
-	if (storm > 0.0 && clouds && up > 0.0) {
+	if (storm > 0.0 && clouds && up > 0.0 && up < 0.3) {
 		vec2 round = (flat_eye + vec2(-flat_eye.y, flat_eye.x) * up * 1.2) * 1.6 + cloud_wind() * 0.5;
 		float shafts = smoothstep(0.45, 0.75, cloud_tex(round) * 0.65 + cloud_tex(round * 2.7 + vec2(4.1, 1.9)) * 0.35);
 		float under = smoothstep(0.0, 0.1, up) * (1.0 - smoothstep(0.12, 0.3, up));
@@ -465,34 +464,32 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	float unclouded = 1.0 - smoothstep(0.15, 0.75, sun_hidden);
 	// The moon: a ball lit from one side, mottled with darker seas. Its dark side is the sky's
 	// colour with the stars put out: just seen by night, lost by day.
-	float moon = step(0.5, night_amount);
-	vec3 to_moon = length(moon_dir) > 0.0 ? normalize(moon_dir) : sun;
-	if (dot(eye_dir, to_moon) > cos(moon_size * 1.1) && (length(moon_dir) > 0.0 || moon > 0.0)) {
-		vec3 mx = normalize(cross(to_moon, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
-		vec3 my = cross(mx, to_moon);
+	if (dot(eye_dir, moon_dir) > cos(moon_size * 1.1)) {
+		vec3 mx = normalize(cross(moon_dir, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+		vec3 my = cross(mx, moon_dir);
 		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, my)) / sin(moon_size);
 		float r = length(q);
 		float face = (1.0 - smoothstep(0.92, 1.0, r)) * sun_through * unclouded;
-		vec3 normal = q.x * mx + q.y * my - to_moon * sqrt(max(1.0 - r * r, 0.0));
-		vec3 lit_from = length(moon_lit_from) > 0.0 ? normalize(moon_lit_from) : -to_moon;
-		float lit = smoothstep(-0.03, 0.15, dot(normal, lit_from));
+		vec3 normal = q.x * mx + q.y * my - moon_dir * sqrt(max(1.0 - r * r, 0.0));
+		float lit = smoothstep(-0.03, 0.15, dot(normal, moon_lit_from));
 		float seas = overcast_vnoise(q * 2.2 + 7.0) * 0.6 + overcast_vnoise(q * 5.0 + 3.0) * 0.4;
 		vec3 ball = moon_color * mix(0.3, 0.6, smoothstep(0.35, 0.65, seas));
 		col = mix(col, air_col + ball * 0.04, face);
 		col += ball * lit * face * mix(0.45, moon_energy, night_amount);
 	}
 	// The sun's disc; past half night light_dir is the moon, drawn above.
-	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd) * (1.0 - moon);
+	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd) * (1.0 - step(0.5, night_amount));
 	col += sun_col * disc * sun_energy * light_strength * sun_through * unclouded;
 	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * light_strength * sun_through
 		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon
 	// lights little of it.
-	// The air's own light already brightens round the sun, so it takes most of the painted halo's place.
 	float horizon_band = pow(1.0 - abs(up), 8.0) * pow(sun_side, 3.0);
 	vec3 halo_color = mix(sun_col, vec3(1.0), 0.4);
 	col += halo_color * sun_halo_energy * mix(1.0, 0.25, night_amount) * light_strength * sun_through
-		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band) * (1.0 - 0.6 * atmosphere * (1.0 - night_amount));
+		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band)
+		// The air's own light already brightens round the sun, and takes most of this one's place.
+		* (1.0 - 0.6 * atmosphere * (1.0 - night_amount));
 	return overcast_shoulder(col);
 }
 

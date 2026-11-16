@@ -257,7 +257,7 @@ func test_the_moon_keeps_its_own_time() -> void:
 	assert_almost_eq(SkyScript.moonlight_at(0.0, 0.5), 1.0, 1e-6, "a full moon lights midnight")
 	assert_eq(SkyScript.moonlight_at(0.0, 0.0), 0.0, "a new one does not")
 	assert_eq(SkyScript.moonlight_at(3.0, 0.25), 0.0, "nor one that has set")
-	var dark := SkyScript.scene_light_at(0.0, SkyScript.DUSK_LIGHT, SkyScript.MOON_LIGHT, 0.0)
+	var dark := SkyScript.scene_light_at(0.0, 0.0)
 	assert_almost_eq(dark.r, SkyScript.MOON_LIGHT.r * SkyScript.STARLIGHT, 1e-6, "which leaves the night to the stars")
 	var sky := SkyScript.new({"drawing": false, "sun_dir": noon, "time_of_day": 3.0, "moon_phase": 0.25})
 	assert_vec3_almost_eq(sky.light_dir(), SkyScript.moon_at(noon, 3.0, 0.25), 1e-5, "the night's light is wherever the moon is")

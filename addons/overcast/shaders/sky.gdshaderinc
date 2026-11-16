@@ -177,18 +177,20 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		if (clear_run >= FINE) {
 			stride = dt;
 		}
-		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true) : 0.0;
+		float crease = 0.0;
+		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true, crease) : 0.0;
 		if (d <= 0.0) {
 			t += stride;
 			continue;
 		}
 		// Light march toward the sun, steps growing outward.
 		float od = 0.0;
+		float unused;
 		float ls = 6.0 * CLOUD_M;
 		vec3 lp = p;
 		for (int j = 0; j < LIGHT_STEPS; j++) {
 			lp += sun * ls;
-			od += cloud_volume_density(lp, cam, wind, fair, weather, false) * ls;
+			od += cloud_volume_density(lp, cam, wind, fair, weather, false, unused) * ls;
 			ls *= 1.8;
 		}
 		od *= EXTINCTION;
@@ -199,7 +201,8 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		float light = exp(-od) * phase + mix(0.35, 0.6, low_sun) * exp(-od * mix(0.1, 0.06, low_sun));
 		float powder = 1.0 - exp(-d * MARCH_STEP * EXTINCTION * 2.0);
 		vec3 amb = mix(base_col, top_col, clamp(cloud_height_frac(p, cam), 0.0, 1.0));
-		vec3 radiance = sun_col * light * mix(0.5, 1.0, powder) + amb;
+		// The creases between billows sit in their shade.
+		vec3 radiance = (sun_col * light * mix(0.5, 1.0, powder) + amb) * mix(1.04, 0.84, crease);
 		float absorbed = 1.0 - exp(-d * EXTINCTION * stride);
 		scattered += trans * radiance * absorbed;
 		weight += trans * absorbed * d;

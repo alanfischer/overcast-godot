@@ -49,6 +49,7 @@ uniform vec3 night_zenith_color : source_color = vec3(0.02, 0.03, 0.07);
 uniform vec3 night_horizon_color : source_color = vec3(0.06, 0.07, 0.12);
 uniform vec3 moon_color : source_color = vec3(0.82, 0.86, 1.0);
 uniform float moon_energy : hint_range(0.0, 8.0) = 1.5;
+uniform float moon_size : hint_range(0.002, 0.5) = 0.03;   // angular radius, radians
 uniform float night_stars : hint_range(0.0, 1.0) = 0.7;
 
 // Rain: 0 is the sky as configured, 1 a full storm — the deck closes over, its clouds go dark and
@@ -127,6 +128,7 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	float fair = cloud_fair();
 	vec2 cp_per_m = eye_dir.xz * (overcast_scale / CLOUD_HEIGHT);
 	vec3 p0 = cam + eye_dir * t0;
+	float low_sun = 1.0 - smoothstep(0.0, 0.3, sun.y);
 	vec3 scattered = vec3(0.0);
 	float trans = 1.0;
 	float weight = 0.0;
@@ -174,7 +176,7 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 		// the light scattered once keeps the sun's direction, so only it takes the phase: into the
 		// sun, a thick cloud's body is lit by the even, many-times-scattered glow, and its thin
 		// edges blaze.
-		float light = exp(-od) * phase + 0.35 * exp(-od * 0.1);
+		float light = exp(-od) * phase + mix(0.35, 0.9, low_sun) * exp(-od * mix(0.1, 0.03, low_sun));
 		float powder = 1.0 - exp(-d * MARCH_STEP * EXTINCTION * 2.0);
 		vec3 amb = mix(base_col, top_col, clamp(cloud_height_frac(p, cam), 0.0, 1.0));
 		vec3 radiance = sun_col * light * mix(0.5, 1.0, powder) + amb;
@@ -348,7 +350,16 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 
 	// Sun last. Thin cloud dims it and thick cloud hides the disc; the glow leaks through.
 	float sd = dot(eye_dir, sun);
-	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd);
+	// Past half night light_dir is the moon: a crisp disc, mottled with darker seas.
+	float moon = step(0.5, night_amount);
+	float size = mix(sun_size, moon_size, moon);
+	float disc = smoothstep(cos(size * mix(1.4, 1.08, moon)), cos(size), sd);
+	if (moon > 0.0 && disc > 0.0) {
+		vec3 mx = normalize(cross(sun, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, cross(mx, sun))) / size;
+		float seas = overcast_vnoise(q * 2.2 + 7.0) * 0.6 + overcast_vnoise(q * 5.0 + 3.0) * 0.4;
+		disc *= mix(0.3, 0.6, smoothstep(0.35, 0.65, seas));
+	}
 	// The ground hides a sun or moon below the horizon.
 	float sun_through = (1.0 - 0.95 * storm) * smoothstep(-0.02, 0.01, up);
 	float disc_energy = mix(sun_energy, moon_energy, night_amount) * light_strength;

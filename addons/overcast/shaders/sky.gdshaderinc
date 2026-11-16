@@ -314,7 +314,11 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	// What a storm cloud is measured against: the sky it covers, not the cloud colour, which on a
 	// moonlit sky is pale and would light the deck up at night.
 	float sky_lum = dot(col, OVERCAST_LUMA);
-	col = mix(col, vec3(sky_lum) * mix(0.55, 1.0, snowy), storm);
+	// An overcast sky is the horizon's grey, the grey rain's haze fades into, and lighter overhead
+	// where the cloud is looked through at its thinnest.
+	float storm_lum = mix(sky_lum, dot(hor, OVERCAST_LUMA) * (1.0 + 0.45 * smoothstep(0.0, 0.6, up)),
+		smoothstep(0.0, 0.1, up));
+	col = mix(col, vec3(storm_lum) * mix(0.55, 1.0, snowy), storm);
 
 	// Stars before clouds and sun, so both occlude them.
 	if (stars > 0.0) {
@@ -369,6 +373,12 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			lit = v.rgb;
 			cover = v.a * smoothstep(-0.02, 0.06, up);
 			storm_body = clamp(0.72 + 0.42 * body, 0.4, 1.3);
+			if (storm > 0.0) {
+				// A closed deck is all but one density to the march: its bellies come from the
+				// flat layer's pattern.
+				vec2 belly = cp;
+				storm_body = mix(storm_body, clamp(0.55 + 0.7 * cloud_density(belly), 0.4, 1.3), 0.75 * storm);
+			}
 			shade = clamp(dot(lit, OVERCAST_LUMA) / max(dot(lit_col, OVERCAST_LUMA), 1e-3), 0.0, 1.0);
 			rim = 0.0;   // the march's phase lights thin edges itself
 		} else {
@@ -408,8 +418,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			rim = exp(-thick * 10.0);
 		}
 		// Storm cloud: grey, darker than the sky it closes over.
-		vec3 heavy = vec3(sky_lum) * mix(0.6, 1.1, toward * toward) * storm_body * mix(0.8, 1.0, shade);
-		heavy = mix(heavy, vec3(sky_lum) * mix(0.9, 1.1, storm_body - 0.4), snowy);
+		vec3 heavy = vec3(storm_lum) * 0.7 * mix(0.6, 1.1, toward * toward) * storm_body * mix(0.6, 1.0, shade);
+		// Its thin spots are no brighter than the sky they would open onto.
+		heavy = min(heavy, col * 1.1);
+		heavy = mix(heavy, vec3(storm_lum) * mix(0.9, 1.1, storm_body - 0.4), snowy);
 		lit = mix(lit, heavy, storm);
 		// Silver lining: thin cloud near the sun scatters it forward (Henyey-Greenstein, g 0.8,
 		// scaled to 1 looking straight at the sun).
@@ -419,9 +431,20 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		// blue to give, and dark cloud would glow with it.
 		vec3 through = exp(-far * mix(vec3(0.6), vec3(0.3, 0.55, 1.1), 1.0 - max(dusk_amount, night_amount)));
 		lit = lit * through + col * (1.0 - through);
+		// Rain in the air hides a deck long before the horizon does.
+		lit = mix(lit, col, storm * (1.0 - smoothstep(0.03, 0.3, up)));
 		storm_cover = cover * storm;
 		col = mix(col, lit, cover);
 		sun_hidden = cover;
+	}
+
+	// Rain falling far off: dark curtains hung under the deck round the horizon, leaning with the
+	// wind and drifting with the cloud, lost in the haze before they reach the ground.
+	if (storm > 0.0 && clouds && up > 0.0) {
+		vec2 round = (flat_eye + vec2(-flat_eye.y, flat_eye.x) * up * 1.2) * 1.6 + cloud_wind() * 0.5;
+		float shafts = smoothstep(0.45, 0.75, cloud_tex(round) * 0.65 + cloud_tex(round * 2.7 + vec2(4.1, 1.9)) * 0.35);
+		float under = smoothstep(0.0, 0.1, up) * (1.0 - smoothstep(0.12, 0.3, up));
+		col *= 1.0 - 0.3 * shafts * under * storm * (1.0 - 0.6 * snowy);
 	}
 
 	// Sun last. Thin cloud dims it and thick cloud hides the disc; the glow leaks through.

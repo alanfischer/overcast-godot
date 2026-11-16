@@ -100,9 +100,8 @@ vec3 overcast_art(vec3 c) {
 #define MARCH_STEP (12.0 * CLOUD_M)
 const int MARCH_STEPS_MIN = 16;
 const int MARCH_STEPS_MAX = 48;
-// Short strides inside cloud, per long one, and the clear ones it takes to go back to long.
+// Short strides under the weather map's cloud, per long one.
 const int FINE = 4;
-const int FINE_CLEAR = 4;
 
 float hg_phase(float c, float g) {
 	return (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5);   // x4π: isotropic is 1
@@ -132,35 +131,37 @@ vec4 cloud_march(vec3 cam, vec3 eye_dir, float t0, vec2 cp, vec3 sun, vec3 sun_c
 	vec3 scattered = vec3(0.0);
 	float trans = 1.0;
 	float weight = 0.0;
-	// Long strides through clear air; on meeting cloud, back up one and go on in short ones. One
-	// long step through a sunlit edge is all but opaque, so which part of the edge it lands on
-	// would decide the pixel, a grain at every low sun.
+	// Long strides where the weather map holds no cloud, short ones where it does, until a long
+	// one's worth is clear again. One long step through a sunlit edge is all but opaque, so which
+	// part of the edge it lands on would decide the pixel, a grain at every low sun. The map is
+	// broad and smooth, so neighbouring pixels change stride together: changing on the cloud
+	// itself left its thinnest wisps found by some pixels and not their neighbours, a sparkle.
+	// Enough steps to cross the whole slab in short ones.
 	float stride = dt;
 	float t = dt * jitter;
 	int clear_run = 0;
-	for (int i = 0; i < steps * 3; i++) {
+	for (int i = 0; i < steps * (FINE + 1); i++) {
 		if (t > t1 - t0) {
 			break;
 		}
 		vec3 p = p0 + eye_dir * t;
 		float weather = cloud_weather(cp + cp_per_m * t, field);
-		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true) : 0.0;
-		if (d <= 0.0) {
-			// Back to long strides once well clear again.
-			clear_run++;
-			if (stride < dt && clear_run >= FINE_CLEAR) {
-				stride = dt;
-			}
-			t += stride;
-			continue;
-		}
-		clear_run = 0;
-		if (stride == dt) {
+		if (weather > 0.0 && stride == dt) {
 			stride = dt / float(FINE);
+			clear_run = 0;
 			if (i > 0) {
 				t -= dt - stride;
 				continue;
 			}
+		}
+		clear_run = weather > 0.0 ? 0 : clear_run + 1;
+		if (clear_run >= FINE) {
+			stride = dt;
+		}
+		float d = weather > 0.0 ? cloud_volume_density(p, cam, wind, fair, weather, true) : 0.0;
+		if (d <= 0.0) {
+			t += stride;
+			continue;
 		}
 		// Light march toward the sun, steps growing outward.
 		float od = 0.0;

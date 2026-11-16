@@ -12,6 +12,9 @@ extends ShaderMaterial
 
 const _Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
+const _LutShader = preload("res://addons/overcast/shaders/atmosphere_lut.gdshader")
+## The air's light, drawn into a texture this size whenever the sun or the air changes.
+const _LUT_SIZE := Vector2i(256, 128)
 
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
@@ -134,6 +137,8 @@ var _storm := 0.0
 var _snowy := 0.0
 ## The air's light level across the sun's bearing, linear, as _sync_air last took it.
 var _air_horizon := Color.BLACK
+## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
+var _lut := {}
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -167,6 +172,7 @@ func _start() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
 		_Clouds._release(_id)
+		_free_lut(_lut)  # static: a RefCounted's own methods are out of reach by now
 
 
 ## Shader parameters and properties by name, at once. An unknown name is an error rather than a
@@ -303,10 +309,46 @@ func _sync_air() -> void:
 	# DEFAULTS go in one at a time: the rest may not be there yet.
 	if _air() <= 0.0 or not haze is float or not exposure is float:
 		return
-	var air := air_at(air_sun(), haze, exposure)
+	var sun := air_sun()
+	var air := air_at(sun, haze, exposure)
 	_air_horizon = air["atmosphere_horizon"]
 	for key in air:
-		RenderingServer.material_set_param(get_rid(), key, air[key])
+		if key != &"atmosphere_gain" and key != &"atmosphere_dark":
+			RenderingServer.material_set_param(get_rid(), key, air[key])
+	_draw_lut(sun.y, haze, air["atmosphere_gain"], air["atmosphere_dark"])
+
+
+## The sky samples the air's light rather than summing it per pixel: on sky brushes that cost
+## more than the rest of the frame.
+func _draw_lut(sun_height: float, haze: float, gain: float, dark: float) -> void:
+	var rs := RenderingServer
+	if _lut.is_empty():
+		var viewport := rs.viewport_create()
+		rs.viewport_set_size(viewport, _LUT_SIZE.x, _LUT_SIZE.y)
+		rs.viewport_set_disable_3d(viewport, true)
+		rs.viewport_set_active(viewport, true)
+		var canvas := rs.canvas_create()
+		rs.viewport_attach_canvas(viewport, canvas)
+		var item := rs.canvas_item_create()
+		rs.canvas_item_set_parent(item, canvas)
+		rs.canvas_item_add_rect(item, Rect2(Vector2.ZERO, _LUT_SIZE), Color.WHITE)
+		var material := rs.material_create()
+		rs.material_set_shader(material, _LutShader.get_rid())
+		rs.canvas_item_set_material(item, material)
+		_lut = {"viewport": viewport, "canvas": canvas, "item": item, "material": material}
+		rs.material_set_param(get_rid(), &"atmosphere_lut", rs.viewport_get_texture(viewport))
+	var material: RID = _lut["material"]
+	rs.material_set_param(material, &"sun_height", sun_height)
+	rs.material_set_param(material, &"haze", haze)
+	rs.material_set_param(material, &"gain", gain)
+	rs.material_set_param(material, &"dark", dark)
+	rs.viewport_set_update_mode(_lut["viewport"], RenderingServer.VIEWPORT_UPDATE_ONCE)
+
+
+static func _free_lut(lut: Dictionary) -> void:
+	for key in ["item", "material", "canvas", "viewport"]:
+		if lut.has(key):
+			RenderingServer.free_rid(lut[key])
 
 
 ## The air's light the whole sky shares, by the shader parameter it goes to, for a sun at `sun`

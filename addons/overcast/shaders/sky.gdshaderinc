@@ -73,14 +73,12 @@ uniform vec3 atmosphere_light = vec3(1.0);
 uniform vec3 atmosphere_cloud_light = vec3(1.0);   // as atmosphere_light, at the clouds' height
 uniform vec3 atmosphere_zenith = vec3(0.0);
 uniform vec3 atmosphere_horizon = vec3(0.0);
-// The exposure the light is seen at, and how far it has risen for a failing light, 0 to 1.
-uniform float atmosphere_gain = 24.0;
-uniform float atmosphere_dark = 0.0;
+// The air's light over the sky for the sun now, as atmosphere_lut.gdshader draws it.
+uniform sampler2D atmosphere_lut : filter_linear, repeat_disable, hint_default_black;
 
 #include "res://addons/overcast/shaders/flash.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
 #include "res://addons/overcast/shaders/clouds.gdshaderinc"
-#include "res://addons/overcast/shaders/atmosphere.gdshaderinc"
 #include "res://addons/overcast/shaders/color_space.gdshaderinc"
 
 const vec3 OVERCAST_LUMA = vec3(0.299, 0.587, 0.114);
@@ -221,10 +219,13 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		hor = mix(hor, overcast_art(atmosphere_horizon) + night_hor, atmosphere);
 		vec3 lit_sun = mix(sun_color * atmosphere_light, moon_color, night_amount);
 		sun_col = mix(sun_col, lit_sun, atmosphere);
-		vec3 sky_dir = normalize(vec3(eye_dir.x, max(up, 0.0), eye_dir.z));
-		vec3 air = atmo_seen(atmo_sky(sky_dir, normalize(atmosphere_sun), atmosphere_haze), atmosphere_gain,
-			atmosphere_dark);
-		above_air = overcast_art(air) + mix(night_hor, night_zen, pow(max(up, 0.0), horizon_falloff));
+		vec2 flat_air_sun = normalize(atmosphere_sun.xz + vec2(1e-5));
+		float bearing = acos(clamp(dot(flat_eye, flat_air_sun), -1.0, 1.0)) / PI;
+		vec3 air = texture(atmosphere_lut, vec2(bearing, 1.0 - sqrt(max(up, 0.0)))).rgb;
+#if CURRENT_RENDERER != RENDERER_COMPATIBILITY
+		air = overcast_to_linear(air);
+#endif
+		above_air = air + mix(night_hor, night_zen, pow(max(up, 0.0), horizon_falloff));
 	}
 
 	// Gradient. Above and below the horizon are the same expression mirrored, so the seam at

@@ -31,18 +31,18 @@ forecasts and observations describe cloud, so real data and new cloud types shar
 Heights are real metres; the sky's `world_scale` shrinks them into the world (1/15 by default,
 for small levels; 1 for a world at real size).
 
-## 3. Cloud types
+## 3. Cloud types (done)
 
-In the layer model, by what they give for what they cost:
+Each layer runs from heaped to a sheet, so a forecast blends between kinds rather than switching:
 
-- Altocumulus (done, the middle layer) and cirrocumulus: a cheap flat layer of small cells, the
-  sunset sky.
-- Stratus and stratocumulus: a grey sheet with no rain (today only the storm deck closes the sky).
-- Cirrostratus and altostratus: a thin veil, the sun dimmed to a disc, the 22° halo.
-- Cumulonimbus: towers and anvils. The costly one: a tall volumetric slab, or painted at the
-  horizon.
+- Low (`cloud_sheet`): cumulus, stratocumulus, stratus. Ground shadows follow.
+- Middle (`mid_cloud_sheet`): altocumulus, altostratus, the sun behind it as through frosted glass.
+- High (`cirrus_sheet`): cirrus, cirrostratus with the 22° halo.
+- `cloud_towering`: thunderheads painted round the horizon, towering cumulus then cumulonimbus
+  with anvils and rain curtains. Overhead, a thunderstorm stays the storm deck.
 
-Only the low layer ray-marches.
+Not done: cirrocumulus (the middle layer's puffs, smaller and higher), and thunderheads in the
+ray-marched layer. Only the low layer ray-marches.
 
 ## 4. Real weather
 

@@ -15,6 +15,7 @@ global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
 global uniform float overcast_shadow;    // how much of the sky's share a cloud takes off; 0 for none
 global uniform float overcast_veil;      // how much the higher cloud takes off it, evenly
+global uniform float overcast_sheet;     // 0 heaped cumulus, 0.5 stratocumulus, 1 a stratus sheet
 #ifndef OVERCAST_SUN_DIR  // snow.gdshaderinc reads it too
 #define OVERCAST_SUN_DIR
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
@@ -45,7 +46,20 @@ float cloud_tex(vec2 p) {
 
 // 1 for fair-weather cumulus, 0 once a storm has closed the sky into one flat deck.
 float cloud_fair() {
-	return 1.0 - smoothstep(0.7, 0.95, overcast_cover);
+	return (1.0 - smoothstep(0.7, 0.95, overcast_cover)) * (1.0 - 0.8 * overcast_sheet);
+}
+
+// The layer spread out (overcast_sheet) from density `n` at noise point cp: toward
+// stratocumulus, rolls of cells packed side by side across the wind with thin gaps between;
+// toward stratus, broad smooth patches that close into one even sheet.
+float cloud_spread(vec2 cp, float n) {
+	if (overcast_sheet <= 0.0) {
+		return n;
+	}
+	vec2 t = cloud_tex2(vec2(cp.x * 0.5, cp.y * 0.9) + vec2(4.2, 1.1));
+	float cells = 0.85 - t.g * 0.75 + (n - 0.5) * 0.3;
+	float even = 0.62 + (cloud_tex(cp * 0.12 + vec2(1.3, 5.9)) - 0.5) * 0.7 + (n - 0.5) * 0.06;
+	return mix(mix(n, cells, min(overcast_sheet * 2.0, 1.0)), even, max(overcast_sheet * 2.0 - 1.0, 0.0));
 }
 
 // Perlin swelling into round billows: worley cells push the outline out into lobes, so a cloud's
@@ -96,8 +110,8 @@ float cloud_density(inout vec2 cp) {
 	vec2 warp = vec2(cloud_tex(cp * 0.5 + vec2(0.31, 0.17) - wind * 0.4),
 		cloud_tex(cp * 0.5 + vec2(5.71, 2.53) + wind * 0.3)) - 0.5;
 	cp += warp * 0.35;
-	return cloud_shape(cp) + (0.5 - cloud_tex2(cp * 3.1 + vec2(7.3, 2.9)).g) * mix(0.08, 0.2, cloud_fair())
-		+ cloud_field(cp);
+	return cloud_spread(cp, cloud_shape(cp) + (0.5 - cloud_tex2(cp * 3.1 + vec2(7.3, 2.9)).g)
+		* mix(0.08, 0.2, cloud_fair()) + cloud_field(cp));
 }
 
 // The density a cloud starts at. `amount` drives coverage, not opacity: at 0 the threshold sits
@@ -115,7 +129,7 @@ float cloud_coverage(float n, float amount) {
 // The volumetric clouds' weather map: how much cloud stands over noise point cp, 0 to 1. Smooth
 // and broad, as the 3D noise carves the clouds themselves out of it.
 float cloud_weather(vec2 cp, float field) {
-	float n = cloud_tex(cp * 0.45) + field;
+	float n = cloud_spread(cp, cloud_tex(cp * 0.45) + field);
 	float edge = mix(0.75, 0.25, overcast_cover);
 	return smoothstep(edge - 0.15, edge + 0.25, n);
 }

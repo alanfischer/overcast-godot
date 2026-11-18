@@ -68,11 +68,16 @@ switches, and a mode where showers come and go on their own.
   Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
   has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
   gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
-- **Three layers of cloud**: the cumulus layer (`cloud_amount`, `cloud_height`), an altocumulus
-  sheet of small puffs in rows (`mid_cloud_amount`, `mid_cloud_height`) and cirrus (`cirrus_amount`,
-  `cirrus_height`), each on its own shell at its own real height, and each lit by the air at that
-  height: after sunset the higher ones keep the sun longest. The cumulus shades the ground in
-  patches; the middle layer dims the sun evenly (`veil`).
+- **Three layers of cloud**: the low layer (`cloud_amount`, `cloud_height`), a middle one
+  (`mid_cloud_amount`, `mid_cloud_height`) and cirrus (`cirrus_amount`, `cirrus_height`), each on
+  its own shell at its own real height, and each lit by the air at that height: after sunset the
+  higher ones keep the sun longest. Each runs from heaped to a sheet: `cloud_sheet` takes the low
+  layer from cumulus through stratocumulus to stratus, ground shadows and all; `mid_cloud_sheet`
+  the middle from altocumulus to altostratus, the sun behind it as through frosted glass;
+  `cirrus_sheet` the cirrus to cirrostratus, with the 22° halo round the sun or moon.
+  `cloud_towering` raises thunderheads round the horizon: towering cumulus, then cumulonimbus with
+  anvils and rain hanging under them. The low layer shades the ground in patches; the middle layer
+  and cirrostratus dim the sun evenly (`veil`).
 - **`OvercastConditions`**: the weather at one moment as forecasts give it: cover and base of a
   low, a middle and a high layer, rain, temperature and wind. Set it as an OvercastWeather's
   `conditions` and the weather and its sky follow it; `OvercastConditions.blend` goes between two.

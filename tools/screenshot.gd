@@ -4,7 +4,8 @@ extends SceneTree
 ## for the moon's phase, MOONVIEW=12 to shoot the moon through a lens that many degrees tall;
 ## CLEARED=1 clears the sky over the settled weather; PLACE=lat,lon[,utc offset] and DATE=YYYY-MM-DD
 ## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole;
-## MID=0.6 and CIRRUS=0.8 for the higher layers.
+## MID=0.6 and CIRRUS=0.8 for the higher layers, MIDSHEET, CIRRUSSHEET, SHEET and TOWERING for their
+## kinds; LOOK=yaw,pitch[,fov] in degrees for one view, FOV=20 to narrow any.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -24,6 +25,11 @@ func _run() -> void:
 		demo.sky.set("shader_parameter/atmosphere", float(OS.get_environment("ATMO")))
 	if OS.get_environment("CLOUDS") != "":
 		demo.sky.cloud_amount = float(OS.get_environment("CLOUDS"))
+	if OS.get_environment("SHEET") != "":
+		demo.sky.cloud_sheet = float(OS.get_environment("SHEET"))
+	for knob in [["MIDSHEET", "mid_cloud_sheet"], ["CIRRUSSHEET", "cirrus_sheet"], ["TOWERING", "cloud_towering"]]:
+		if OS.get_environment(knob[0]) != "":
+			demo.sky.set(knob[1], float(OS.get_environment(knob[0])))
 	if OS.get_environment("MID") != "":
 		demo.sky.mid_cloud_amount = float(OS.get_environment("MID"))
 	if OS.get_environment("CIRRUS") != "":
@@ -65,9 +71,15 @@ func _run() -> void:
 		var m: Vector3 = demo.sky.moon_dir()
 		demo.camera.fov = float(OS.get_environment("MOONVIEW"))
 		views = {"moon": [Vector3(0, 1.7, 8), asin(m.y), atan2(-m.x, -m.z)]}
+	if OS.get_environment("LOOK") != "":  # yaw and pitch in degrees (yaw 0 north, 90 west), fov
+		var look := OS.get_environment("LOOK").split_floats(",")
+		demo.camera.fov = look[2] if look.size() > 2 else demo.camera.fov
+		views = {"look": [Vector3(0, 1.7, 8), deg_to_rad(look[1]), deg_to_rad(look[0])]}
 	if OS.get_environment("POLE") == "1":  # the pole the stars turn about, due north or south
 		var lat: float = deg_to_rad(demo.sky.latitude)
 		views = {"pole": [Vector3(0, 1.7, 8), absf(lat), 0.0 if lat >= 0.0 else PI]}
+	if OS.get_environment("FOV") != "":
+		demo.camera.fov = float(OS.get_environment("FOV"))
 	for name in views:
 		var v: Array = views[name]
 		demo._yaw = v[2]

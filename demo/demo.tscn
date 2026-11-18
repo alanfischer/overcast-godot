@@ -163,3 +163,35 @@ layout_mode = 2
 max_value = 1.0
 step = 0.01
 value = 0.5
+
+[node name="KindLabel" type="Label" parent="UI/Panel/Box"]
+layout_mode = 2
+text = "Heaped → sheet: low, middle, cirrus"
+
+[node name="LowSheet" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01
+
+[node name="MidSheet" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01
+
+[node name="CirrusSheet" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01
+
+[node name="ToweringLabel" type="Label" parent="UI/Panel/Box"]
+layout_mode = 2
+text = "Thunderheads"
+
+[node name="Towering" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01

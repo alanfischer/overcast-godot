@@ -22,10 +22,12 @@ const _AIR_SUN_STEP := 0.002
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
-const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount", &"mid_cloud_amount"]
-## How much of the sun's light a full middle layer takes off the ground, evenly: it is too high
-## and too broken for its shadows to show.
-const _MID_VEIL := 0.45
+const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount", &"cloud_sheet", &"mid_cloud_amount",
+	&"mid_cloud_sheet", &"cirrus_amount", &"cirrus_sheet"]
+## How much of the sun's light a full middle layer takes off the ground, evenly, as altocumulus
+## and as altostratus; and a full cirrostratus. Too high and broken for their shadows to show.
+const _MID_VEIL := Vector2(0.45, 0.7)
+const _HIGH_VEIL := 0.12
 ## Shader parameters the air's light, taken once here for the whole sky, follows.
 const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
@@ -213,18 +215,50 @@ var cloud_amount: float:
 		return get_shader_parameter("cloud_amount")
 	set(v):
 		set("shader_parameter/cloud_amount", v)
+## How far the cloud layer is spread into a sheet: 0 heaped cumulus, 0.5 stratocumulus, 1 stratus.
+## As cloud_amount, set it here or through the inspector: the ground's shadows follow it.
+var cloud_sheet: float:
+	get:
+		return _float_param(&"cloud_sheet")
+	set(v):
+		set("shader_parameter/cloud_sheet", v)
 ## How much of the middle layer there is, 0 to 1. As cloud_amount, set it here or through the
 ## inspector: the ground's light follows it.
 var mid_cloud_amount: float:
 	get:
-		var v = param("mid_cloud_amount")
-		return v if v is float else 0.0
+		return _float_param(&"mid_cloud_amount")
 	set(v):
 		set("shader_parameter/mid_cloud_amount", v)
+## How far the middle layer is spread into altostratus, 0 to 1.
+var mid_cloud_sheet: float:
+	get:
+		return _float_param(&"mid_cloud_sheet")
+	set(v):
+		set("shader_parameter/mid_cloud_sheet", v)
+## How much cirrus there is, and how far it is spread into cirrostratus, 0 to 1 each.
+var cirrus_amount: float:
+	get:
+		return _float_param(&"cirrus_amount")
+	set(v):
+		set("shader_parameter/cirrus_amount", v)
+var cirrus_sheet: float:
+	get:
+		return _float_param(&"cirrus_sheet")
+	set(v):
+		set("shader_parameter/cirrus_sheet", v)
+## Thunderheads round the horizon: towering cumulus as it rises, cumulonimbus with anvils toward
+## 1. Overhead, a thunderstorm is the storm deck (set_weather).
+var cloud_towering: float:
+	get:
+		return _float_param(&"cloud_towering")
+	set(v):
+		set("shader_parameter/cloud_towering", v)
 ## How much of the sun's light the cloud over the low layer takes off the ground, evenly, 0 to 1.
 var veil: float:
 	get:
-		return mid_cloud_amount * _MID_VEIL * (1.0 - storm)
+		var mid := mid_cloud_amount * lerpf(_MID_VEIL.x, _MID_VEIL.y, mid_cloud_sheet)
+		var high := cirrus_amount * cirrus_sheet * _HIGH_VEIL
+		return (1.0 - (1.0 - mid) * (1.0 - high)) * (1.0 - storm)
 
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
@@ -308,6 +342,11 @@ func _set(property: StringName, value: Variant) -> bool:
 	set_shader_parameter(key, value)
 	_sync_light()
 	return true
+
+
+func _float_param(key: StringName) -> float:
+	var v = param(key)
+	return v if v is float else 0.0
 
 
 ## A shader parameter, or the shader's own default for one never set.
@@ -758,7 +797,7 @@ func _push_weather() -> void:
 	var amount: float = cloud_amount
 	var casting := maxf(amount, storm) > 0.0
 	_Clouds._set_weather(_id, lerpf(amount, _STORM_COVER, storm),
-		lerpf(cloud_shadow, storm_shadow, storm) if casting else 0.0, veil)
+		lerpf(cloud_shadow, storm_shadow, storm) if casting else 0.0, veil, cloud_sheet)
 
 
 ## The colour the sky draws at the horizon right now, linear, flash aside: what rain haze fades

@@ -1386,8 +1386,10 @@ func _follow(c: OvercastConditions) -> void:
 			[&"cirrus_height", c.high_base]]:
 		if s.get(pair[0]) != pair[1]:
 			s.set(pair[0], pair[1])
-	if s.param(&"cirrus_amount") != c.high_cover:
-		s.set(&"shader_parameter/cirrus_amount", c.high_cover)
+	for pair in [[&"cloud_sheet", c.low_sheet], [&"cloud_towering", c.towering], [&"mid_cloud_sheet", c.mid_sheet],
+			[&"cirrus_amount", c.high_cover], [&"cirrus_sheet", c.high_sheet]]:
+		if s.get(pair[0]) != pair[1]:
+			s.set(pair[0], pair[1])
 
 
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes

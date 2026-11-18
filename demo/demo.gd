@@ -63,7 +63,10 @@ func _ready() -> void:
 	%Place.item_selected.connect(_set_place)
 	%Date.value_changed.connect(_set_date)
 	%Mid.value_changed.connect(func(v: float) -> void: sky.mid_cloud_amount = v)
-	%Cirrus.value_changed.connect(func(v: float) -> void: sky.set("shader_parameter/cirrus_amount", v))
+	%Cirrus.value_changed.connect(func(v: float) -> void: sky.cirrus_amount = v)
+	for knob in [[%LowSheet, &"cloud_sheet"], [%MidSheet, &"mid_cloud_sheet"],
+			[%CirrusSheet, &"cirrus_sheet"], [%Towering, &"cloud_towering"]]:
+		knob[0].value_changed.connect(func(v: float) -> void: sky.set(knob[1], v))
 	_set_date(%Date.value)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
 

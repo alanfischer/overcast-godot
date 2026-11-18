@@ -32,11 +32,20 @@ uniform float sun_halo_exp : hint_range(1.0, 64.0) = 6.0;
 // How cloudy a fair day is; the cover actually drawn is the overcast_cover global, which a storm
 // raises (OvercastSky).
 uniform float cloud_amount : hint_range(0.0, 1.0) = 0.45;
+// How far the cloud layer is spread into a sheet: 0 heaped cumulus, 0.5 stratocumulus, 1 stratus
+// (the overcast_sheet global, which OvercastSky sets from it).
+uniform float cloud_sheet : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 cloud_color : source_color = vec3(1.0, 1.0, 1.0);
 // A thin, streaky layer high over the main one, drifting faster.
 uniform float cirrus_amount : hint_range(0.0, 1.0) = 0.5;
 // A sheet of small puffs in rows (altocumulus), between the two.
 uniform float mid_cloud_amount : hint_range(0.0, 1.0) = 0.0;
+// How far each is spread into a smooth veil: the middle layer toward altostratus, the sun behind
+// it as through frosted glass; the cirrus toward cirrostratus, milky, with a halo round the sun.
+uniform float mid_cloud_sheet : hint_range(0.0, 1.0) = 0.0;
+uniform float cirrus_sheet : hint_range(0.0, 1.0) = 0.0;
+// Thunderheads round the horizon: towering cumulus as it rises, cumulonimbus with anvils toward 1.
+uniform float cloud_towering : hint_range(0.0, 1.0) = 0.0;
 // The middle layer's and the cirrus' heights, as multiples of the cloud layer's (OvercastSky).
 uniform float mid_cloud_rise = 2.6667;
 uniform float cirrus_rise = 6.0;
@@ -306,10 +315,21 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		vec2 hp = (cam.xz + eye_dir.xz * d) * (overcast_scale / h) * 0.6;
 		float far = smoothstep(1.5 * h, cloud_distance_to(cam, vec3(1.0, 0.0, 0.0), h), d);
 		float c = cloud_tex(vec2(hp.x * 0.25, hp.y) + wind * 2.5 + vec2(3.7, 1.3));
-		float ci = smoothstep(0.55, 0.85, c) * cirrus_amount * 0.45 * clear * (1.0 - far)
-			* smoothstep(0.0, 0.15, up);
+		float streaks = smoothstep(0.55, 0.85, c) * 0.45 * (1.0 - far);
+		// Cirrostratus: a milky veil, faintly fibrous, thickening toward the horizon.
+		float milky = (0.32 + 0.12 * c) * mix(1.0, 1.6, smoothstep(0.4, 0.0, up));
+		float ci = mix(streaks, milky, cirrus_sheet) * cirrus_amount * clear * smoothstep(0.0, 0.15, up);
 		vec3 lit = overcast_cloud_lit(cloud_col, sun_col, atmosphere_high_light);
 		out_col = mix(out_col, mix(ambient, lit, 0.7), ci);
+		// The 22° halo, from ice crystals: a sharp reddish inner edge, white and diffuse outward.
+		float halo_veil = milky * cirrus_amount * cirrus_sheet * clear;
+		if (halo_veil > 0.0) {
+			float ang = acos(clamp(dot(eye_dir, sun), -1.0, 1.0));
+			float ring = exp(-pow((ang - 0.384) / 0.008, 2.0))
+				+ 0.5 * exp(-pow((ang - 0.384) / 0.05, 2.0)) * step(0.384, ang);
+			vec3 tint = mix(vec3(1.0, 0.72, 0.55), vec3(0.9, 0.95, 1.0), smoothstep(0.378, 0.41, ang));
+			out_col += sun_col * tint * ring * halo_veil * 0.3 * light_strength * smoothstep(-0.02, 0.05, sun.y);
+		}
 	}
 	if (mid_cloud_amount > 0.0) {
 		float h = CLOUD_HEIGHT * mid_cloud_rise;
@@ -327,7 +347,9 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		float puff = 1.0 - smoothstep(size - 0.1, size + 0.03, cell);
 		// Far off, a cell is finer than a pixel: the sheet's average, banking up toward the horizon.
 		puff = mix(puff, mix(0.5, 0.85, mid_cloud_amount), far);
-		float cover = puff * sheet * clear * smoothstep(0.0, 0.06, up);
+		// Altostratus: the patches spread smooth and grey, seen through.
+		float smooth_sheet = smoothstep(edge - 0.2, edge + 0.25, patches);
+		float cover = mix(puff * sheet, smooth_sheet * 0.85, mid_cloud_sheet) * clear * smoothstep(0.0, 0.06, up);
 		float toward = clamp(dot(eye_dir, sun) * 0.5 + 0.5, 0.0, 1.0);
 		// Thin: lit through, a little grey at a puff's heart, bright at its rim toward the sun.
 		float heart = 1.0 - smoothstep(0.0, size, cell);
@@ -336,10 +358,117 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		vec3 skylit = mix(vec3(dot(ambient, OVERCAST_LUMA)), ambient, 0.6) * 0.9;
 		vec3 c = max(mix(lit, mix(skylit, lit, 0.55), heart * mix(0.7, 0.3, toward)), skylit * mix(1.0, 0.8, heart));
 		c += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * (1.0 - heart) * light_strength;
+		vec3 grey = mix(skylit, lit, 0.45) * (0.92 + 0.16 * patches);
+		c = mix(c, grey, mid_cloud_sheet);
 		vec3 through = exp(-far * vec3(0.5, 0.6, 0.8));
 		c = c * through + out_col * (1.0 - through);
 		out_col = mix(out_col, c, cover);
-		out_cover = cover;
+		// A thin veil leaves the sun's disc to be seen through it.
+		out_cover = cover * mix(1.0, 0.55, mid_cloud_sheet);
+	}
+	return vec4(out_col, out_cover);
+}
+
+float overcast_smin(float a, float b, float k) {
+	float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+	return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// Thunderheads far off round the horizon (cloud_towering): towers of heaped lobes, the biggest
+// spreading into a flat-topped anvil downwind, their tops lit by the air at their height. Colour
+// over `col`, and how much they cover.
+vec4 overcast_towers(vec3 eye_dir, vec3 sun, vec3 ambient, vec3 cloud_col, vec3 sun_col, vec3 col) {
+	float e = asin(clamp(eye_dir.y, -1.0, 1.0));
+	if (cloud_towering <= 0.0 || e > 0.45 || e < -0.05) {
+		return vec4(col, 0.0);
+	}
+	float az = atan(eye_dir.x, -eye_dir.z);
+	float sun_az = atan(sun.x, -sun.z);
+	vec3 skylit = mix(vec3(dot(ambient, OVERCAST_LUMA)), ambient, 0.6) * 0.75;
+	float anvil_amount = smoothstep(0.5, 1.0, cloud_towering);
+	vec3 out_col = col;
+	float out_cover = 0.0;
+	for (int i = 0; i < 5; i++) {
+		float fi = float(i);
+		float h = overcast_hash12(vec2(fi, 7.1));
+		// More of them as it rises, and taller.
+		if (h > cloud_towering) {
+			continue;
+		}
+		float centre = overcast_hash12(vec2(fi, 2.3)) * TAU + TIME * overcast_speed * 0.02;
+		float top = mix(0.07, 0.2, overcast_hash12(vec2(fi, 5.9))) * mix(0.5, 1.0, cloud_towering);
+		// In units of the cloud's height: x across, y up from the horizon.
+		vec2 p = vec2(mod(az - centre + PI, TAU) - PI, e) / top;
+		if (abs(p.x) > 2.8 || p.y > 1.3) {
+			continue;
+		}
+		float sdf = 1e3;
+		// Each lobe a ball, their surface normals blended by nearness: they shade the bulges.
+		vec3 normal_sum = vec3(0.0);
+		float nearest = 1e3;
+		for (int j = 0; j < 6; j++) {
+			float fj = float(j);
+			float r = mix(0.55, 0.26, fj / 5.0) * mix(0.85, 1.2, overcast_hash12(vec2(fi, fj + 20.0)));
+			vec2 c = vec2((overcast_hash12(vec2(fi, fj + 40.0)) - 0.5) * mix(0.9, 0.3, fj / 5.0), 0.1 + fj * 0.15);
+			float dl = length(p - c) - r;
+			nearest = min(nearest, dl);
+			vec2 n = clamp((p - c) / r, vec2(-1.0), vec2(1.0));
+			normal_sum += normalize(vec3(n, sqrt(max(1.0 - dot(n, n), 0.0)) + 0.05)) * exp(-max(dl, -0.3) * 18.0);
+			sdf = overcast_smin(sdf, dl, 0.12);
+		}
+		vec3 normal = normalize(normal_sum + vec3(0.0, 0.0, 1e-4));
+		if (anvil_amount > 0.0) {
+			float downwind = overcast_hash12(vec2(fi, 9.4)) > 0.5 ? 1.0 : -1.0;
+			float reach = mix(1.3, 2.0, h);
+			// Out of the crown, thinning downwind; flat on top where the storm meets the stratosphere.
+			vec2 q = p - vec2(downwind * reach * 0.45, 0.93);
+			float slab = (length(q / vec2(reach * 0.65, 0.17 + 0.15 * (1.0 - abs(q.x) / reach))) - 1.0) * 0.17;
+			float hood = (length((p - vec2(downwind * 0.2, 0.86)) / vec2(0.8, 0.26)) - 1.0) * 0.26;
+			float anvil = max(overcast_smin(slab, hood, 0.12), p.y - 1.02);
+			normal = normalize(mix(normal, vec3(0.0, 0.6, 0.8), smoothstep(0.05, -0.05, anvil - nearest) * anvil_amount));
+			sdf = mix(sdf, overcast_smin(sdf, anvil, 0.1), anvil_amount);
+		}
+		float billow = overcast_vnoise(p * 9.0 + fi * 13.0) - 0.5;
+		billow += (overcast_vnoise(p * 22.0 + fi * 7.0) - 0.5) * 0.5;
+		sdf += billow * 0.05;
+		// A flat base, as cumulus have, a little over the horizon this far off.
+		float base = 0.07 + 0.01 * billow;
+		float column = sdf;
+		sdf = max(sdf, base - p.y);
+		float inside = 1.0 - smoothstep(-0.012, 0.012, sdf);
+		// Under a cumulonimbus, its rain: a grey curtain from the base to the ground.
+		float curtain = anvil_amount * smoothstep(0.02, -0.12, column) * step(p.y, base)
+			* (0.45 + 0.55 * cloud_tex(vec2(p.x * 5.0 - p.y * 2.0, 0.3) + fi));
+		if (curtain > 0.0) {
+			out_col = mix(out_col, skylit * 0.9, curtain * 0.55);
+		}
+		if (inside <= 0.0) {
+			continue;
+		}
+		// Cauliflower: small bulges on the lobes, tilting the surface their way.
+		vec2 fp = p * 1.6 + fi * 3.7;
+		float f0 = cloud_tex(fp);
+		vec2 grad = vec2(cloud_tex(fp + vec2(0.04, 0.0)), cloud_tex(fp + vec2(0.0, 0.04))) - f0;
+		normal = normalize(normal - vec3(grad * 9.0, 0.0));
+		// Lit full face on with the sun behind us, on one side with it to the side, dark against
+		// it but for a silver edge; brighter toward the top, which stands high in the sun's light.
+		float rel = sun_az - centre;
+		float facing = 0.5 - 0.5 * cos(rel);
+		float up_frac = clamp(p.y, 0.0, 1.0);
+		// The sun in the cloud's own frame: x across, y up, z toward us.
+		float sun_flat = sqrt(max(1.0 - sun.y * sun.y, 0.0));
+		vec3 to_sun = vec3(sin(rel) * sun_flat, sun.y, -cos(rel) * sun_flat);
+		float lambert = clamp(dot(normal, to_sun) * 0.75 + 0.25, 0.0, 1.0);
+		float light = clamp(lambert + billow * 0.12, 0.0, 1.0) * mix(0.6, 1.0, up_frac);
+		vec3 air = mix(atmosphere_cloud_light, atmosphere_high_light, up_frac);
+		vec3 sunlit = overcast_cloud_lit(cloud_col, sun_col, air);
+		vec3 c = mix(skylit, sunlit, light * light_strength);
+		float rim = (1.0 - smoothstep(0.0, 0.04, -sdf)) * (1.0 - facing) * smoothstep(-0.3, 0.6, cos(rel));
+		c += sunlit * rim * 0.6 * light_strength;
+		// Far off: their feet lost in the haze, their tops clearer.
+		c = mix(c, col, mix(0.5, 0.08, smoothstep(0.0, 0.5, up_frac)));
+		out_col = mix(out_col, c, inside);
+		out_cover = max(out_cover, inside);
 	}
 	return vec4(out_col, out_cover);
 }
@@ -413,6 +542,12 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		col = higher.rgb;
 		sun_hidden = higher.a;
 	}
+	// Their feet a little under the horizon, where a level's own ground edge often is.
+	if (clouds && up > -0.05 && storm < 1.0) {
+		vec4 towers = overcast_towers(eye_dir, sun, mix(zen, hor, 0.5), cloud_col, sun_col, col);
+		col = towers.rgb;
+		sun_hidden = max(sun_hidden, towers.a);
+	}
 	float amount = overcast_cover;
 	if (clouds && amount > 0.0) {
 		float dist = cloud_distance(cam, eye_dir);
@@ -473,8 +608,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			// steps sunward through the layer) and in the cloud above us, so thick bases go grey.
 			vec2 sun_step = normalize(sun.xz + vec2(1e-4));
 			float thick = max(n - edge, 0.0);
-			float sunward = max(cloud_shape(cp + sun_step * 0.25) - edge, 0.0)
-				+ max(cloud_shape(cp + sun_step * 0.6) - edge, 0.0);
+			vec2 s1 = cp + sun_step * 0.25;
+			vec2 s2 = cp + sun_step * 0.6;
+			float sunward = max(cloud_spread(s1, cloud_shape(s1)) - edge, 0.0)
+				+ max(cloud_spread(s2, cloud_shape(s2)) - edge, 0.0);
 			// A low sun shines in under the layer, so the cloud overhead is not in its way.
 			shade = exp(-(sunward * 2.5 + thick * mix(2.2, 0.5, sunset)));
 			// Powder: a thin edge has had little chance to scatter light toward us, so with the sun
@@ -492,6 +629,9 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			storm_body = storm_body_of(n);
 			rim = exp(-thick * 10.0);
 		}
+		// Stratus: one even grey, a little darker where it is thicker.
+		float stratus = max(overcast_sheet * 2.0 - 1.0, 0.0);
+		lit = mix(lit, mix(shadow_col, lit_col, 0.6) * mix(0.7, 1.0, shade), stratus * 0.8);
 		// Storm cloud: grey, darker than the sky it closes over.
 		vec3 heavy = vec3(storm_lum) * 0.7 * mix(0.6, 1.1, toward * toward) * storm_body * mix(0.6, 1.0, shade);
 		// Its thin spots are no brighter than the sky they would open onto.

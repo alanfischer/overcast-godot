@@ -15,6 +15,7 @@ const GLOBALS := {
 	"overcast_cover": ["float", 0.0],
 	"overcast_shadow": ["float", 0.0],
 	"overcast_veil": ["float", 0.0],
+	"overcast_sheet": ["float", 0.0],
 	"overcast_sun_dir": ["vec3", Vector3(0, 1, 0)],
 	"overcast_volumetric": ["float", 0.0],
 	"overcast_volume": ["sampler3D", ""],

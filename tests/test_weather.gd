@@ -1192,11 +1192,22 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	w._process(0.0)
 	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), sky.light_dir(), 1e-4, "and from the moon at night")
 	assert_lt(sun.light_color.get_luminance(), 0.3, "in moonlight")
+	sky.time_of_day = 12.0
+	w._process(0.0)
+	var clear := sun.light_energy
+	sky.mid_cloud_amount = 1.0
+	w._process(0.0)
+	assert_almost_eq(sun.light_energy, clear, 1e-6, "a veil dims it where it lands (cloud_sunlight), not twice")
+	sky.mid_cloud_amount = 0.0
+	sky.time_of_day = 23.0
 	sky.sun_follows_time = false
 	var before := sun.global_basis
 	sky.time_of_day = 9.0
 	w._process(0.0)
 	assert_true(sun.global_basis.is_equal_approx(before), "a sun that does not follow the time is left where it is")
+	sky.placed = true
+	w._process(0.0)
+	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), sky.light_dir(), 1e-4, "but a placed sky's sun moves all the same")
 
 
 func test_lying_snow_comes_back_with_the_weather() -> void:

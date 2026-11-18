@@ -138,9 +138,11 @@ func test_a_storm_and_a_flash_are_not_saved_with_the_sky() -> void:
 func test_the_layer_takes_its_height() -> void:
 	var sky := SkyScript.new()
 	sky.drawing = true
-	assert_eq(_global("overcast_height"), 100.0, "100 m by default")
-	sky.cloud_height = 400.0
-	assert_eq(_global("overcast_height"), 400.0, "and the shaders follow a higher layer")
+	assert_almost_eq(_global("overcast_height"), 100.0, 1e-3, "100 m by default: 1500 real, shrunk")
+	sky.cloud_height = 6000.0
+	assert_almost_eq(_global("overcast_height"), 400.0, 1e-3, "and the shaders follow a higher layer")
+	sky.world_scale = 1.0
+	assert_almost_eq(_global("overcast_height"), 6000.0, 1e-3, "at its real height in a world at real size")
 	sky.drawing = false
 
 func test_a_passing_sky_gives_the_layer_back() -> void:
@@ -222,10 +224,9 @@ func test_a_sky_lit_by_the_air_keeps_its_haze_in_step() -> void:
 func test_clouds_catch_the_sun_after_the_ground_loses_it() -> void:
 	var gone := SkyScript.air_at(Vector3(0.0, -0.02, -1.0).normalized(), 1.0, 20.0)
 	assert_eq(gone["atmosphere_light"], Vector3.ZERO, "the sun has set on the ground")
-	var light: Vector3 = gone["atmosphere_cloud_light"]
+	var light := SkyScript.cloud_light_at(Vector3(0.0, -0.02, -1.0).normalized(), 1.0, 2000.0)
 	assert_gt(light.x, light.z * 2.0, "but still reaches the clouds, red")
-	var midnight := SkyScript.air_at(Vector3.DOWN, 1.0, 20.0)
-	assert_eq(midnight["atmosphere_cloud_light"], Vector3.ZERO, "and not at midnight")
+	assert_eq(SkyScript.cloud_light_at(Vector3.DOWN, 1.0, 2000.0), Vector3.ZERO, "and not at midnight")
 	var dusk_gain: float = gone["atmosphere_gain"]
 	assert_gt(dusk_gain, SkyScript.air_at(Vector3.UP, 1.0, 20.0)["atmosphere_gain"], "the eye opens up at dusk")
 
@@ -244,6 +245,37 @@ func test_the_sun_crosses_the_sky_with_the_time() -> void:
 	sky.sun_follows_time = false
 	assert_vec3_almost_eq(sky.light_dir(), noon, 1e-5, "a baked sun stays put, and so does its moon")
 	assert_vec3_almost_eq(sky.sun_dir, noon, 1e-5, "and sun_dir is never moved")
+
+
+func test_a_placed_sky_is_the_real_one() -> void:
+	# Greenwich, 21 June 2026, 13:00 BST.
+	var sky := SkyScript.new({"drawing": false, "placed": true, "latitude": 51.4769, "longitude": 0.0,
+		"date": "2026-06-21", "utc_offset": 1.0, "time_of_day": 13.0})
+	assert_almost_eq(sky.unix_time, 1782043200.0, 1e-3, "the local clock, back to UTC")
+	var sun: Vector3 = sky.light_dir()
+	assert_almost_eq(rad_to_deg(asin(sun.y)), 61.96, 0.05, "the sun as high as midsummer puts it")
+	assert_gt(sun.z, 0.4, "in the south, -Z being north")
+	assert_eq(sky.night, 0.0, "day")
+	assert_almost_eq(sky.phase(), 0.236, 0.002, "the moon's phase is the date's")
+	assert_vec3_almost_eq(sky.get_shader_parameter("moon_lit_from"), sun, 1e-6, "lit from the sun")
+	sky.moon_phase = 0.9
+	assert_almost_eq(sky.phase(), 0.236, 0.002, "and moon_phase goes unused")
+	sky.north = 180.0
+	assert_lt(sky.light_dir().z, -0.4, "north turned round puts the sun the other way")
+	sky.north = 0.0
+	sky.unix_time = 1782043200.0 + 12 * 3600.0
+	assert_eq(sky.date, "2026-06-22", "setting the moment rolls the date over")
+	assert_almost_eq(sky.time_of_day, 1.0, 1e-6, "past local midnight")
+	assert_gt(sky.night, 0.9, "into the short summer night")
+	sky.latitude = 69.65
+	sky.longitude = 18.96
+	assert_lt(sky.night, 0.1, "which Tromsø does not have")
+	sky.unix_time = 1797849000.0  # 21 December, 10:30 UTC
+	assert_lt(sky._now["sun"].y, 0.0, "the polar night's noon: the sun stays down")
+	assert_gt(sky.dusk, 0.5, "a long twilight")
+	sky.placed = false
+	assert_vec3_almost_eq(sky.light_dir(), SkyScript.light_dir_at(sky.sun_dir, sky.time_of_day, sky.moon_phase), 1e-6,
+		"off, the arc again")
 
 
 func test_the_moon_keeps_its_own_time() -> void:

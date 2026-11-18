@@ -14,6 +14,8 @@ global uniform float overcast_speed;     // noise units per second
 global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
 global uniform float overcast_shadow;    // how much of the sky's share a cloud takes off; 0 for none
+global uniform float overcast_veil;      // how much the higher cloud takes off it, evenly
+global uniform float overcast_sheet;     // 0 heaped cumulus, 0.5 stratocumulus, 1 a stratus sheet
 #ifndef OVERCAST_SUN_DIR  // snow.gdshaderinc reads it too
 #define OVERCAST_SUN_DIR
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
@@ -44,7 +46,25 @@ float cloud_tex(vec2 p) {
 
 // 1 for fair-weather cumulus, 0 once a storm has closed the sky into one flat deck.
 float cloud_fair() {
-	return 1.0 - smoothstep(0.7, 0.95, overcast_cover);
+	return (1.0 - smoothstep(0.7, 0.95, overcast_cover)) * (1.0 - 0.8 * overcast_sheet);
+}
+
+// How far toward stratus the layer has spread: 0 up to stratocumulus, 1 at a full sheet.
+float cloud_stratus() {
+	return max(overcast_sheet * 2.0 - 1.0, 0.0);
+}
+
+// The layer spread out (overcast_sheet) from density `n` at noise point cp: toward
+// stratocumulus, rolls of cells packed side by side across the wind with thin gaps between;
+// toward stratus, broad smooth patches that close into one even sheet.
+float cloud_spread(vec2 cp, float n) {
+	if (overcast_sheet <= 0.0) {
+		return n;
+	}
+	vec2 t = cloud_tex2(vec2(cp.x * 0.5, cp.y * 0.9) + vec2(4.2, 1.1));
+	float cells = 0.85 - t.g * 0.75 + (n - 0.5) * 0.3;
+	float even = 0.62 + (cloud_tex(cp * 0.12 + vec2(1.3, 5.9)) - 0.5) * 0.7 + (n - 0.5) * 0.06;
+	return mix(mix(n, cells, min(overcast_sheet * 2.0, 1.0)), even, cloud_stratus());
 }
 
 // Perlin swelling into round billows: worley cells push the outline out into lobes, so a cloud's
@@ -68,18 +88,27 @@ float cloud_distance(vec3 origin, vec3 dir) {
 	return cloud_distance_to(origin, dir, CLOUD_HEIGHT);
 }
 
-// cloud_distance looking at the horizon.
+// cloud_distance_to looking at the horizon.
+float cloud_horizon_at(vec3 origin, float height) {
+	return cloud_distance_to(origin, vec3(1.0, 0.0, 0.0), height);
+}
+
 float cloud_horizon(vec3 origin) {
-	return cloud_distance(origin, vec3(1.0, 0.0, 0.0));
+	return cloud_horizon_at(origin, CLOUD_HEIGHT);
 }
 
 vec2 cloud_wind() {
 	return TIME * overcast_speed * vec2(1.0, 0.35);
 }
 
+// As cloud_layer, for a shell `height` over the origin, scaled as the layer is by its own.
+vec2 cloud_layer_at(vec3 origin, vec3 dir, float dist, float height) {
+	return (origin.xz + dir.xz * dist) * (overcast_scale / height);
+}
+
 // Noise coordinates of where the ray meets the shell, before the wind moves the pattern.
 vec2 cloud_layer(vec3 origin, vec3 dir, float dist) {
-	return (origin.xz + dir.xz * dist) * (overcast_scale / CLOUD_HEIGHT);
+	return cloud_layer_at(origin, dir, dist, CLOUD_HEIGHT);
 }
 
 // The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp.
@@ -95,8 +124,8 @@ float cloud_density(inout vec2 cp) {
 	vec2 warp = vec2(cloud_tex(cp * 0.5 + vec2(0.31, 0.17) - wind * 0.4),
 		cloud_tex(cp * 0.5 + vec2(5.71, 2.53) + wind * 0.3)) - 0.5;
 	cp += warp * 0.35;
-	return cloud_shape(cp) + (0.5 - cloud_tex2(cp * 3.1 + vec2(7.3, 2.9)).g) * mix(0.08, 0.2, cloud_fair())
-		+ cloud_field(cp);
+	return cloud_spread(cp, cloud_shape(cp) + (0.5 - cloud_tex2(cp * 3.1 + vec2(7.3, 2.9)).g)
+		* mix(0.08, 0.2, cloud_fair()) + cloud_field(cp));
 }
 
 // The density a cloud starts at. `amount` drives coverage, not opacity: at 0 the threshold sits
@@ -114,7 +143,7 @@ float cloud_coverage(float n, float amount) {
 // The volumetric clouds' weather map: how much cloud stands over noise point cp, 0 to 1. Smooth
 // and broad, as the 3D noise carves the clouds themselves out of it.
 float cloud_weather(vec2 cp, float field) {
-	float n = cloud_tex(cp * 0.45) + field;
+	float n = cloud_spread(cp, cloud_tex(cp * 0.45) + field);
 	float edge = mix(0.75, 0.25, overcast_cover);
 	return smoothstep(edge - 0.15, edge + 0.25, n);
 }
@@ -179,8 +208,9 @@ float cloud_volume_density(vec3 p, vec3 viewer, vec3 wind, float fair, float wea
 
 // The multiplier on the sky's share of the light at world point p: 1 in sun, less under cloud.
 float cloud_sunlight(vec3 p) {
+	float veiled = 1.0 - overcast_veil;
 	if (overcast_shadow <= 0.0) {
-		return 1.0;
+		return veiled;
 	}
 	if (overcast_volumetric > 0.5) {
 		// One sample a third of the way up the slab, through the sun's slant of it.
@@ -189,9 +219,9 @@ float cloud_sunlight(vec3 p) {
 		float d = cloud_volume_bulk(p + overcast_sun_dir * dq, p, cloud_volume_wind(), cloud_fair(),
 			cloud_weather(qp, cloud_field(qp)));
 		float depth = d * CLOUD_THICK * 0.5 / max(overcast_sun_dir.y, 0.2) * EXTINCTION;
-		return 1.0 - overcast_shadow * (1.0 - exp(-depth));
+		return veiled * (1.0 - overcast_shadow * (1.0 - exp(-depth)));
 	}
 	vec2 cp = cloud_layer(p, overcast_sun_dir, cloud_distance(p, overcast_sun_dir)) + cloud_wind();
-	return 1.0 - overcast_shadow * cloud_coverage(cloud_density(cp), overcast_cover);
+	return veiled * (1.0 - overcast_shadow * cloud_coverage(cloud_density(cp), overcast_cover));
 }
 #endif

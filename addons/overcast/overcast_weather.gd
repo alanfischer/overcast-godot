@@ -156,6 +156,9 @@ const _GROUND_REACH := 1.0
 			_let_sky_go()
 		sky = v
 		update_configuration_warnings()
+## The weather to follow, as a forecast or observation gives it: `rain`, `temperature` and `wind`
+## come from it, and the sky's cloud layers. It overrides them, and the showers.
+@export var conditions: OvercastConditions
 ## The weather's extent, in this node's space: the rain floor is baked over this box, and lightning
 ## lands within it, over its top.
 @export var area := AABB(Vector3(-100, -20, -100), Vector3(200, 60, 200)):
@@ -1279,7 +1282,9 @@ func current_sky() -> OvercastSky:
 
 
 func _process(delta: float) -> void:
-	if cycle and not _editor:
+	if conditions:
+		_follow(conditions)
+	elif cycle and not _editor:
 		if _cycle == null:
 			_cycle = _Cycle.new(cycle_seed)
 		cycle_time += delta * cycle_speed
@@ -1352,7 +1357,7 @@ func _drive_sun(drawn: OvercastSky) -> void:
 		_sun_color = sun.light_color
 	if sun.basis != _sun_set_basis:
 		_sun_basis = sun.basis
-	if drawn and drawn.sun_follows_time:
+	if drawn and drawn.sun_moves:
 		var toward := drawn.light_dir()
 		if not toward.is_equal_approx(sun.global_basis.z):
 			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD
@@ -1363,6 +1368,17 @@ func _drive_sun(drawn: OvercastSky) -> void:
 	var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
 	sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * _FLASH.r
 	_note_sun()
+
+
+func _follow(c: OvercastConditions) -> void:
+	if rain != c.rain:
+		rain = c.rain
+	if temperature != c.temperature:
+		temperature = c.temperature
+	wind = c.wind
+	var s := current_sky()
+	if s:
+		s.set_clouds(c)
 
 
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes

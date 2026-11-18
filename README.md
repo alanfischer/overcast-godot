@@ -39,7 +39,7 @@ $OvercastWeather.temperature = -5.0  # °C: snow below -1, rain above 3, sleet b
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain, temperature and the time of day, a lightning button, volumetric-clouds and lit-by-the-air
+rain, temperature, the time of day and a real place and date, a lightning button, volumetric-clouds and lit-by-the-air
 switches, and a mode where showers come and go on their own.
 
 ## What's in it
@@ -62,6 +62,25 @@ switches, and a mode where showers come and go on their own.
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
+- **A real place**: turn on `placed` and give `latitude`, `longitude`, `date` and `utc_offset`,
+  and the sun, moon and stars stand where they do there at `time_of_day` local time (or set
+  `unix_time`). The moon's phase is the date's, the stars turn about the real pole with the
+  Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
+  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
+  gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
+- **Three layers of cloud**: the low layer (`cloud_amount`, `cloud_height`), a middle one
+  (`mid_cloud_amount`, `mid_cloud_height`) and cirrus (`cirrus_amount`, `cirrus_height`), each on
+  its own shell at its own real height, and each lit by the air at that height: after sunset the
+  higher ones keep the sun longest. Each runs from heaped to a sheet: `cloud_sheet` takes the low
+  layer from cumulus through stratocumulus to stratus, ground shadows and all; `mid_cloud_sheet`
+  the middle from altocumulus to altostratus, the sun behind it as through frosted glass;
+  `cirrus_sheet` the cirrus to cirrostratus, with the 22° halo round the sun or moon.
+  `cloud_towering` raises thunderheads round the horizon: towering cumulus, then cumulonimbus with
+  anvils and rain hanging under them. The low layer shades the ground in patches; the middle layer
+  and cirrostratus dim the sun evenly (`veil`).
+- **`OvercastConditions`**: the weather at one moment as forecasts give it: cover and base of a
+  low, a middle and a high layer, rain, temperature and wind. Set it as an OvercastWeather's
+  `conditions` and the weather and its sky follow it; `OvercastConditions.blend` goes between two.
 - **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
   Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
   instead. Overhead it's blue, at the horizon pale.
@@ -248,8 +267,10 @@ ported to Godot. Its maps are lit by baked lightmaps, which is why cloud shadows
 work through a light multiplier rather than through Godot's dynamic lights. The game plays on
 Quest as well as desktop, which is why everything works on Compatibility.
 
-The cloud layer sits 100 m up by default, tuned to maps a few dozen metres across. For a bigger
-world, raise the sky's `cloud_height`: the clouds and lightning scale with it.
+The sky's `cloud_height` is the clouds' real base, 1500 m by default, and `world_scale` shrinks it
+into the world: 1/15 by default, putting the clouds 100 m up for maps a few dozen metres across.
+For a world at real size, set `world_scale` to 1: the clouds look the same from the ground, and
+their shadows and the lightning grow to match.
 
 ## Tests
 

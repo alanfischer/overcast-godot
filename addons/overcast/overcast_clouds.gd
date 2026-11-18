@@ -54,9 +54,11 @@ static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, sp
 
 ## OvercastSky's: how much of the sky is cloud, and how much of the sun's share of the light a
 ## cloud overhead takes off what is under it, if `owner` holds the layer. Every frame of a storm.
-static func _set_weather(owner: int, cover: float, shadow: float) -> void:
+## `veil` is how much the cloud over the layer takes off the light evenly, `sheet` how far the
+## layer is spread into one.
+static func _set_weather(owner: int, cover: float, shadow: float, veil: float, sheet: float) -> void:
 	if owner == _owner:
-		_set_cover(cover, shadow)
+		_set_cover(cover, shadow, veil, sheet)
 
 
 ## OvercastSky's: `owner` stops drawing. If it held the layer, the previous sky still drawing
@@ -75,9 +77,11 @@ static func _release(owner: int) -> void:
 		_drawing.pop_back()
 
 
-static func _set_cover(cover: float, shadow: float) -> void:
+static func _set_cover(cover: float, shadow: float, veil := 0.0, sheet := 0.0) -> void:
 	_set_global("overcast_cover", cover)
 	_set_global("overcast_shadow", shadow)
+	_set_global("overcast_veil", veil)
+	_set_global("overcast_sheet", sheet)
 
 
 static func _noise_texture() -> Texture2D:

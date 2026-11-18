@@ -10,7 +10,7 @@ const GLOBALS := {
 	"overcast_noise": ["sampler2D", ""],
 	"overcast_height": ["float", 100.0],
 	"overcast_scale": ["float", 2.2],
-	"overcast_speed": ["float", 0.035],
+	"overcast_cloud_drift": ["vec2", Vector2.ZERO],
 	"overcast_softness": ["float", 0.1],
 	"overcast_cover": ["float", 0.0],
 	"overcast_shadow": ["float", 0.0],

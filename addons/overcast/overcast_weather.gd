@@ -362,6 +362,7 @@ var cycle_time := 0.0:
 var _cycle: _Cycle
 var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
 var _sky_storm := Vector2(NAN, NAN)
+var _sky_wind := Vector3.INF
 ## How much of the storm is snow: follows snow_share at _STORM_RATE, as the sky turns pale.
 var snowy: float:
 	get:
@@ -601,6 +602,7 @@ func _let_sky_go() -> void:
 	if told:
 		told.set_weather(0.0, 0.0)
 		told.set_flash(Color.BLACK, Vector3.UP)
+		told.set_wind(Vector3.INF)
 	_sky_told = 0
 
 
@@ -1313,6 +1315,10 @@ func _process(delta: float) -> void:
 		drawn.set_weather(_storm, _snowy)
 		_sky_told = drawn.get_instance_id()
 		_sky_storm = Vector2(storm, snowy)
+		_sky_wind = Vector3.INF
+	if drawn and wind != _sky_wind:
+		drawn.set_wind(wind)
+		_sky_wind = wind
 	_live.update(delta)
 	_blow(delta)
 	_drops.visible = rainfall > 0.0 and not underwater

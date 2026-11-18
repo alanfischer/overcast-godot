@@ -76,6 +76,13 @@ func assert_vec3_almost_eq(got: Vector3, expected: Vector3, tolerance: float, co
 		_fail("assert_vec3_almost_eq: got %s, expected %s (±%f)%s" % [got, expected, tolerance, _ctx(context)])
 
 
+func assert_vec2_almost_eq(got: Vector2, expected: Vector2, tolerance: float, context := "") -> void:
+	if got.distance_to(expected) <= tolerance:
+		_pass_count += 1
+	else:
+		_fail("assert_vec2_almost_eq: got %s, expected %s (±%f)%s" % [got, expected, tolerance, _ctx(context)])
+
+
 func _ctx(context: String) -> String:
 	return " — %s" % context if not context.is_empty() else ""
 

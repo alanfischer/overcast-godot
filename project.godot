@@ -36,9 +36,9 @@ overcast_scale={
 "type": "float",
 "value": 2.2
 }
-overcast_speed={
-"type": "float",
-"value": 0.035
+overcast_cloud_drift={
+"type": "vec2",
+"value": Vector2(0, 0)
 }
 overcast_softness={
 "type": "float",

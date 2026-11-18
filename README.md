@@ -58,7 +58,9 @@ switches, and a mode where showers come and go on their own.
   sun, a moon, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
   (`set_weather(storm, snowy)`, and `set_flash` for lightning: an OvercastWeather calls both, and
   a sky without one can be told by hand). Its look is its shader parameters;
-  the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
+  the cloud layer's scale and shadows are its own properties. The clouds ride `wind_aloft` at
+  its real speed for their real height (`cloud_speedup` to hurry them); an OvercastWeather hands
+  its own wind up instead, blowing twice as hard aloft. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
@@ -117,7 +119,7 @@ switches, and a mode where showers come and go on their own.
     Flakes tumble, come in clumps as well as singly, and blur out of focus right at the eye.
     Most drops are fine and a few big; they show against the ground and hardly at all against
     the sky, as real rain does
-  - `wind`, with gusts (`gustiness`): the rain slants and sways, the snow is carried off on it, and
+  - `wind`, with gusts (`gustiness`): the clouds ride it, the rain slants and sways, the snow is carried off on it, and
     whatever stands upwind keeps rain and snow off the ground in its lee
   - splashes where the rain lands, on roofs and the open ground, with rings where it lands in
     standing water. They land on the rain floor, so they need one

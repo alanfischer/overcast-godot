@@ -35,6 +35,8 @@ const _CLOUD_FIELDS := [[&"cloud_amount", &"low_cover"], [&"cloud_height", &"low
 ## and as altostratus; and a full cirrostratus. Too high and broken for their shadows to show.
 const _MID_VEIL := Vector2(0.45, 0.7)
 const _HIGH_VEIL := 0.12
+## How much harder the wind blows at the clouds than at the ground.
+const _ALOFT := 2.0
 ## Shader parameters the air's light, taken once here for the whole sky, follows.
 const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
@@ -148,11 +150,17 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 	set(v):
 		cloud_scale = v
 		_sync_layer()
-## Noise units per second.
-@export_range(0.0, 0.5, 0.001) var cloud_speed := 0.035:
+## The wind the clouds ride, m/s at their real height (y is ignored), while no weather says
+## otherwise (set_wind).
+@export var wind_aloft := Vector3(-10.0, 0.0, -3.5):
 	set(v):
-		cloud_speed = v
-		_sync_layer()
+		wind_aloft = v
+		_sync_drift()
+## How many times faster than life the clouds go: 1 is real, which in a game can look still.
+@export_range(0.0, 20.0, 0.1, "or_greater") var cloud_speedup := 1.0:
+	set(v):
+		cloud_speedup = v
+		_sync_drift()
 @export_range(0.0, 0.5, 0.01) var cloud_softness := 0.1:
 	set(v):
 		cloud_softness = v
@@ -271,6 +279,7 @@ var veil: float:
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
 var _started := false
+var _told_wind := Vector3.INF
 var _storm := 0.0
 var _snowy := 0.0
 ## The air's light level across the sun's bearing, linear, as _sync_air last took it.
@@ -802,7 +811,7 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, cloud_speed, cloud_softness)
+		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, _drift(), cloud_softness)
 		_push_weather()
 	else:
 		_Clouds._release(_id)
@@ -817,6 +826,24 @@ func set_weather(storm_amount: float, snowy_amount: float) -> void:
 	RenderingServer.material_set_param(get_rid(), &"storm", storm_amount)
 	RenderingServer.material_set_param(get_rid(), &"snowy", snowy_amount)
 	_push_weather()
+
+
+## The wind at the ground, m/s, that the clouds ride: aloft it blows _ALOFT times as hard. Vector3.INF
+## hands them back to wind_aloft.
+func set_wind(ground: Vector3) -> void:
+	_told_wind = ground * _ALOFT if ground.is_finite() else Vector3.INF
+	_sync_drift()
+
+
+## Noise units per second the wind carries the pattern; it moves against the noise coordinates.
+func _drift() -> Vector2:
+	var w := _told_wind if _told_wind.is_finite() else wind_aloft
+	return -Vector2(w.x, w.z) * cloud_scale / cloud_height * cloud_speedup
+
+
+func _sync_drift() -> void:
+	if _started and drawing:
+		_Clouds._set_drift(_id, _drift())
 
 
 ## Lightning: light the sky from within, brightest toward `dir` (world space); black puts it out.

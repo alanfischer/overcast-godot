@@ -10,7 +10,7 @@
 global uniform sampler2D overcast_noise : filter_linear_mipmap, repeat_enable;
 global uniform float overcast_height;    // metres over the origin
 global uniform float overcast_scale;     // noise units per overcast_height
-global uniform float overcast_speed;     // noise units per second
+global uniform vec2 overcast_cloud_drift;      // noise units the wind has carried the pattern
 global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
 global uniform float overcast_shadow;    // how much of the sky's share a cloud takes off; 0 for none
@@ -98,7 +98,7 @@ float cloud_horizon(vec3 origin) {
 }
 
 vec2 cloud_wind() {
-	return TIME * overcast_speed * vec2(1.0, 0.35);
+	return overcast_cloud_drift;
 }
 
 // As cloud_layer, for a shell `height` over the origin, scaled as the layer is by its own.

@@ -39,6 +39,13 @@ func _declare() -> void:
 			ProjectSettings.set_setting(setting,
 				{"type": Globals.GLOBALS[key][0], "value": Globals.GLOBALS[key][1]})
 			added = true
+	# One an older version declared and this one dropped.
+	for p in ProjectSettings.get_property_list():
+		var setting: String = p["name"]
+		if setting.begins_with("shader_globals/overcast_") \
+				and not Globals.GLOBALS.has(setting.trim_prefix("shader_globals/")):
+			ProjectSettings.set_setting(setting, null)
+			added = true
 	if added:
 		ProjectSettings.save()
 	Globals.declare()  # this session's RenderingServer too, which read the settings at startup

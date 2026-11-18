@@ -402,7 +402,7 @@ vec4 overcast_towers(vec3 eye_dir, vec3 sun, vec3 ambient, vec3 cloud_col, vec3 
 		if (h > cloud_towering) {
 			continue;
 		}
-		float centre = overcast_hash12(vec2(fi, 2.3)) * TAU + TIME * overcast_speed * 0.02;
+		float centre = overcast_hash12(vec2(fi, 2.3)) * TAU + length(overcast_cloud_drift) * 0.02;
 		float top = mix(0.07, 0.2, overcast_hash12(vec2(fi, 5.9))) * mix(0.5, 1.0, cloud_towering);
 		// In units of the cloud's height: x across, y up from the horizon.
 		vec2 p = vec2(mod(az - centre + PI, TAU) - PI, e) / top;

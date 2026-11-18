@@ -91,8 +91,8 @@ func test_only_the_sky_that_holds_the_layer_lets_it_go() -> void:
 func test_the_layer_follows_its_settings_and_the_inspector() -> void:
 	var sky := SkyScript.new()
 	sky.drawing = true
-	sky.cloud_speed = 0.5
-	assert_almost_eq(_global("overcast_speed"), 0.5, 1e-6, "a layer setting moves the global")
+	sky.cloud_scale = 3.0
+	assert_almost_eq(_global("overcast_scale"), 3.0, 1e-6, "a layer setting moves the global")
 	sky.set("shader_parameter/sun_dir", Vector3(0, 2, 0))
 	assert_vec3_almost_eq(_global("overcast_sun_dir"), Vector3.UP, 1e-6, "an inspector edit to the sun moves it too")
 	assert_vec3_almost_eq(sky.sun_dir, Vector3.UP, 1e-6, "normalized on the material")
@@ -101,6 +101,34 @@ func test_the_layer_follows_its_settings_and_the_inspector() -> void:
 	sky.apply({"horizon_color": Color.RED})
 	assert_eq(sky.get_shader_parameter("horizon_color"), Color.RED, "apply sets a uniform by name")
 	sky.drawing = false
+
+
+func test_the_clouds_ride_the_wind_aloft() -> void:
+	var sky := SkyScript.new({"cloud_height": 2000.0, "cloud_scale": 2.0})
+	sky.drawing = true
+	sky.wind_aloft = Vector3(10.0, 5.0, 0.0)
+	# Real speed: 10 m/s at 2 km is 2 noise units per 2 km, so 0.01 a second; against the noise.
+	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.01, 0.0), 1e-9, "east at the wind's real speed")
+	sky.cloud_speedup = 3.0
+	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.03, 0.0), 1e-9, "sped up")
+	sky.set_wind(Vector3(0.0, 0.0, 2.0))
+	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(0.0, -0.012), 1e-9,
+		"told the ground's wind, they go its way, twice as hard aloft")
+	sky.set_wind(Vector3.INF)
+	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.03, 0.0), 1e-9, "handed back, its own wind")
+	var from := Vector2(Clouds._drift_x, Clouds._drift_y)
+	Clouds._drift_usec = Time.get_ticks_usec() - 100000
+	Clouds._advance()
+	var moved: Vector2 = _global("overcast_cloud_drift") - from
+	assert_almost_eq(moved.x, -0.003, 0.0005, "a tenth of a second carries it a tenth as far")
+	assert_almost_eq(moved.y, 0.0, 1e-6, "along the wind")
+	Clouds._drift_usec = Time.get_ticks_usec() - 10000000
+	from = _global("overcast_cloud_drift")
+	Clouds._advance()
+	assert_almost_eq(_global("overcast_cloud_drift").x - from.x, -0.03 * Clouds._DRIFT_STEP_MAX, 1e-4,
+		"a stall does not jump them")
+	sky.drawing = false
+	assert_eq(Clouds._drift_rate, Vector2.ZERO, "no sky, no drift")
 
 
 func test_a_saved_sky_loads_with_its_settings() -> void:

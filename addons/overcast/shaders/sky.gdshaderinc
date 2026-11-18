@@ -350,8 +350,10 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		// The puffs: worley cells drawn out across the wind into rows, their outlines broken.
 		vec2 t = cloud_tex2(vec2(mp.x * 3.0, mp.y * 5.5) + vec2(2.3, 7.7));
 		float cell = t.g + (t.r - 0.5) * 0.3;
-		float size = mix(0.3, 0.55, sheet * mid_cloud_amount);
-		float puff = 1.0 - smoothstep(size - 0.1, size + 0.03, cell);
+		// Smaller toward a patch's edge, so a thin patch frays out rather than ending in flecks;
+		// thick at a puff's core and thinning to its rim.
+		float size = mix(0.1, 0.5, sheet);
+		float puff = 1.0 - smoothstep(size * 0.4, size + 0.04, cell);
 		// Far off, a cell is finer than a pixel: the sheet's average, banking up toward the horizon.
 		puff = mix(puff, mix(0.5, 0.85, mid_cloud_amount), far);
 		// Altostratus: the patches spread smooth and grey, seen through.

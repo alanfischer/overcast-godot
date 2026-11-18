@@ -111,9 +111,8 @@ func test_the_clouds_ride_the_wind_aloft() -> void:
 	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.01, 0.0), 1e-9, "east at the wind's real speed")
 	sky.cloud_speedup = 3.0
 	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.03, 0.0), 1e-9, "sped up")
-	sky.set_wind(Vector3(0.0, 0.0, 2.0))
-	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(0.0, -0.012), 1e-9,
-		"told the ground's wind, they go its way, twice as hard aloft")
+	sky.set_wind(Vector3(0.0, 0.0, 4.0))
+	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(0.0, -0.012), 1e-9, "told a wind, they go its way")
 	sky.set_wind(Vector3.INF)
 	assert_vec2_almost_eq(Clouds._drift_rate, Vector2(-0.03, 0.0), 1e-9, "handed back, its own wind")
 	var from := Vector2(Clouds._drift_x, Clouds._drift_y)

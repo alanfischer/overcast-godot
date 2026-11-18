@@ -83,6 +83,15 @@ switches, and a mode where showers come and go on their own.
 - **`OvercastConditions`**: the weather at one moment as forecasts give it: cover and base of a
   low, a middle and a high layer, rain, temperature and wind. Set it as an OvercastWeather's
   `conditions` and the weather and its sky follow it; `OvercastConditions.blend` goes between two.
+- **`OvercastForecast`**: the real weather, from [Open-Meteo](https://open-meteo.com). Put one
+  under an OvercastWeather whose sky is placed and turn on `enabled`: it fetches the hours about
+  the sky's `unix_time` (the forecast, or further back the record) and hands the weather
+  conditions blended between them: cloud in each layer and its kind, the base from the air's dew
+  point, thunderheads from how unstable the air is, rain, temperature, wind and gusts, and the wind
+  the clouds ride. Set the sky's `unix_time` to the clock for the weather now. Turning it on sends
+  the sky's latitude and longitude to Open-Meteo, so ask the player first. Open-Meteo is free
+  without a key for non-commercial use only (`api_key` for its paid service), and its data is
+  CC BY 4.0: credit it.
 - **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
   Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
   instead. Overhead it's blue, at the horizon pale.
@@ -218,7 +227,8 @@ switches, and a mode where showers come and go on their own.
 Overcast has no networking of its own; you sync two things.
 
 1. **Rain:** sync `rain`, `temperature` and `wind`, or share `cycle_seed` and `cycle_time` (and
-   `temperature` and `wind`). Gusts are each peer's own: they only sway what is drawn.
+   `temperature` and `wind`). Gusts are each peer's own: they only sway what is drawn. With an
+   OvercastForecast, run it on one peer and send the others its `conditions`.
 2. **Lightning:** let one peer time the strikes (`times_strikes = true`) and send the seed from
    `struck` to the others, which call `strike(seed)`. The bolt, flash direction and thunder all
    derive from the seed, so every peer sees the same strike.

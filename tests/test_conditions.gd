@@ -45,6 +45,12 @@ func test_the_weather_and_its_sky_follow_the_conditions() -> void:
 	assert_eq(w.rain, 0.6, "it rains as they say, the showers overridden")
 	assert_eq(w.temperature, -4.0, "as cold")
 	assert_vec3_almost_eq(w.wind, c.wind, 1e-6, "with their wind")
+	assert_vec3_almost_eq(w.wind_aloft(), c.wind * 2.0, 1e-6, "twice as hard aloft, with none given")
+	c.wind_aloft = Vector3(0.0, 0.0, -12.0)
+	c.gustiness = 0.8
+	w._process(0.1)
+	assert_vec3_almost_eq(w.wind_aloft(), c.wind_aloft, 1e-6, "or theirs")
+	assert_eq(w.gustiness, 0.8, "and their gusts")
 	assert_almost_eq(sky.cloud_amount, 0.2, 1e-6, "the sky takes the low cloud")
 	assert_almost_eq(sky.mid_cloud_amount, 0.7, 1e-6, "the middle")
 	assert_eq(sky.mid_cloud_height, 5000.0, "at its height")

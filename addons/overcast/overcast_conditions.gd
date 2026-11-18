@@ -32,6 +32,10 @@ extends Resource
 @export_range(-30.0, 40.0, 0.5, "or_less", "or_greater", "suffix:°C") var temperature := 10.0
 ## At the ground, m/s (y is ignored).
 @export var wind := Vector3.ZERO
+## How far the wind swings in gusts, as OvercastWeather.gustiness.
+@export_range(0.0, 1.0, 0.01) var gustiness := 0.4
+## At the low cloud, m/s (y is ignored): what carries the clouds. Zero for twice `wind`.
+@export var wind_aloft := Vector3.ZERO
 
 ## `t` of the way from `from` to `to`, as a new one.
 static func blend(from: OvercastConditions, to: OvercastConditions, t: float) -> OvercastConditions:

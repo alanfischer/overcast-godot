@@ -25,6 +25,9 @@ const ROOF := ["weathered_brown_planks", 1.8]
 ## The sky in the scene's WorldEnvironment, which the weather finds by itself.
 var sky: SkyScript
 var _surfaces := {}
+## What real weather sets that no slider puts back.
+const _UNSLID := [&"cloud_amount", &"cloud_height", &"mid_cloud_height", &"cirrus_height"]
+var _unslid := {}
 var _yaw := 0.0
 var _pitch := 0.15
 
@@ -67,6 +70,7 @@ func _ready() -> void:
 		knob[0].value_changed.connect(func(v: float) -> void: sky.set(knob[1], v))
 	_set_date(%Date.value)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
+	%Real.toggled.connect(_set_real)
 
 
 ## Returns the box's material.
@@ -135,9 +139,33 @@ func _set_place(index: int) -> void:
 		sky.longitude = place[2]
 		sky.utc_offset = place[3]
 	sky.placed = index > 0
+	%Real.disabled = not sky.placed
+	if not sky.placed:
+		%Real.button_pressed = false
 	%Moon.editable = not sky.placed
 	%Date.editable = sky.placed
 	_show_phase()
+
+
+## The weather Open-Meteo has for the place at its date and time. Sends the place to it.
+func _set_real(on: bool) -> void:
+	if on:
+		for key in _UNSLID:
+			_unslid[key] = sky.get(key)
+	if on and not has_node("Weather/Forecast"):
+		var forecast := OvercastForecast.new()
+		forecast.name = "Forecast"
+		forecast.failed.connect(func(m: String) -> void: push_warning("Open-Meteo: " + m))
+		weather.add_child(forecast)
+	if has_node("Weather/Forecast"):
+		$Weather/Forecast.enabled = on
+	if not on:
+		weather.conditions = null
+		for key in _unslid:
+			sky.set(key, _unslid[key])
+		for knob in [%Rain, %Temperature, %Wind, %Mid, %Cirrus, %LowSheet, %MidSheet,
+				%CirrusSheet, %Towering]:
+			knob.value_changed.emit(knob.value)
 
 
 func _set_date(day: float) -> void:

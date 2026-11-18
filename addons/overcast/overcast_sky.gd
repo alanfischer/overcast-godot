@@ -35,8 +35,6 @@ const _CLOUD_FIELDS := [[&"cloud_amount", &"low_cover"], [&"cloud_height", &"low
 ## and as altostratus; and a full cirrostratus. Too high and broken for their shadows to show.
 const _MID_VEIL := Vector2(0.45, 0.7)
 const _HIGH_VEIL := 0.12
-## How much harder the wind blows at the clouds than at the ground.
-const _ALOFT := 2.0
 ## Shader parameters the air's light, taken once here for the whole sky, follows.
 const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
@@ -828,10 +826,10 @@ func set_weather(storm_amount: float, snowy_amount: float) -> void:
 	_push_weather()
 
 
-## The wind at the ground, m/s, that the clouds ride: aloft it blows _ALOFT times as hard. Vector3.INF
-## hands them back to wind_aloft.
-func set_wind(ground: Vector3) -> void:
-	_told_wind = ground * _ALOFT if ground.is_finite() else Vector3.INF
+## The wind the clouds ride, m/s at their height, over wind_aloft: OvercastWeather's say.
+## Vector3.INF hands them back to wind_aloft.
+func set_wind(aloft: Vector3) -> void:
+	_told_wind = aloft
 	_sync_drift()
 
 

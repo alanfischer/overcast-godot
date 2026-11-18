@@ -49,8 +49,10 @@ ray-marched layer. Only the low layer ray-marches.
 Optional, off by default, and the game hands it the place (the place is the player's; it goes
 to a third party only when they agree).
 
-- Open-Meteo first: current and hourly temperature, rain, snow, weather code, low/mid/high cloud
-  cover, wind and gusts, visibility. Free without a key for non-commercial use only.
+- Open-Meteo (done): `OvercastForecast` fetches the hours about the placed sky's moment, the
+  forecast or the record, and hands the weather conditions blended between them. The clouds now
+  drift with the wind (summed on the CPU into `overcast_cloud_drift`), the 850 hPa wind when the
+  forecast gives it. Not taken yet: visibility (fog and haze), and the freezing level.
 - METAR, near airports: observed cloud bases, and towering cumulus and cumulonimbus by name.
 - Satellite, last: geostationary cloud imagery (NASA GIBS tiles, about every ten minutes) cropped
   round the place into a cover texture that steers the cloud noise, so the clouds overhead are

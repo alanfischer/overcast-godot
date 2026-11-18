@@ -124,6 +124,8 @@ const _BOLT_HEIGHT := Vector2(1.1, 1.7)
 const _SOUND_SPEED := 340.0
 ## How far a full storm dims `sun` when there is no sky to say (OvercastSky.storm_shadow).
 const _SUN_STORM_SHADOW := 0.88
+## How much harder the wind blows at the clouds than at the ground, when nothing says.
+const _ALOFT := 2.0
 ## How far under where rain stops ground still takes it (rains_on).
 const _GROUND_REACH := 1.0
 
@@ -1316,9 +1318,10 @@ func _process(delta: float) -> void:
 		_sky_told = drawn.get_instance_id()
 		_sky_storm = Vector2(storm, snowy)
 		_sky_wind = Vector3.INF
-	if drawn and wind != _sky_wind:
-		drawn.set_wind(wind)
-		_sky_wind = wind
+	var aloft := wind_aloft()
+	if drawn and aloft != _sky_wind:
+		drawn.set_wind(aloft)
+		_sky_wind = aloft
 	_live.update(delta)
 	_blow(delta)
 	_drops.visible = rainfall > 0.0 and not underwater
@@ -1355,6 +1358,14 @@ func _process(delta: float) -> void:
 		_update_wet(haze_color)
 
 
+## The wind the clouds ride: the conditions' when they give one, else `wind` blown _ALOFT times
+## as hard.
+func wind_aloft() -> Vector3:
+	if conditions and conditions.wind_aloft != Vector3.ZERO:
+		return conditions.wind_aloft
+	return wind * _ALOFT
+
+
 func _drive_sun(drawn: OvercastSky) -> void:
 	# Changed since this last set it: someone else's doing, and the sun's own from now on.
 	if sun.light_energy != _sun_set_energy:
@@ -1382,6 +1393,7 @@ func _follow(c: OvercastConditions) -> void:
 	if temperature != c.temperature:
 		temperature = c.temperature
 	wind = c.wind
+	gustiness = c.gustiness
 	var s := current_sky()
 	if s:
 		s.set_clouds(c)

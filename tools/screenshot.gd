@@ -5,7 +5,8 @@ extends SceneTree
 ## CLEARED=1 clears the sky over the settled weather; PLACE=lat,lon[,utc offset] and DATE=YYYY-MM-DD
 ## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole;
 ## MID=0.6 and CIRRUS=0.8 for the higher layers, MIDSHEET, CIRRUSSHEET, SHEET and TOWERING for their
-## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any.
+## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any. FORECAST=1 takes the real
+## weather at PLACE from Open-Meteo, at DATE and TIME or now.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -44,9 +45,19 @@ func _run() -> void:
 		demo.get_node("%Wind").value = float(OS.get_environment("WIND"))
 	if OS.get_environment("TEMP") != "":
 		demo.get_node("%Temperature").value = float(OS.get_environment("TEMP"))
+	var weather = demo.get_node("Weather")
+	if OS.get_environment("FORECAST") == "1":
+		if OS.get_environment("DATE") == "" and OS.get_environment("TIME") == "":
+			demo.sky.unix_time = Time.get_unix_time_from_system()
+		var forecast := OvercastForecast.new()
+		forecast.enabled = true
+		forecast.failed.connect(func(m: String) -> void: printerr("forecast: ", m))
+		weather.add_child(forecast)
+		await forecast.updated
+		await process_frame
+		print("forecast: ", inst_to_dict(forecast.conditions_at(demo.sky.unix_time)))
 	for i in 20:
 		await physics_frame
-	var weather = demo.get_node("Weather")
 	weather.settle()
 	if OS.get_environment("CLEARED") == "1":  # the snow lying, and the sky cleared over it
 		weather.rain = 0.0

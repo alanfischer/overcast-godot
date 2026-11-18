@@ -3,7 +3,7 @@
 The aim: name a latitude, longitude and time, and get the sky that stands there — the sun, moon
 and stars where they are, and in the end the clouds and weather that are there now.
 
-## 1. Sun, moon and stars from a place and a time
+## 1. Sun, moon and stars from a place and a time (done)
 
 Pure arithmetic, no network.
 
@@ -20,7 +20,7 @@ Pure arithmetic, no network.
 - Later: real stars from the Yale Bright Star Catalogue (public domain) instead of the procedural
   field.
 
-## 2. One weather state, in layers
+## 2. One weather state, in layers (done)
 
 Today the weather is spread over `cloud_amount`, `storm`, `snowy`, `rain`, `temperature` and
 `wind`. One conditions resource instead: cover, type and base for a low, a middle and a high
@@ -28,14 +28,15 @@ layer; rain or snow and how hard; temperature; wind at the ground and aloft; vis
 hand, by OvercastCycle or by a feed, and read by the sky and the weather. The layers are how
 forecasts and observations describe cloud, so real data and new cloud types share one model.
 
-Open question: in a placed sky, cloud bases at their real heights (0.5 to 12 km), with shadows
-on their own scale for small levels.
+Heights are real metres; the sky's `world_scale` shrinks them into the world (1/15 by default,
+for small levels; 1 for a world at real size).
 
 ## 3. Cloud types
 
 In the layer model, by what they give for what they cost:
 
-- Altocumulus and cirrocumulus: a cheap flat high layer of small cells, the sunset sky.
+- Altocumulus (done, the middle layer) and cirrocumulus: a cheap flat layer of small cells, the
+  sunset sky.
 - Stratus and stratocumulus: a grey sheet with no rain (today only the storm deck closes the sky).
 - Cirrostratus and altostratus: a thin veil, the sun dimmed to a disc, the 22° halo.
 - Cumulonimbus: towers and anvils. The costly one: a tall volumetric slab, or painted at the

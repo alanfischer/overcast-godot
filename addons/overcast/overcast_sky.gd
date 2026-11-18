@@ -22,7 +22,10 @@ const _AIR_SUN_STEP := 0.002
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
-const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount", &"mid_cloud_amount"]
+## How much of the sun's light a full middle layer takes off the ground, evenly: it is too high
+## and too broken for its shadows to show.
+const _MID_VEIL := 0.45
 ## Shader parameters the air's light, taken once here for the whole sky, follows.
 const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
@@ -122,7 +125,7 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 @export_range(100.0, 15000.0, 10.0, "or_greater", "suffix:m") var cloud_height := 1500.0:
 	set(v):
 		cloud_height = v
-		_sync_layer()
+		_sync_heights()
 ## World metres per real metre, for the clouds, their shadows and the lightning: 1 for a world
 ## at real size. The default puts the clouds 100 m up, for levels a few dozen metres across,
 ## where real ones would shade the whole level at once.
@@ -154,6 +157,18 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 	set(v):
 		storm_shadow = v
 		_push_weather()
+@export_group("Higher cloud")
+## The middle layer's base, real metres: altocumulus, a sheet of small puffs in rows. How much of
+## it there is is mid_cloud_amount.
+@export_range(2000.0, 8000.0, 10.0, "or_greater", "suffix:m") var mid_cloud_height := 4000.0:
+	set(v):
+		mid_cloud_height = v
+		_sync_heights()
+## The cirrus' base, real metres. How much of it there is is the shader's cirrus_amount.
+@export_range(5000.0, 15000.0, 10.0, "or_greater", "suffix:m") var cirrus_height := 9000.0:
+	set(v):
+		cirrus_height = v
+		_sync_heights()
 
 ## 0 by day to 1 at full night, at time_of_day.
 var night: float:
@@ -198,6 +213,18 @@ var cloud_amount: float:
 		return get_shader_parameter("cloud_amount")
 	set(v):
 		set("shader_parameter/cloud_amount", v)
+## How much of the middle layer there is, 0 to 1. As cloud_amount, set it here or through the
+## inspector: the ground's light follows it.
+var mid_cloud_amount: float:
+	get:
+		var v = param("mid_cloud_amount")
+		return v if v is float else 0.0
+	set(v):
+		set("shader_parameter/mid_cloud_amount", v)
+## How much of the sun's light the cloud over the low layer takes off the ground, evenly, 0 to 1.
+var veil: float:
+	get:
+		return mid_cloud_amount * _MID_VEIL * (1.0 - storm)
 
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
@@ -231,6 +258,7 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 		if get_shader_parameter(key) != null:
 			set_shader_parameter(key, null)
 	time_of_day = time_of_day
+	_sync_heights()
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
 	# before it ever draws.
@@ -502,12 +530,12 @@ func _sync_air() -> void:
 	var sun := _air_sun()
 	RenderingServer.material_set_param(get_rid(), &"atmosphere_sun", sun)
 	# The sums are a few thousand steps, and the texture a few million: only when what they depend
-	# on has moved enough to see. They go by the sun's height alone.
-	var inputs := [snappedf(sun.y, _AIR_SUN_STEP), haze, exposure]
+	# on has moved enough to see. They go by the sun's height, not its bearing.
+	var inputs := [snappedf(sun.y, _AIR_SUN_STEP), haze, exposure, mid_cloud_height, cirrus_height]
 	if inputs == _air_inputs:
 		return
 	_air_inputs = inputs
-	var air := air_at(sun, haze, exposure)
+	var air := air_at(sun, haze, exposure, Vector2(mid_cloud_height, cirrus_height))
 	_air_horizon = air["atmosphere_horizon"]
 	for key in air:
 		if key != &"atmosphere_gain" and key != &"atmosphere_dark":
@@ -550,7 +578,7 @@ static func _free_lut(lut: Dictionary) -> void:
 
 ## The air's light the whole sky shares, by the shader parameter it goes to, for a sun at `sun`
 ## (unit, below the horizon too).
-static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
+static func air_at(sun: Vector3, haze: float, exposure: float, higher := Vector2(4000.0, 9000.0)) -> Dictionary:
 	var level := Vector3(sun.x, 0.0, sun.z)
 	level = level.normalized().rotated(Vector3.UP, PI * 0.5) if level.length() > 1e-4 else Vector3.RIGHT
 	# The eye opens up as the light fails, so dusk has colour rather than black; up to a point.
@@ -574,6 +602,8 @@ static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
 		&"atmosphere_horizon": _air_seen(horizon, gain, dark),
 		&"atmosphere_light": _air_toward_eye(_air_sunlight(ground, sun, haze) / noon),
 		&"atmosphere_cloud_light": _air_toward_eye(_air_sunlight(clouds, sun, haze) / noon),
+		&"atmosphere_mid_light": _air_toward_eye(_air_sunlight(Vector3(0.0, _AIR_GROUND + higher.x, 0.0), sun, haze) / noon),
+		&"atmosphere_high_light": _air_toward_eye(_air_sunlight(Vector3(0.0, _AIR_GROUND + higher.y, 0.0), sun, haze) / noon),
 	}
 
 
@@ -686,6 +716,15 @@ static func _air_sky(dir: Vector3, sun: Vector3, haze: float) -> Color:
 	return Color(v.x, v.y, v.z)
 
 
+## The higher layers ride at their share of the low one's height, as the shader draws them all
+## off it; the air lights each at its real height.
+func _sync_heights() -> void:
+	RenderingServer.material_set_param(get_rid(), &"mid_cloud_rise", mid_cloud_height / cloud_height)
+	RenderingServer.material_set_param(get_rid(), &"cirrus_rise", cirrus_height / cloud_height)
+	_sync_air()
+	_sync_layer()
+
+
 func _sync_layer() -> void:
 	if not _started:
 		return
@@ -719,7 +758,7 @@ func _push_weather() -> void:
 	var amount: float = cloud_amount
 	var casting := maxf(amount, storm) > 0.0
 	_Clouds._set_weather(_id, lerpf(amount, _STORM_COVER, storm),
-		lerpf(cloud_shadow, storm_shadow, storm) if casting else 0.0)
+		lerpf(cloud_shadow, storm_shadow, storm) if casting else 0.0, veil)
 
 
 ## The colour the sky draws at the horizon right now, linear, flash aside: what rain haze fades

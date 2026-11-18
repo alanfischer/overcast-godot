@@ -14,6 +14,7 @@ global uniform float overcast_speed;     // noise units per second
 global uniform float overcast_softness;
 global uniform float overcast_cover;     // how much of the sky is cloud, storm included
 global uniform float overcast_shadow;    // how much of the sky's share a cloud takes off; 0 for none
+global uniform float overcast_veil;      // how much the higher cloud takes off it, evenly
 #ifndef OVERCAST_SUN_DIR  // snow.gdshaderinc reads it too
 #define OVERCAST_SUN_DIR
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
@@ -179,8 +180,9 @@ float cloud_volume_density(vec3 p, vec3 viewer, vec3 wind, float fair, float wea
 
 // The multiplier on the sky's share of the light at world point p: 1 in sun, less under cloud.
 float cloud_sunlight(vec3 p) {
+	float veiled = 1.0 - overcast_veil;
 	if (overcast_shadow <= 0.0) {
-		return 1.0;
+		return veiled;
 	}
 	if (overcast_volumetric > 0.5) {
 		// One sample a third of the way up the slab, through the sun's slant of it.
@@ -189,9 +191,9 @@ float cloud_sunlight(vec3 p) {
 		float d = cloud_volume_bulk(p + overcast_sun_dir * dq, p, cloud_volume_wind(), cloud_fair(),
 			cloud_weather(qp, cloud_field(qp)));
 		float depth = d * CLOUD_THICK * 0.5 / max(overcast_sun_dir.y, 0.2) * EXTINCTION;
-		return 1.0 - overcast_shadow * (1.0 - exp(-depth));
+		return veiled * (1.0 - overcast_shadow * (1.0 - exp(-depth)));
 	}
 	vec2 cp = cloud_layer(p, overcast_sun_dir, cloud_distance(p, overcast_sun_dir)) + cloud_wind();
-	return 1.0 - overcast_shadow * cloud_coverage(cloud_density(cp), overcast_cover);
+	return veiled * (1.0 - overcast_shadow * cloud_coverage(cloud_density(cp), overcast_cover));
 }
 #endif

@@ -156,6 +156,9 @@ const _GROUND_REACH := 1.0
 			_let_sky_go()
 		sky = v
 		update_configuration_warnings()
+## The weather to follow, as a forecast or observation gives it: `rain`, `temperature` and `wind`
+## come from it, and the sky's cloud layers. It overrides them, and the showers.
+@export var conditions: OvercastConditions
 ## The weather's extent, in this node's space: the rain floor is baked over this box, and lightning
 ## lands within it, over its top.
 @export var area := AABB(Vector3(-100, -20, -100), Vector3(200, 60, 200)):
@@ -1279,7 +1282,9 @@ func current_sky() -> OvercastSky:
 
 
 func _process(delta: float) -> void:
-	if cycle and not _editor:
+	if conditions:
+		_follow(conditions)
+	elif cycle and not _editor:
 		if _cycle == null:
 			_cycle = _Cycle.new(cycle_seed)
 		cycle_time += delta * cycle_speed
@@ -1361,8 +1366,28 @@ func _drive_sun(drawn: OvercastSky) -> void:
 		sun.light_color = _sun_color * drawn.scene_light() * smoothstep(-0.05, 0.05, toward.y) \
 			* drawn.light_strength()
 	var shade := drawn.storm_shadow if drawn else _SUN_STORM_SHADOW
-	sun.light_energy = _sun_energy * (1.0 - shade * storm) + _flash_k * _FLASH.r
+	var veil := drawn.veil if drawn else 0.0
+	sun.light_energy = _sun_energy * (1.0 - shade * storm) * (1.0 - veil) + _flash_k * _FLASH.r
 	_note_sun()
+
+
+func _follow(c: OvercastConditions) -> void:
+	if rain != c.rain:
+		rain = c.rain
+	if temperature != c.temperature:
+		temperature = c.temperature
+	wind = c.wind
+	var s := current_sky()
+	if s == null:
+		return
+	# Only on a change: each set dirties a sky saved in the editor.
+	for pair in [[&"cloud_amount", c.low_cover], [&"cloud_height", c.low_base],
+			[&"mid_cloud_amount", c.mid_cover], [&"mid_cloud_height", c.mid_base],
+			[&"cirrus_height", c.high_base]]:
+		if s.get(pair[0]) != pair[1]:
+			s.set(pair[0], pair[1])
+	if s.param(&"cirrus_amount") != c.high_cover:
+		s.set(&"shader_parameter/cirrus_amount", c.high_cover)
 
 
 ## One lightning strike, somewhere over `area`, drawn up into the sky. Everything about it comes

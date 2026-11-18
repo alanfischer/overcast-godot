@@ -142,3 +142,24 @@ unique_name_in_owner = true
 layout_mode = 2
 max_value = 364.0
 value = 171.0
+
+[node name="MidLabel" type="Label" parent="UI/Panel/Box"]
+layout_mode = 2
+text = "Middle cloud (altocumulus)"
+
+[node name="Mid" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01
+
+[node name="CirrusLabel" type="Label" parent="UI/Panel/Box"]
+layout_mode = 2
+text = "Cirrus"
+
+[node name="Cirrus" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.01
+value = 0.5

@@ -1192,6 +1192,14 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	w._process(0.0)
 	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), sky.light_dir(), 1e-4, "and from the moon at night")
 	assert_lt(sun.light_color.get_luminance(), 0.3, "in moonlight")
+	sky.time_of_day = 12.0
+	w._process(0.0)
+	var clear := sun.light_energy
+	sky.mid_cloud_amount = 1.0
+	w._process(0.0)
+	assert_almost_eq(sun.light_energy, clear * (1.0 - sky.veil), 1e-4, "a middle layer veils it")
+	sky.mid_cloud_amount = 0.0
+	sky.time_of_day = 23.0
 	sky.sun_follows_time = false
 	var before := sun.global_basis
 	sky.time_of_day = 9.0

@@ -3,7 +3,8 @@ extends SceneTree
 ## vary it (as the demo's sliders: how much falls, and degrees C); CLOUDS=0 for a clear sky, MOON=0.25
 ## for the moon's phase, MOONVIEW=12 to shoot the moon through a lens that many degrees tall;
 ## CLEARED=1 clears the sky over the settled weather; PLACE=lat,lon[,utc offset] and DATE=YYYY-MM-DD
-## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole.
+## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole;
+## MID=0.6 and CIRRUS=0.8 for the higher layers.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -23,6 +24,10 @@ func _run() -> void:
 		demo.sky.set("shader_parameter/atmosphere", float(OS.get_environment("ATMO")))
 	if OS.get_environment("CLOUDS") != "":
 		demo.sky.cloud_amount = float(OS.get_environment("CLOUDS"))
+	if OS.get_environment("MID") != "":
+		demo.sky.mid_cloud_amount = float(OS.get_environment("MID"))
+	if OS.get_environment("CIRRUS") != "":
+		demo.sky.set("shader_parameter/cirrus_amount", float(OS.get_environment("CIRRUS")))
 	if OS.get_environment("MOON") != "":
 		demo.sky.moon_phase = float(OS.get_environment("MOON"))
 	if OS.get_environment("PLACE") != "":

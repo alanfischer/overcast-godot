@@ -22,8 +22,15 @@ const _AIR_SUN_STEP := 0.002
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
-const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount", &"cloud_sheet", &"mid_cloud_amount",
-	&"mid_cloud_sheet", &"cirrus_amount", &"cirrus_sheet"]
+## Shader parameters the ground's light follows: the cover, shadows and veil.
+const _COVER_UNIFORMS := [&"cloud_amount", &"cloud_sheet", &"mid_cloud_amount", &"mid_cloud_sheet",
+	&"cirrus_amount", &"cirrus_sheet"]
+## What set_clouds takes from an OvercastConditions: this sky's name, then the conditions'.
+const _CLOUD_FIELDS := [[&"cloud_amount", &"low_cover"], [&"cloud_height", &"low_base"],
+	[&"cloud_sheet", &"low_sheet"], [&"cloud_towering", &"towering"],
+	[&"mid_cloud_amount", &"mid_cover"], [&"mid_cloud_height", &"mid_base"],
+	[&"mid_cloud_sheet", &"mid_sheet"], [&"cirrus_amount", &"high_cover"],
+	[&"cirrus_height", &"high_base"], [&"cirrus_sheet", &"high_sheet"]]
 ## How much of the sun's light a full middle layer takes off the ground, evenly, as altocumulus
 ## and as altostratus; and a full cirrostratus. Too high and broken for their shadows to show.
 const _MID_VEIL := Vector2(0.45, 0.7)
@@ -76,7 +83,7 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 @export var sun_follows_time := true:
 	set(on):
 		sun_follows_time = on
-		_sync_light()
+		_moved()
 ## Where the moon is in its month: new at 0, in the sky with the sun and dark; full at 0.5, up all
 ## night; a waxing crescent and half before that, waning after. It follows the sun across the sky by
 ## this share of a day, lit from the sun's side, and its light on the scene goes by how much of it
@@ -84,7 +91,7 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 @export_range(0.0, 1.0, 0.01) var moon_phase := 0.5:
 	set(v):
 		moon_phase = v
-		_sync_light()
+		_moved()
 @export_group("Place")
 ## On, the sun, moon and stars stand where they do from `latitude` and `longitude` on `date` at
 ## time_of_day, local time `utc_offset` hours ahead of UTC, and the moon's phase is the date's:
@@ -128,6 +135,7 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 	set(v):
 		cloud_height = v
 		_sync_heights()
+		_sync_layer()
 ## World metres per real metre, for the clouds, their shadows and the lightning: 1 for a world
 ## at real size. The default puts the clouds 100 m up, for levels a few dozen metres across,
 ## where real ones would shade the whole level at once.
@@ -175,11 +183,11 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 ## 0 by day to 1 at full night, at time_of_day.
 var night: float:
 	get:
-		return _night_of(_sun_height())
+		return _night_of(_now["sun_height"])
 ## How far into the warm light of a sunset or sunrise, 0 to 1, at time_of_day.
 var dusk: float:
 	get:
-		return _dusk_of(_sun_height())
+		return _dusk_of(_now["sun_height"])
 ## The moment a placed sky shows, Unix seconds (UTC): its date and time_of_day. Setting it sets
 ## both.
 var unix_time: float:
@@ -193,7 +201,7 @@ var unix_time: float:
 ## Whether the sun and moon move with the time: placed, or following it.
 var sun_moves: bool:
 	get:
-		return placed or sun_follows_time
+		return _now["moves"]
 ## How far the sky has closed over for rain, 0 to 1 (set_weather).
 var storm: float:
 	get:
@@ -270,10 +278,19 @@ var _air_horizon := Color.BLACK
 ## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
 var _lut := {}
 var _air_inputs := []
-## Sun, moon, phase and stars from the ephemeris, while placed.
-var _placed_sky := {}
+## Where the sun and moon stand now and what follows from it (_sky_now).
+var _now := {}
+## The air's light on each cloud layer, as _sync_air last took it, and what it went by.
+var _layer_inputs := []
+## What set_clouds last set, so a sky followed every frame is only set on a change.
+var _clouds := {}
 ## The noon sky's zenith, by haze: what the eye adapts against.
 static var _air_noon_zenith := {}
+## The noon sun on the ground, by haze: what the air's light on the scene is measured against.
+static var _air_noon_light := {}
+## Turns the galaxy's real pole to where the sky shader draws the Milky Way.
+static var _galaxy_turn := Basis(Quaternion(
+	_Ephemeris.radec(_Ephemeris.GALACTIC_POLE.x, _Ephemeris.GALACTIC_POLE.y), _STAR_POLE.normalized()))
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -335,13 +352,15 @@ func _set(property: StringName, value: Variant) -> bool:
 		set_shader_parameter(key, value)
 		_sync_air()
 		return true
-	if not key in _LAYER_UNIFORMS:
-		return false
-	if value is Vector3:
-		value = (value as Vector3).normalized()
-	set_shader_parameter(key, value)
-	_sync_light()
-	return true
+	if key == &"sun_dir":
+		set_shader_parameter(key, (value as Vector3).normalized())
+		_moved()
+		return true
+	if key in _COVER_UNIFORMS:
+		set_shader_parameter(key, value)
+		_push_weather()
+		return true
+	return false
 
 
 func _float_param(key: StringName) -> float:
@@ -379,13 +398,32 @@ static func _dusk_of(height: float) -> float:
 	return 1.0 - smoothstep(0.0, 0.35, absf(height + 0.05))
 
 
-func _sun_height() -> float:
-	return _placed_sky["sun"].y / _NOON_HEIGHT if placed else _elevation(time_of_day)
+## Where the sun and moon stand now: from the place, along the day's arc, or fixed at sun_dir.
+## sun_height and moon_height are shares of the noon height night, dusk and moonlight go by.
+func _sky_now() -> Dictionary:
+	var noon: Vector3 = (param(&"sun_dir") as Vector3).normalized()
+	if placed:
+		var at := _Ephemeris.sky_at(unix_time, latitude, longitude, north)
+		return {"sun": at["sun"], "moon": at["moon"], "lit_from": at["sun"], "phase": at["phase"],
+			"moves": true, "sun_height": at["sun"].y / _NOON_HEIGHT,
+			"moon_height": at["moon"].y / _NOON_HEIGHT, "stars": _galaxy_turn * at["stars"]}
+	var hours := time_of_day
+	if sun_follows_time:
+		var sun := sun_at(noon, hours)
+		var moon := moon_at(noon, hours, moon_phase)
+		# The stars turn with the sun: back to where they stood at noon.
+		return {"sun": sun, "moon": moon, "lit_from": _lit_from(moon, sun, moon_phase),
+			"phase": moon_phase, "moves": true, "sun_height": _elevation(hours),
+			"moon_height": _elevation(hours - 24.0 * moon_phase),
+			"stars": Basis(_arc_axis(noon), -_arc_turn(hours))}
+	return {"sun": noon, "moon": noon, "lit_from": _lit_from(noon, noon, moon_phase),
+		"phase": moon_phase, "moves": false, "sun_height": _elevation(hours), "moon_height": 1.0,
+		"stars": Basis.IDENTITY}
 
 
-## The time, date or place has moved: the sun and moon go with it.
+## The time, date, place or way of keeping time has changed: the sun and moon go with it.
 func _moved() -> void:
-	_placed_sky = _Ephemeris.sky_at(unix_time, latitude, longitude, north) if placed else {}
+	_now = _sky_now()
 	set_shader_parameter("dusk_amount", dusk)
 	set_shader_parameter("night_amount", night)
 	_sync_light()
@@ -464,38 +502,28 @@ static func _moonlight_of(phase: float, height: float) -> float:
 
 
 func _moonlight() -> float:
-	if placed:
-		return _moonlight_of(_placed_sky["phase"], _placed_sky["moon"].y / _NOON_HEIGHT)
-	return moonlight_at(time_of_day, moon_phase) if sun_follows_time else moon_lit(moon_phase)
+	return _moonlight_of(_now["phase"], _now["moon_height"])
 
 
 ## Where the moon is in its month now: moon_phase, or the date's when placed.
 func phase() -> float:
-	return _placed_sky["phase"] if placed else moon_phase
+	return _now["phase"]
 
 
 ## Toward the moon now. At sun_dir when the sun does not follow the time.
 func moon_dir() -> Vector3:
-	if placed:
-		return _placed_sky["moon"]
-	var noon: Vector3 = sun_dir
-	return moon_at(noon, time_of_day, moon_phase) if sun_follows_time else noon.normalized()
+	return _now["moon"]
 
 
 ## Toward what lights the sky now: the sun by day and the moon by night, even one that has set.
 ## Both at sun_dir when the sun does not follow the time.
 func light_dir() -> Vector3:
-	if placed:
-		return _placed_sky["sun"] if night <= 0.5 else _placed_sky["moon"]
-	var noon: Vector3 = sun_dir
-	return light_dir_at(noon, time_of_day, moon_phase) if sun_follows_time else noon.normalized()
+	return _now["sun"] if night <= 0.5 else _now["moon"]
 
 
 ## How strongly what light_dir points at shines, 0 to 1.
 func light_strength() -> float:
-	if placed:
-		return _strength_of(night, _moonlight())
-	return light_strength_at(time_of_day, moon_phase) if sun_follows_time else 1.0
+	return _strength_of(night, _moonlight()) if _now["moves"] else 1.0
 
 
 ## Toward what lights the scene at `hours`: the sun, or once night is half in, the moon.
@@ -515,49 +543,32 @@ static func _strength_of(night_amount: float, moonlight: float) -> float:
 
 ## The direction the moon's face is lit from: round from the moon toward the sun by its phase, so
 ## the bright limb points at the sun whatever arc the two are on.
-func _moon_lit_from() -> Vector3:
-	if placed:
-		return _placed_sky["sun"]
-	var moon := moon_dir()
-	var across := moon.cross(_air_sun())
+static func _lit_from(moon: Vector3, sun: Vector3, phase: float) -> Vector3:
+	var across := moon.cross(sun)
 	if across.length() < 1e-3:
 		across = moon.cross(Vector3.UP if absf(moon.y) < 0.99 else Vector3.RIGHT)
-	return moon.rotated(across.normalized(), PI * (1.0 - absf(2.0 * moon_phase - 1.0)))
+	return moon.rotated(across.normalized(), PI * (1.0 - absf(2.0 * phase - 1.0)))
 
 
 func _sync_light() -> void:
 	set_shader_parameter("light_dir", light_dir())
 	set_shader_parameter("light_strength", light_strength())
 	set_shader_parameter("moon_dir", moon_dir())
-	set_shader_parameter("moon_lit_from", _moon_lit_from())
+	set_shader_parameter("moon_lit_from", _now["lit_from"])
 	set_shader_parameter("moonlight", _moonlight())
-	set_shader_parameter("star_basis", _star_basis())
+	set_shader_parameter("star_basis", _now["stars"])
 	_sync_air()
 	_sync_layer()
 
 
-## Takes a view ray to the stars' own frame. On the arc the stars turn with the sun, back to where
-## they stood at noon; placed, they are the real sky's, with the Milky Way where it lies.
-func _star_basis() -> Basis:
-	if placed:
-		var galaxy := _Ephemeris.radec(_Ephemeris.GALACTIC_POLE.x, _Ephemeris.GALACTIC_POLE.y)
-		return Basis(Quaternion(galaxy, _STAR_POLE.normalized())) * _placed_sky["stars"]
-	var noon: Vector3 = sun_dir
-	return Basis(_arc_axis(noon), -_arc_turn(time_of_day)) if sun_follows_time else Basis.IDENTITY
-
-
 ## How far the sky is the air's light: none from a sky shader without the uniform.
 func _air() -> float:
-	var v = param("atmosphere")
-	return v if v is float else 0.0
+	return _float_param(&"atmosphere")
 
 
 ## Where the sun really is now, below the horizon too: what lights the air.
 func _air_sun() -> Vector3:
-	if placed:
-		return _placed_sky["sun"]
-	var noon: Vector3 = sun_dir
-	return sun_at(noon, time_of_day) if sun_follows_time else noon.normalized()
+	return _now["sun"]
 
 
 func _sync_air() -> void:
@@ -568,13 +579,20 @@ func _sync_air() -> void:
 		return
 	var sun := _air_sun()
 	RenderingServer.material_set_param(get_rid(), &"atmosphere_sun", sun)
-	# The sums are a few thousand steps, and the texture a few million: only when what they depend
-	# on has moved enough to see. They go by the sun's height, not its bearing.
-	var inputs := [snappedf(sun.y, _AIR_SUN_STEP), haze, exposure, mid_cloud_height, cirrus_height]
+	# Only when what they depend on has moved enough to see: the sun's height, not its bearing.
+	var height := snappedf(sun.y, _AIR_SUN_STEP)
+	var layers := [height, haze, cloud_height, mid_cloud_height, cirrus_height]
+	if layers != _layer_inputs:
+		_layer_inputs = layers
+		for layer in [[&"atmosphere_cloud_light", cloud_height], [&"atmosphere_mid_light", mid_cloud_height],
+				[&"atmosphere_high_light", cirrus_height]]:
+			RenderingServer.material_set_param(get_rid(), layer[0], cloud_light_at(sun, haze, layer[1]))
+	# The sums are a few thousand steps, and the texture a few million.
+	var inputs := [height, haze, exposure]
 	if inputs == _air_inputs:
 		return
 	_air_inputs = inputs
-	var air := air_at(sun, haze, exposure, Vector2(mid_cloud_height, cirrus_height))
+	var air := air_at(sun, haze, exposure)
 	_air_horizon = air["atmosphere_horizon"]
 	for key in air:
 		if key != &"atmosphere_gain" and key != &"atmosphere_dark":
@@ -617,7 +635,7 @@ static func _free_lut(lut: Dictionary) -> void:
 
 ## The air's light the whole sky shares, by the shader parameter it goes to, for a sun at `sun`
 ## (unit, below the horizon too).
-static func air_at(sun: Vector3, haze: float, exposure: float, higher := Vector2(4000.0, 9000.0)) -> Dictionary:
+static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
 	var level := Vector3(sun.x, 0.0, sun.z)
 	level = level.normalized().rotated(Vector3.UP, PI * 0.5) if level.length() > 1e-4 else Vector3.RIGHT
 	# The eye opens up as the light fails, so dusk has colour rather than black; up to a point.
@@ -631,26 +649,33 @@ static func air_at(sun: Vector3, haze: float, exposure: float, higher := Vector2
 	# Level and across the sun's bearing: between the glow under it and the shadow opposite.
 	var horizon := _air_sky(level, sun, haze)
 	var ground := Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0)
-	var clouds := Vector3(0.0, _AIR_GROUND + _AIR_CLOUDS, 0.0)
-	var noon := _air_sunlight(ground, Vector3.UP, haze)
 	return {
 		&"atmosphere_sun": sun,
 		&"atmosphere_gain": gain,
 		&"atmosphere_dark": dark,
 		&"atmosphere_zenith": _air_seen(zenith, gain, dark),
 		&"atmosphere_horizon": _air_seen(horizon, gain, dark),
-		&"atmosphere_light": _air_toward_eye(_air_sunlight(ground, sun, haze) / noon),
-		&"atmosphere_cloud_light": _air_toward_eye(_air_sunlight(clouds, sun, haze) / noon),
-		&"atmosphere_mid_light": _air_toward_eye(_air_sunlight(Vector3(0.0, _AIR_GROUND + higher.x, 0.0), sun, haze) / noon),
-		&"atmosphere_high_light": _air_toward_eye(_air_sunlight(Vector3(0.0, _AIR_GROUND + higher.y, 0.0), sun, haze) / noon),
+		&"atmosphere_light": _air_toward_eye(_air_sunlight(ground, sun, haze) / _noon_light(haze)),
 	}
+
+
+## The sun's light on cloud `height` real metres up, for a sun at `sun` (unit, below the horizon
+## too), as the noon sun's on the ground: a sunset's colours, and the earth's shadow after it.
+static func cloud_light_at(sun: Vector3, haze: float, height: float) -> Vector3:
+	var p := Vector3(0.0, _AIR_GROUND + height, 0.0)
+	return _air_toward_eye(_air_sunlight(p, sun, haze) / _noon_light(haze))
+
+
+static func _noon_light(haze: float) -> Vector3:
+	if not _air_noon_light.has(haze):
+		_air_noon_light[haze] = _air_sunlight(Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0), Vector3.UP, haze)
+	return _air_noon_light[haze]
 
 
 # atmosphere.gdshaderinc's sums, for the few directions the whole sky shares.
 const _AIR_GROUND := 6360e3
 const _AIR_TOP := 6460e3
 const _AIR_VIEWER := 200.0
-const _AIR_CLOUDS := 2000.0
 const _AIR_RAYLEIGH := Vector3(5.802e-6, 13.558e-6, 33.1e-6)
 const _AIR_MIE := 3.996e-6
 const _AIR_MIE_G := 0.8
@@ -761,7 +786,16 @@ func _sync_heights() -> void:
 	RenderingServer.material_set_param(get_rid(), &"mid_cloud_rise", mid_cloud_height / cloud_height)
 	RenderingServer.material_set_param(get_rid(), &"cirrus_rise", cirrus_height / cloud_height)
 	_sync_air()
-	_sync_layer()
+
+
+## The cloud as `conditions` give it: each layer's cover, base and kind, and the thunderheads.
+## Cheap to call every frame: only what changed since the last call is set.
+func set_clouds(conditions: OvercastConditions) -> void:
+	for field in _CLOUD_FIELDS:
+		var v = conditions.get(field[1])
+		if _clouds.get(field[0]) != v:
+			_clouds[field[0]] = v
+			set(field[0], v)
 
 
 func _sync_layer() -> void:

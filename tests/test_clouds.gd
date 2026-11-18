@@ -224,10 +224,9 @@ func test_a_sky_lit_by_the_air_keeps_its_haze_in_step() -> void:
 func test_clouds_catch_the_sun_after_the_ground_loses_it() -> void:
 	var gone := SkyScript.air_at(Vector3(0.0, -0.02, -1.0).normalized(), 1.0, 20.0)
 	assert_eq(gone["atmosphere_light"], Vector3.ZERO, "the sun has set on the ground")
-	var light: Vector3 = gone["atmosphere_cloud_light"]
+	var light := SkyScript.cloud_light_at(Vector3(0.0, -0.02, -1.0).normalized(), 1.0, 2000.0)
 	assert_gt(light.x, light.z * 2.0, "but still reaches the clouds, red")
-	var midnight := SkyScript.air_at(Vector3.DOWN, 1.0, 20.0)
-	assert_eq(midnight["atmosphere_cloud_light"], Vector3.ZERO, "and not at midnight")
+	assert_eq(SkyScript.cloud_light_at(Vector3.DOWN, 1.0, 2000.0), Vector3.ZERO, "and not at midnight")
 	var dusk_gain: float = gone["atmosphere_gain"]
 	assert_gt(dusk_gain, SkyScript.air_at(Vector3.UP, 1.0, 20.0)["atmosphere_gain"], "the eye opens up at dusk")
 
@@ -272,7 +271,7 @@ func test_a_placed_sky_is_the_real_one() -> void:
 	sky.longitude = 18.96
 	assert_lt(sky.night, 0.1, "which Tromsø does not have")
 	sky.unix_time = 1797849000.0  # 21 December, 10:30 UTC
-	assert_lt(sky._placed_sky["sun"].y, 0.0, "the polar night's noon: the sun stays down")
+	assert_lt(sky._now["sun"].y, 0.0, "the polar night's noon: the sun stays down")
 	assert_gt(sky.dusk, 0.5, "a long twilight")
 	sky.placed = false
 	assert_vec3_almost_eq(sky.light_dir(), SkyScript.light_dir_at(sky.sun_dir, sky.time_of_day, sky.moon_phase), 1e-6,

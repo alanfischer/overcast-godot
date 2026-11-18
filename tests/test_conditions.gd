@@ -91,10 +91,9 @@ func test_the_higher_layers_ride_at_their_share_of_the_low_one() -> void:
 
 func test_higher_cloud_keeps_the_sun_longer() -> void:
 	var set_sun := Vector3(0.0, -0.035, -1.0).normalized()
-	var air := SkyScript.air_at(set_sun, 1.0, 20.0, Vector2(4000.0, 9000.0))
-	var low: float = air["atmosphere_cloud_light"].length()
-	var mid: float = air["atmosphere_mid_light"].length()
-	var high: float = air["atmosphere_high_light"].length()
+	var low := SkyScript.cloud_light_at(set_sun, 1.0, 1500.0).length()
+	var mid := SkyScript.cloud_light_at(set_sun, 1.0, 4000.0).length()
+	var high := SkyScript.cloud_light_at(set_sun, 1.0, 9000.0).length()
 	assert_gt(mid, low, "with the sun two degrees down, the middle layer still has it")
 	assert_gt(high, mid, "and the cirrus more")
 

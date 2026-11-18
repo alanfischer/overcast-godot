@@ -35,10 +35,8 @@ static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0)
 
 ## Local sidereal time, degrees: the right ascension standing on the meridian.
 static func sidereal(unix: float, longitude: float) -> float:
-	var d := days(unix)
-	var sun_mean := 356.0470 + 0.9856002585 * d + 282.9404 + 4.70935e-5 * d
 	var ut := fposmod(unix / 3600.0, 24.0)
-	return fposmod(sun_mean + 180.0 + ut * 15.0 + longitude, 360.0)
+	return fposmod(_sun(days(unix))["l"] + 180.0 + ut * 15.0 + longitude, 360.0)
 
 
 ## The observer's place, equatorial, in Earth radii from its centre.
@@ -66,10 +64,8 @@ static func _to_world(lst: float, latitude: float, north: float) -> Basis:
 
 ## Ecliptic longitude and latitude (degrees) to a unit equatorial vector, d days in.
 static func _equatorial(lon: float, lat: float, d: float) -> Vector3:
-	var l := deg_to_rad(lon)
-	var b := deg_to_rad(lat)
 	var ecl := deg_to_rad(23.4393 - 3.563e-7 * d)
-	var v := Vector3(cos(b) * cos(l), cos(b) * sin(l), sin(b))
+	var v := radec(lon, lat)
 	return Vector3(v.x, v.y * cos(ecl) - v.z * sin(ecl), v.y * sin(ecl) + v.z * cos(ecl))
 
 

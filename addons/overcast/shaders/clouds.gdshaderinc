@@ -49,6 +49,11 @@ float cloud_fair() {
 	return (1.0 - smoothstep(0.7, 0.95, overcast_cover)) * (1.0 - 0.8 * overcast_sheet);
 }
 
+// How far toward stratus the layer has spread: 0 up to stratocumulus, 1 at a full sheet.
+float cloud_stratus() {
+	return max(overcast_sheet * 2.0 - 1.0, 0.0);
+}
+
 // The layer spread out (overcast_sheet) from density `n` at noise point cp: toward
 // stratocumulus, rolls of cells packed side by side across the wind with thin gaps between;
 // toward stratus, broad smooth patches that close into one even sheet.
@@ -59,7 +64,7 @@ float cloud_spread(vec2 cp, float n) {
 	vec2 t = cloud_tex2(vec2(cp.x * 0.5, cp.y * 0.9) + vec2(4.2, 1.1));
 	float cells = 0.85 - t.g * 0.75 + (n - 0.5) * 0.3;
 	float even = 0.62 + (cloud_tex(cp * 0.12 + vec2(1.3, 5.9)) - 0.5) * 0.7 + (n - 0.5) * 0.06;
-	return mix(mix(n, cells, min(overcast_sheet * 2.0, 1.0)), even, max(overcast_sheet * 2.0 - 1.0, 0.0));
+	return mix(mix(n, cells, min(overcast_sheet * 2.0, 1.0)), even, cloud_stratus());
 }
 
 // Perlin swelling into round billows: worley cells push the outline out into lobes, so a cloud's
@@ -83,18 +88,27 @@ float cloud_distance(vec3 origin, vec3 dir) {
 	return cloud_distance_to(origin, dir, CLOUD_HEIGHT);
 }
 
-// cloud_distance looking at the horizon.
+// cloud_distance_to looking at the horizon.
+float cloud_horizon_at(vec3 origin, float height) {
+	return cloud_distance_to(origin, vec3(1.0, 0.0, 0.0), height);
+}
+
 float cloud_horizon(vec3 origin) {
-	return cloud_distance(origin, vec3(1.0, 0.0, 0.0));
+	return cloud_horizon_at(origin, CLOUD_HEIGHT);
 }
 
 vec2 cloud_wind() {
 	return TIME * overcast_speed * vec2(1.0, 0.35);
 }
 
+// As cloud_layer, for a shell `height` over the origin, scaled as the layer is by its own.
+vec2 cloud_layer_at(vec3 origin, vec3 dir, float dist, float height) {
+	return (origin.xz + dir.xz * dist) * (overcast_scale / height);
+}
+
 // Noise coordinates of where the ray meets the shell, before the wind moves the pattern.
 vec2 cloud_layer(vec3 origin, vec3 dir, float dist) {
-	return (origin.xz + dir.xz * dist) * (overcast_scale / CLOUD_HEIGHT);
+	return cloud_layer_at(origin, dir, dist, CLOUD_HEIGHT);
 }
 
 // The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp.

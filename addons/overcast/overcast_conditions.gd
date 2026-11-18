@@ -33,13 +33,10 @@ extends Resource
 ## At the ground, m/s (y is ignored).
 @export var wind := Vector3.ZERO
 
-const _FIELDS := [&"low_cover", &"low_base", &"low_sheet", &"towering", &"mid_cover", &"mid_base", &"mid_sheet",
-	&"high_cover", &"high_base", &"high_sheet", &"rain", &"temperature", &"wind"]
-
-
 ## `t` of the way from `from` to `to`, as a new one.
 static func blend(from: OvercastConditions, to: OvercastConditions, t: float) -> OvercastConditions:
 	var c: OvercastConditions = from.duplicate()
-	for key in _FIELDS:
-		c.set(key, lerp(from.get(key), to.get(key), t))
+	for p in from.get_property_list():
+		if p["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			c.set(p["name"], lerp(from.get(p["name"]), to.get(p["name"]), t))
 	return c

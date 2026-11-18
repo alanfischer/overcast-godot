@@ -56,7 +56,7 @@ static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, sp
 ## cloud overhead takes off what is under it, if `owner` holds the layer. Every frame of a storm.
 ## `veil` is how much the cloud over the layer takes off the light evenly, `sheet` how far the
 ## layer is spread into one.
-static func _set_weather(owner: int, cover: float, shadow: float, veil := 0.0, sheet := 0.0) -> void:
+static func _set_weather(owner: int, cover: float, shadow: float, veil: float, sheet: float) -> void:
 	if owner == _owner:
 		_set_cover(cover, shadow, veil, sheet)
 

@@ -1197,7 +1197,7 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	var clear := sun.light_energy
 	sky.mid_cloud_amount = 1.0
 	w._process(0.0)
-	assert_almost_eq(sun.light_energy, clear * (1.0 - sky.veil), 1e-4, "a middle layer veils it")
+	assert_almost_eq(sun.light_energy, clear, 1e-6, "a veil dims it where it lands (cloud_sunlight), not twice")
 	sky.mid_cloud_amount = 0.0
 	sky.time_of_day = 23.0
 	sky.sun_follows_time = false

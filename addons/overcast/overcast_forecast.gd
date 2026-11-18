@@ -23,6 +23,11 @@ const _FORECAST_PAST_DAYS := 80
 ## conditions are blended again.
 const _RETRY := 60.0
 const _STEP := 10.0
+## An hour's cloud is what stands at that hour, not a share of the hour before: the next hour's
+## comes in over the last of this one, from this far through it.
+const _CLOUD_TURN := 0.75
+const _CLOUD := [&"low_cover", &"low_base", &"low_sheet", &"towering", &"mid_cover", &"mid_base",
+	&"mid_sheet", &"high_cover", &"high_base", &"high_sheet"]
 ## Degrees the place moves before it is fetched again.
 const _MOVED := 0.05
 ## Precipitation (mm an hour) that is a downpour: OvercastWeather.rain 1.
@@ -77,7 +82,8 @@ func _process(_delta: float) -> void:
 		w.conditions = turned(conditions_at(t), sky.north)
 
 
-## The conditions at `t` (Unix seconds), between the two hours either side; null outside them.
+## The conditions at `t` (Unix seconds), between the two hours either side (the cloud late in the
+## hour, _CLOUD_TURN); null outside them.
 ## Their winds blow in a world whose north is -Z (turned).
 func conditions_at(t: float) -> OvercastConditions:
 	if not _covers(t):
@@ -87,7 +93,12 @@ func conditions_at(t: float) -> OvercastConditions:
 		return hours[0]
 	if i >= times.size() - 1:
 		return hours[-1]
-	return OvercastConditions.blend(hours[i], hours[i + 1], (t - times[i]) / (times[i + 1] - times[i]))
+	var f := (t - times[i]) / (times[i + 1] - times[i])
+	var c := OvercastConditions.blend(hours[i], hours[i + 1], f)
+	var late := OvercastConditions.blend(hours[i], hours[i + 1], smoothstep(_CLOUD_TURN, 1.0, f))
+	for p in _CLOUD:
+		c.set(p, late.get(p))
+	return c
 
 
 func _target() -> OvercastWeather:

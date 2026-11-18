@@ -10,6 +10,7 @@ renderer, including Compatibility and Mobile.
 ![Fair weather, with cloud shadows on the ground](docs/clear.png)
 ![A downpour: haze, far rain, puddles](docs/rain.png)
 ![Snow: flakes, a pale sky, and snow lying everywhere but under the roofs](docs/snow.png)
+![Just after sunset, the sky lit by the air: clouds still catching the sun](docs/sunset.png)
 
 ## Quick start
 
@@ -38,8 +39,8 @@ $OvercastWeather.temperature = -5.0  # °C: snow below -1, rain above 3, sleet b
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain, temperature and the time of day, a lightning button, a volumetric-clouds switch, and a mode where showers come
-and go on their own.
+rain, temperature and the time of day, a lightning button, volumetric-clouds and lit-by-the-air
+switches, and a mode where showers come and go on their own.
 
 ## What's in it
 
@@ -50,14 +51,26 @@ and go on their own.
   moon then stay at `sun_dir`.
   `scene_light()` is the light it puts on your scene at that hour, for a sun's colour or a
   lightmap; `light_dir()` and `light_strength()` are where the sun or moon is and how strongly it
-  shines, as the moon comes up from nothing once it takes over at dusk. It draws a gradient, a
-  sun, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
+  shines, as the moon comes up from nothing once it takes over at dusk. `moon_phase` is where the
+  moon is in its month, from new at 0 through full at 0.5: it trails the sun across the sky by
+  that share of a day, shows the crescent or disc that goes with it, by day as well, and lights
+  the night by how much of it is lit and how high it stands. It draws a gradient, a
+  sun, a moon, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
   (`set_weather(storm, snowy)`, and `set_flash` for lightning: an OvercastWeather calls both, and
   a sky without one can be told by hand). Its look is its shader parameters;
   the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
+- **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
+  Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
+  instead. Overhead it's blue, at the horizon pale.
+  Toward a low sun it turns gold and red, and after sunset the clouds stay lit red a while. Opposite
+  the set sun, the planet's shadow rises with a pink band above it, and twilight fades through blue.
+  `atmosphere_haze` thickens the air and `atmosphere_exposure` brightens it. The sky's night colours
+  still take over at night. The air is summed into a small texture only when the sun or the haze
+  changes, so each pixel costs one texture read. The sunset needs the sun to set, so leave
+  `sun_follows_time` on.
 - **Volumetric clouds**: `OvercastClouds.set_volumetric(true)` ray-marches the clouds through 3D
   noise. That costs about a millisecond at 720p on an M1 on Compatibility. The radiance cubemap
   pass skips the clouds, so ambient light stays cheap.
@@ -226,7 +239,7 @@ Overcast lights its own sky, rain and haze. For your scene, it gives you hooks:
   when it stops, the one before takes them back.
 - The sky's sun is its `sun_dir`; it does not follow a DirectionalLight3D by itself.
 - The sun's path is an equinox's: up at 6:00, at `sun_dir` at noon, down at 18:00, with the moon
-  on the same arc at night. There are no seasons or latitude.
+  on the same arc behind it. There are no seasons or latitude.
 
 ## Origin
 

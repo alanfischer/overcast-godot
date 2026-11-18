@@ -13,6 +13,15 @@ float overcast_hash13(vec3 p) {
 	return fract((p.x + p.y) * p.z);
 }
 
+// Per-pixel noise with its low frequencies taken out, for jittering a march: it dithers to a fine
+// even grain, where interleaved gradient noise leaves diagonal hatching without TAA to blur it.
+float overcast_jitter(vec2 frag) {
+	float n = overcast_hash12(frag) * 2.0;
+	n -= 0.5 * (overcast_hash12(frag + vec2(1.0, 0.0)) + overcast_hash12(frag - vec2(1.0, 0.0))
+		+ overcast_hash12(frag + vec2(0.0, 1.0)) + overcast_hash12(frag - vec2(0.0, 1.0)));
+	return fract(n);
+}
+
 // Smoothed value noise, one octave.
 float overcast_vnoise(vec2 p) {
 	vec2 i = floor(p);

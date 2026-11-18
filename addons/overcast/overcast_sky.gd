@@ -12,11 +12,18 @@ extends ShaderMaterial
 
 const _Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
+const _LutShader = preload("res://addons/overcast/shaders/atmosphere_lut.gdshader")
+## The air's light, drawn into a texture this size whenever the sun or the air changes.
+const _LUT_SIZE := Vector2i(256, 128)
+## How far the sun's height (the sine of it) moves before the air's light is summed again.
+const _AIR_SUN_STEP := 0.002
 
 ## Cloud cover once a storm has closed the sky over.
 const _STORM_COVER := 0.97
 ## Shader parameters the cloud layer follows.
 const _LAYER_UNIFORMS := [&"sun_dir", &"cloud_amount"]
+## Shader parameters the air's light, taken once here for the whole sky, follows.
+const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
 ## saved with the sky.
 const _TRANSIENT := [&"storm", &"snowy", &"flash_color", &"flash_dir"]
@@ -28,11 +35,16 @@ const DEFAULTS := {
 	"horizon_color": Color(0.62, 0.70, 0.82),
 	"dusk_color": Color(1.0, 0.48, 0.24),
 	"night_horizon_color": Color(0.06, 0.07, 0.12),
+	"atmosphere": 1.0,
+	"atmosphere_haze": 1.0,
+	"atmosphere_exposure": 20.0,
 }
 ## The light the sky puts on a scene (scene_light) at the height of dusk and at full night, as a
 ## linear multiplier on daylight.
 const DUSK_LIGHT := Color(0.95, 0.55, 0.32)
 const MOON_LIGHT := Color(0.12, 0.14, 0.24)
+## A moonless night's light, as a share of moon_light.
+const STARLIGHT := 0.55
 
 ## Whether this sky draws the cloud layer, and so shades the ground under its clouds. Only one sky
 ## does at a time: turning one on takes the layer, turning the owner off clears the shadows.
@@ -50,11 +62,19 @@ const MOON_LIGHT := Color(0.12, 0.14, 0.24)
 		set_shader_parameter("night_amount", night)
 		_sync_light()
 ## The sun crosses the sky with the time: up at 6, at sun_dir at noon, down at 18, and the moon
-## along the same arc at night. Off, both stay at sun_dir, for a sun baked into the lighting.
-## OvercastWeather turns its `sun` light to follow.
+## along the same arc behind it (moon_phase). Off, both stay at sun_dir, for a sun baked into the
+## lighting. OvercastWeather turns its `sun` light to follow.
 @export var sun_follows_time := true:
 	set(on):
 		sun_follows_time = on
+		_sync_light()
+## Where the moon is in its month: new at 0, in the sky with the sun and dark; full at 0.5, up all
+## night; a waxing crescent and half before that, waning after. It follows the sun across the sky by
+## this share of a day, lit from the sun's side, and its light on the scene goes by how much of it
+## is lit and how high it stands.
+@export_range(0.0, 1.0, 0.01) var moon_phase := 0.5:
+	set(v):
+		moon_phase = v
 		_sync_light()
 @export_group("Scene light")
 ## The light this sky puts on a scene (scene_light) at the height of dusk and at full night.
@@ -127,6 +147,13 @@ var _id := get_instance_id()
 var _started := false
 var _storm := 0.0
 var _snowy := 0.0
+## The air's light level across the sun's bearing, linear, as _sync_air last took it.
+var _air_horizon := Color.BLACK
+## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
+var _lut := {}
+var _air_inputs := []
+## The noon sky's zenith, by haze: what the eye adapts against.
+static var _air_noon_zenith := {}
 
 
 ## `params` are shader parameters or properties by name (see apply); `sky_shader` for a sky drawn
@@ -160,6 +187,7 @@ func _start() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
 		_Clouds._release(_id)
+		_free_lut(_lut)  # static: a RefCounted's own methods are out of reach by now
 
 
 ## Shader parameters and properties by name, at once. An unknown name is an error rather than a
@@ -182,6 +210,10 @@ func _set(property: StringName, value: Variant) -> bool:
 	if not String(property).begins_with("shader_parameter/"):
 		return false
 	var key := StringName(String(property).trim_prefix("shader_parameter/"))
+	if key in _AIR_UNIFORMS:
+		set_shader_parameter(key, value)
+		_sync_air()
+		return true
 	if not key in _LAYER_UNIFORMS:
 		return false
 	if value is Vector3:
@@ -216,11 +248,13 @@ static func dusk_at(hours: float) -> float:
 ## at dusk, moonlight at night. For a sun's light_color, a lightmap's sky share, the weather's
 ## sky_light.
 func scene_light() -> Color:
-	return scene_light_at(time_of_day, dusk_light, moon_light)
+	return scene_light_at(time_of_day, moon_phase, dusk_light, moon_light)
 
 
-static func scene_light_at(hours: float, dusk_tint := DUSK_LIGHT, moon := MOON_LIGHT) -> Color:
-	return Color.WHITE.lerp(dusk_tint, dusk_at(hours)).lerp(moon, night_at(hours))
+## `moon` is a night under a full moon high up; with less of one, down to STARLIGHT of it.
+static func scene_light_at(hours: float, phase := 0.5, dusk_tint := DUSK_LIGHT, moon := MOON_LIGHT) -> Color:
+	var night_light := moon * lerpf(STARLIGHT, 1.0, moonlight_at(hours, phase))
+	return Color.WHITE.lerp(dusk_tint, dusk_at(hours)).lerp(Color(night_light, 1.0), night_at(hours))
 
 
 ## Sun direction (unit, toward the sun) for a DirectionalLight3D, which shines along its -Z.
@@ -243,34 +277,293 @@ func make_environment() -> Environment:
 ## Where the sun is at `hours`, on an arc through `noon` (unit, toward it) that meets the horizon
 ## at 6 and 18: it turns about the level line toward noon's sun, as on an equinox.
 static func sun_at(noon: Vector3, hours: float) -> Vector3:
+	return noon.normalized().rotated(_arc_axis(noon), _arc_turn(hours))
+
+
+## The level line the sky turns about, and how far it has turned from noon at `hours`.
+static func _arc_axis(noon: Vector3) -> Vector3:
 	var flat := Vector3(noon.x, 0.0, noon.z)
-	var axis := flat.normalized() if flat.length() > 1e-4 else Vector3.RIGHT
-	return noon.normalized().rotated(axis, TAU * (hours - 12.0) / 24.0)
+	return flat.normalized() if flat.length() > 1e-4 else Vector3.RIGHT
 
 
-## Toward what lights the sky now: the sun by day and the moon, opposite it, by night. Both at
-## sun_dir when the sun does not follow the time.
+static func _arc_turn(hours: float) -> float:
+	return TAU * (hours - 12.0) / 24.0
+
+
+## Where the moon is at `hours`, `phase` through its month: on the sun's arc, that share of a day
+## behind it.
+static func moon_at(noon: Vector3, hours: float, phase: float) -> Vector3:
+	return sun_at(noon, hours - 24.0 * phase)
+
+
+## How much of the moon's face is lit at `phase`, 0 new to 1 full.
+static func moon_lit(phase: float) -> float:
+	return 0.5 - 0.5 * cos(TAU * phase)
+
+
+## The moon's light on the scene at `hours`, 0 to 1 for a full moon well up: by how much of it is
+## lit, and nothing from one below the horizon.
+static func moonlight_at(hours: float, phase: float) -> float:
+	return moon_lit(phase) * smoothstep(-0.05, 0.25, _elevation(hours - 24.0 * phase))
+
+
+## Toward the moon now. At sun_dir when the sun does not follow the time.
+func moon_dir() -> Vector3:
+	var noon: Vector3 = sun_dir
+	return moon_at(noon, time_of_day, moon_phase) if sun_follows_time else noon.normalized()
+
+
+## Toward what lights the sky now: the sun by day and the moon by night, even one that has set.
+## Both at sun_dir when the sun does not follow the time.
 func light_dir() -> Vector3:
 	var noon: Vector3 = sun_dir
-	if not sun_follows_time:
-		return noon.normalized()
-	var sun := sun_at(noon, time_of_day)
-	return -sun if night > 0.5 else sun
+	return light_dir_at(noon, time_of_day, moon_phase) if sun_follows_time else noon.normalized()
 
 
-## How strongly what light_dir points at shines, 0 to 1. The moon takes over from the sun once
-## night is half in, by then already above the horizon, so it comes up from nothing rather than
-## switching on.
+## How strongly what light_dir points at shines, 0 to 1.
 func light_strength() -> float:
-	if not sun_follows_time or night <= 0.5:
-		return 1.0
-	return smoothstep(0.5, 0.8, night)
+	return light_strength_at(time_of_day, moon_phase) if sun_follows_time else 1.0
+
+
+## Toward what lights the scene at `hours`: the sun, or once night is half in, the moon.
+static func light_dir_at(noon: Vector3, hours: float, phase: float) -> Vector3:
+	return sun_at(noon, hours) if night_at(hours) <= 0.5 else moon_at(noon, hours, phase)
+
+
+## How strongly light_dir_at's light shines, 0 to 1. The moon takes over with night half in, from
+## nothing rather than switching on, and shines by its moonlight_at.
+static func light_strength_at(hours: float, phase: float) -> float:
+	var night_amount := night_at(hours)
+	return 1.0 if night_amount <= 0.5 else smoothstep(0.5, 0.8, night_amount) * moonlight_at(hours, phase)
+
+
+## The direction the moon's face is lit from: round from the moon toward the sun by its phase, so
+## the bright limb points at the sun whatever arc the two are on.
+func _moon_lit_from() -> Vector3:
+	var moon := moon_dir()
+	var across := moon.cross(_air_sun())
+	if across.length() < 1e-3:
+		across = moon.cross(Vector3.UP if absf(moon.y) < 0.99 else Vector3.RIGHT)
+	return moon.rotated(across.normalized(), PI * (1.0 - absf(2.0 * moon_phase - 1.0)))
 
 
 func _sync_light() -> void:
 	set_shader_parameter("light_dir", light_dir())
 	set_shader_parameter("light_strength", light_strength())
+	set_shader_parameter("moon_dir", moon_dir())
+	set_shader_parameter("moon_lit_from", _moon_lit_from())
+	set_shader_parameter("moonlight", moonlight_at(time_of_day, moon_phase) if sun_follows_time else moon_lit(moon_phase))
+	var noon: Vector3 = sun_dir
+	# The stars turn with the sun: this takes a view ray back to where it looked at noon.
+	set_shader_parameter("star_basis",
+		Basis(_arc_axis(noon), -_arc_turn(time_of_day)) if sun_follows_time else Basis.IDENTITY)
+	_sync_air()
 	_sync_layer()
+
+
+## How far the sky is the air's light: none from a sky shader without the uniform.
+func _air() -> float:
+	var v = param("atmosphere")
+	return v if v is float else 0.0
+
+
+## Where the sun really is now, below the horizon too: what lights the air.
+func _air_sun() -> Vector3:
+	var noon: Vector3 = sun_dir
+	return sun_at(noon, time_of_day) if sun_follows_time else noon.normalized()
+
+
+func _sync_air() -> void:
+	var haze = param("atmosphere_haze")
+	var exposure = param("atmosphere_exposure")
+	# DEFAULTS go in one at a time: the rest may not be there yet.
+	if _air() <= 0.0 or not haze is float or not exposure is float:
+		return
+	var sun := _air_sun()
+	RenderingServer.material_set_param(get_rid(), &"atmosphere_sun", sun)
+	# The sums are a few thousand steps, and the texture a few million: only when what they depend
+	# on has moved enough to see. They go by the sun's height alone.
+	var inputs := [snappedf(sun.y, _AIR_SUN_STEP), haze, exposure]
+	if inputs == _air_inputs:
+		return
+	_air_inputs = inputs
+	var air := air_at(sun, haze, exposure)
+	_air_horizon = air["atmosphere_horizon"]
+	for key in air:
+		if key != &"atmosphere_gain" and key != &"atmosphere_dark":
+			RenderingServer.material_set_param(get_rid(), key, air[key])
+	_draw_lut(sun.y, haze, air["atmosphere_gain"], air["atmosphere_dark"])
+
+
+## The sky samples the air's light rather than summing it per pixel: on sky brushes that cost
+## more than the rest of the frame.
+func _draw_lut(sun_height: float, haze: float, gain: float, dark: float) -> void:
+	var rs := RenderingServer
+	if _lut.is_empty():
+		var viewport := rs.viewport_create()
+		rs.viewport_set_size(viewport, _LUT_SIZE.x, _LUT_SIZE.y)
+		rs.viewport_set_disable_3d(viewport, true)
+		rs.viewport_set_active(viewport, true)
+		var canvas := rs.canvas_create()
+		rs.viewport_attach_canvas(viewport, canvas)
+		var item := rs.canvas_item_create()
+		rs.canvas_item_set_parent(item, canvas)
+		rs.canvas_item_add_rect(item, Rect2(Vector2.ZERO, _LUT_SIZE), Color.WHITE)
+		var material := rs.material_create()
+		rs.material_set_shader(material, _LutShader.get_rid())
+		rs.canvas_item_set_material(item, material)
+		_lut = {"viewport": viewport, "canvas": canvas, "item": item, "material": material}
+		rs.material_set_param(get_rid(), &"atmosphere_lut", rs.viewport_get_texture(viewport))
+	var material: RID = _lut["material"]
+	rs.material_set_param(material, &"sun_height", sun_height)
+	rs.material_set_param(material, &"haze", haze)
+	rs.material_set_param(material, &"gain", gain)
+	rs.material_set_param(material, &"dark", dark)
+	rs.viewport_set_update_mode(_lut["viewport"], RenderingServer.VIEWPORT_UPDATE_ONCE)
+
+
+static func _free_lut(lut: Dictionary) -> void:
+	for key in ["item", "material", "canvas", "viewport"]:
+		if lut.has(key):
+			RenderingServer.free_rid(lut[key])
+
+
+## The air's light the whole sky shares, by the shader parameter it goes to, for a sun at `sun`
+## (unit, below the horizon too).
+static func air_at(sun: Vector3, haze: float, exposure: float) -> Dictionary:
+	var level := Vector3(sun.x, 0.0, sun.z)
+	level = level.normalized().rotated(Vector3.UP, PI * 0.5) if level.length() > 1e-4 else Vector3.RIGHT
+	# The eye opens up as the light fails, so dusk has colour rather than black; up to a point.
+	var zenith := _air_sky(Vector3.UP, sun, haze)
+	if not _air_noon_zenith.has(haze):
+		_air_noon_zenith[haze] = _air_sky(Vector3.UP, Vector3(0.0, 0.7, 0.7), haze)
+	var noon_zenith: Color = _air_noon_zenith[haze]
+	var adapt := clampf(sqrt(_luma(noon_zenith) / maxf(_luma(zenith), 1e-9)), 1.0, _AIR_ADAPT)
+	var gain := exposure * adapt
+	var dark := clampf(log(adapt) / log(_AIR_ADAPT), 0.0, 1.0) * 0.6
+	# Level and across the sun's bearing: between the glow under it and the shadow opposite.
+	var horizon := _air_sky(level, sun, haze)
+	var ground := Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0)
+	var clouds := Vector3(0.0, _AIR_GROUND + _AIR_CLOUDS, 0.0)
+	var noon := _air_sunlight(ground, Vector3.UP, haze)
+	return {
+		&"atmosphere_sun": sun,
+		&"atmosphere_gain": gain,
+		&"atmosphere_dark": dark,
+		&"atmosphere_zenith": _air_seen(zenith, gain, dark),
+		&"atmosphere_horizon": _air_seen(horizon, gain, dark),
+		&"atmosphere_light": _air_toward_eye(_air_sunlight(ground, sun, haze) / noon),
+		&"atmosphere_cloud_light": _air_toward_eye(_air_sunlight(clouds, sun, haze) / noon),
+	}
+
+
+# atmosphere.gdshaderinc's sums, for the few directions the whole sky shares.
+const _AIR_GROUND := 6360e3
+const _AIR_TOP := 6460e3
+const _AIR_VIEWER := 200.0
+const _AIR_CLOUDS := 2000.0
+const _AIR_RAYLEIGH := Vector3(5.802e-6, 13.558e-6, 33.1e-6)
+const _AIR_MIE := 3.996e-6
+const _AIR_MIE_G := 0.8
+const _AIR_OZONE := Vector3(0.650e-6, 1.881e-6, 0.085e-6)
+const _AIR_VIEW_STEPS := 48
+const _AIR_MULTI := 0.6
+const _AIR_MULTI_TINT := Vector3(0.42, 0.64, 1.0)
+## How far the eye opens up for a failing light.
+const _AIR_ADAPT := 40.0
+const _AIR_MULTI_UP := 6000.0
+
+
+## A low sun's light keeps most of its colour but not all its dimming: the eye makes up some of it.
+static func _air_toward_eye(light: Vector3) -> Vector3:
+	var luma := _luma709(light)
+	return light.lerp(Vector3.ONE * luma, 0.2) / sqrt(maxf(luma, 1e-6))
+
+
+static func _air_seen(light: Color, gain: float, dark: float) -> Color:
+	var c := Color(1.0 - exp(-light.r * gain), 1.0 - exp(-light.g * gain), 1.0 - exp(-light.b * gain))
+	var luma := _luma709(Vector3(c.r, c.g, c.b))
+	return c.lerp(Color(0.6, 0.8, 1.35) * luma, dark)
+
+
+## Luma by Rec. 709, as atmosphere.gdshaderinc weighs the air's light.
+static func _luma709(c: Vector3) -> float:
+	return c.dot(Vector3(0.2126, 0.7152, 0.0722))
+
+
+static func _air_density(h: float) -> Vector3:
+	return Vector3(exp(-h / 8000.0), exp(-h / 1200.0), maxf(0.0, 1.0 - absf(h - 25e3) / 15e3))
+
+
+static func _air_extinction(dens: Vector3, haze: float) -> Vector3:
+	return _AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * 1.11 * haze * dens.y) + _AIR_OZONE * dens.z
+
+
+static func _air_exit(o: Vector3, d: Vector3, r: float) -> float:
+	var b := o.dot(d)
+	return -b + sqrt(maxf(b * b - o.dot(o) + r * r, 0.0))
+
+
+static func _vexp(v: Vector3) -> Vector3:
+	return Vector3(exp(v.x), exp(v.y), exp(v.z))
+
+
+static func _air_chapman(x: float, h: float, mu: float) -> float:
+	var c := sqrt(x + h)
+	if mu >= 0.0:
+		return c / (c * mu + 1.0) * exp(-h)
+	var x0 := sqrt(1.0 - mu * mu) * (x + h)
+	return 2.0 * sqrt(x0) * exp(x - x0) - c / (1.0 - c * mu) * exp(-h)
+
+
+static func _air_sunlight(p: Vector3, sun: Vector3, haze: float) -> Vector3:
+	var r := p.length()
+	var mu := p.dot(sun) / r
+	if mu < 0.0 and r * r * (1.0 - mu * mu) < _AIR_GROUND * _AIR_GROUND:
+		return Vector3.ZERO
+	var h := r - _AIR_GROUND
+	var depth := _AIR_RAYLEIGH * (8000.0 * _air_chapman(_AIR_GROUND / 8000.0, h / 8000.0, mu)) \
+		+ Vector3.ONE * (_AIR_MIE * 1.11 * haze * 1200.0 * _air_chapman(_AIR_GROUND / 1200.0, h / 1200.0, mu))
+	var r_oz := _AIR_GROUND + 25e3
+	var s2 := (1.0 - mu * mu) * r * r / (r_oz * r_oz)
+	var slant := 1.0 / maxf(sqrt(1.0 - s2), 0.04) if s2 < 1.0 else 0.0
+	slant *= 1.0 if r < r_oz else (2.0 if mu < 0.0 else 0.0)
+	depth += _AIR_OZONE * 15e3 * slant
+	return _vexp(-depth)
+
+
+static func _air_sky(dir: Vector3, sun: Vector3, haze: float) -> Color:
+	var o := Vector3(0.0, _AIR_GROUND + _AIR_VIEWER, 0.0)
+	var length := _air_exit(o, dir, _AIR_TOP)
+	var trans := Vector3.ONE
+	var ray := Vector3.ZERO
+	var mie := Vector3.ZERO
+	var multi := Vector3.ZERO
+	var prev := 0.0
+	for i in _AIR_VIEW_STEPS:
+		var f := (i + 1.0) / _AIR_VIEW_STEPS
+		var t := length * f * f
+		var dt := t - prev
+		var p := o + dir * (t - dt * 0.5)
+		prev = t
+		var dens := _air_density(p.length() - _AIR_GROUND)
+		var step_trans := _vexp(-_air_extinction(dens, haze) * dt)
+		var half := Vector3(sqrt(step_trans.x), sqrt(step_trans.y), sqrt(step_trans.z))
+		var seen := trans * half * dt
+		var lit := seen * _air_sunlight(p, sun, haze)
+		var glow := seen * _air_sunlight(p * (1.0 + _AIR_MULTI_UP / p.length()), sun, haze)
+		ray += lit * dens.x
+		mie += lit * dens.y
+		multi += glow * (_AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * haze * dens.y))
+		trans *= step_trans
+	var c := dir.dot(sun)
+	var g := _AIR_MIE_G
+	var rayleigh_phase := 3.0 / (16.0 * PI) * (1.0 + c * c)
+	var mie_phase := 3.0 / (8.0 * PI) * (1.0 - g * g) / (2.0 + g * g) * (1.0 + c * c) \
+		/ pow(1.0 + g * g - 2.0 * g * c, 1.5)
+	var v := ray * _AIR_RAYLEIGH * rayleigh_phase + mie * (_AIR_MIE * haze * mie_phase) \
+		+ multi * _AIR_MULTI_TINT * (_AIR_MULTI / (4.0 * PI))
+	return Color(v.x, v.y, v.z)
 
 
 func _sync_layer() -> void:
@@ -316,7 +609,12 @@ func horizon_now() -> Color:
 	var h := _shader_space(param("horizon_color"), linear)
 	# As the shader's, at a glow halfway round from the sun.
 	h = h.lerp(_shader_space(param("dusk_color"), linear), dusk * 0.725 * 0.8)
-	h = h.lerp(_shader_space(param("night_horizon_color"), linear), night)
+	var night_horizon := _shader_space(param("night_horizon_color"), linear)
+	h = h.lerp(night_horizon, night)
+	var air := _air()
+	if air > 0.0:
+		var horizon: Color = _air_horizon if linear else _air_horizon.linear_to_srgb()
+		h = h.lerp(horizon + night_horizon * night, air)
 	var grey := _luma(h) * lerpf(0.55, 1.0, snowy)
 	var col := h.lerp(Color(grey, grey, grey), storm)
 	return col if linear else col.srgb_to_linear()

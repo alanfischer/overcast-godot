@@ -267,12 +267,16 @@ var cloud_towering: float:
 		return _float_param(&"cloud_towering")
 	set(v):
 		set("shader_parameter/cloud_towering", v)
-## How much of the sun's light the cloud over the low layer takes off the ground, evenly, 0 to 1.
+## How much of the sun's light the cloud over the low layer, and fog under it, take off the
+## ground, evenly, 0 to 1.
 var veil: float:
 	get:
 		var mid := mid_cloud_amount * lerpf(_MID_VEIL.x, _MID_VEIL.y, mid_cloud_sheet)
 		var high := cirrus_amount * cirrus_sheet * _HIGH_VEIL
-		return (1.0 - (1.0 - mid) * (1.0 - high)) * (1.0 - storm)
+		var above := (1.0 - (1.0 - mid) * (1.0 - high)) * (1.0 - storm)
+		# Fog fills the air to the cloud's base: the sun comes through that much of it, slanting.
+		var fog := 1.0 - exp(-_mist * cloud_height * world_scale / maxf(light_dir().y, 0.1))
+		return 1.0 - (1.0 - above) * (1.0 - fog)
 
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
@@ -280,6 +284,7 @@ var _started := false
 var _told_wind := Vector3.INF
 var _storm := 0.0
 var _snowy := 0.0
+var _mist := 0.0
 ## The air's light level across the sun's bearing, linear, as _sync_air last took it.
 var _air_horizon := Color.BLACK
 ## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
@@ -817,10 +822,12 @@ func _sync_layer() -> void:
 
 ## The weather's say over the sky: OvercastWeather calls these, and a sky with no weather can be
 ## told by hand. How far it has closed over for rain (`storm`), and how much of that is snow
-## (`snowy`, a pale sky rather than a dark one), 0 to 1 each.
-func set_weather(storm_amount: float, snowy_amount: float) -> void:
+## (`snowy`, a pale sky rather than a dark one), 0 to 1 each; and fog under the cloud, per metre
+## (OvercastWeather.mist), which veils the sun.
+func set_weather(storm_amount: float, snowy_amount: float, mist := 0.0) -> void:
 	_storm = storm_amount
 	_snowy = snowy_amount
+	_mist = mist
 	RenderingServer.material_set_param(get_rid(), &"storm", storm_amount)
 	RenderingServer.material_set_param(get_rid(), &"snowy", snowy_amount)
 	_push_weather()

@@ -14,7 +14,7 @@ signal updated
 ## A fetch failed; it tries again after _RETRY seconds.
 signal failed(message: String)
 
-const _HOURLY := "temperature_2m,dew_point_2m,precipitation,weather_code,cloud_cover_low," \
+const _HOURLY := "temperature_2m,dew_point_2m,precipitation,snowfall,visibility,weather_code,cloud_cover_low," \
 	+ "cloud_cover_mid,cloud_cover_high,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cape," \
 	+ "wind_speed_850hPa,wind_direction_850hPa"
 ## Further back than this the forecast service has no hours; the record (archive) takes over.
@@ -27,6 +27,10 @@ const _STEP := 10.0
 const _MOVED := 0.05
 ## Precipitation (mm an hour) that is a downpour: OvercastWeather.rain 1.
 const _DOWNPOUR := 10.0
+## Millimetres of water in a centimetre of fresh snow, as Open-Meteo counts it.
+const _SNOW_WATER := 10.0 / 7.0
+## Visibility in fog, when the record gives none.
+const _FOG := 300.0
 ## Metres the cloud base rises per degree between the air and its dew point.
 const _BASE_PER_DEGREE := 125.0
 
@@ -191,6 +195,11 @@ static func conditions_of(v: Dictionary, north := 0.0) -> OvercastConditions:
 	c.high_sheet = smoothstep(0.7, 1.0, c.high_cover)
 	var mm := _num(v, "precipitation", 0.0)
 	c.rain = sqrt(mm / _DOWNPOUR) if mm >= 0.05 else 0.0
+	# Which falls as snow is the model's, which knows the air aloft; dry, it is the temperature's.
+	c.snow_share = clampf(_num(v, "snowfall", 0.0) * _SNOW_WATER / mm, 0.0, 1.0) if c.rain > 0.0 \
+		else 1.0 - smoothstep(OvercastWeather.SLEET.x, OvercastWeather.SLEET.y, temperature)
+	c.visibility = clampf(_num(v, "visibility", _FOG if code == 45 or code == 48 else OvercastWeather.CLEAR_VISIBILITY),
+		10.0, OvercastWeather.CLEAR_VISIBILITY)
 	var speed := _num(v, "wind_speed_10m", 0.0)
 	c.wind = _blowing(_num(v, "wind_direction_10m", 0.0), north) * speed
 	c.gustiness = clampf(_num(v, "wind_gusts_10m", speed) / maxf(speed, 1.0) - 1.0, 0.0, 1.0)

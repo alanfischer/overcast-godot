@@ -29,7 +29,11 @@ extends Resource
 @export_group("")
 ## As OvercastWeather.rain: 0 dry, 1 a downpour.
 @export_range(0.0, 4.0, 0.01, "or_greater") var rain := 0.0
+## How much of `rain` falls as snow; below 0 for the weather's own, by temperature.
+@export_range(-1.0, 1.0, 0.01) var snow_share := -1.0
 @export_range(-30.0, 40.0, 0.5, "or_less", "or_greater", "suffix:°C") var temperature := 10.0
+## How far one can see, m, as OvercastWeather.visibility.
+@export_range(10.0, 20000.0, 10.0, "exp", "suffix:m") var visibility := 20000.0
 ## At the ground, m/s (y is ignored).
 @export var wind := Vector3.ZERO
 ## How far the wind swings in gusts, as OvercastWeather.gustiness.

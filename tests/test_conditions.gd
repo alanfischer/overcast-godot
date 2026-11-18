@@ -51,6 +51,13 @@ func test_the_weather_and_its_sky_follow_the_conditions() -> void:
 	w._process(0.1)
 	assert_vec3_almost_eq(w.wind_aloft(), c.wind_aloft, 1e-6, "or theirs")
 	assert_eq(w.gustiness, 0.8, "and their gusts")
+	assert_almost_eq(w.snow_share, 1.0, 1e-6, "snow at -4 by the weather's own reckoning")
+	c.snow_share = 0.25
+	c.visibility = 400.0
+	w._process(0.1)
+	assert_eq(w.snow_share, 0.25, "or by theirs")
+	assert_eq(w.visibility, 400.0, "fog as they say")
+	assert_almost_eq(w.mist(), 3.912 / 400.0 - 3.912 / 20000.0, 1e-9, "thick as that")
 	assert_almost_eq(sky.cloud_amount, 0.2, 1e-6, "the sky takes the low cloud")
 	assert_almost_eq(sky.mid_cloud_amount, 0.7, 1e-6, "the middle")
 	assert_eq(sky.mid_cloud_height, 5000.0, "at its height")
@@ -82,6 +89,11 @@ func test_higher_cloud_veils_the_sun() -> void:
 	sky.mid_cloud_amount = 1.0
 	sky.set_weather(1.0, 0.0)
 	assert_eq(sky.veil, 0.0, "under a storm's deck it is the deck that shades")
+	sky.set_weather(0.0, 0.0, 3.912 / 300.0)
+	sky.mid_cloud_amount = 0.0
+	sky.cirrus_amount = 0.0
+	assert_gt(sky.veil, 0.7, "300 m fog under a 100 m base takes most of the sun")
+	assert_almost_eq(Globals.value("overcast_veil"), sky.veil, 1e-6, "off the ground too")
 	sky.drawing = false
 	assert_eq(Globals.value("overcast_veil"), 0.0, "and none once the sky lets go")
 

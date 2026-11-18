@@ -87,8 +87,8 @@ switches, and a mode where showers come and go on their own.
   under an OvercastWeather whose sky is placed and turn on `enabled`: it fetches the hours about
   the sky's `unix_time` (the forecast, or further back the record) and hands the weather
   conditions blended between them: cloud in each layer and its kind, the base from the air's dew
-  point, thunderheads from how unstable the air is, rain, temperature, wind and gusts, and the wind
-  the clouds ride. Set the sky's `unix_time` to the clock for the weather now. Turning it on sends
+  point, thunderheads from how unstable the air is, rain and how much of it is snow (the model's
+  say, which knows the air aloft), fog, temperature, wind and gusts, and the wind the clouds ride. Set the sky's `unix_time` to the clock for the weather now. Turning it on sends
   the sky's latitude and longitude to Open-Meteo, so ask the player first. Open-Meteo is free
   without a key for non-commercial use only (`api_key` for its paid service), and its data is
   CC BY 4.0: credit it.
@@ -134,6 +134,8 @@ switches, and a mode where showers come and go on their own.
     standing water. They land on the rain floor, so they need one
   - haze and far rain only through air that rain is actually falling in; snow turns the storm
     sky a pale grey, and hazes less
+  - fog and mist by `visibility` (m): it fills the air up to the cloud's base, rain or none, hides
+    the sky and veils the sun, so shadows go soft
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc` and calls
     `overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal)` from `fragment()`:
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's

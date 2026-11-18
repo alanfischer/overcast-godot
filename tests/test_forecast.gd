@@ -10,6 +10,8 @@ func _hourly() -> Dictionary:
 		"temperature_2m": [13.0, 9.0, null],
 		"dew_point_2m": [7.0, 8.6, null],
 		"precipitation": [0.0, 10.0, null],
+		"snowfall": [0.0, 0.0, null],
+		"visibility": [24000.0, 4000.0, null],
 		"weather_code": [3, 95, null],
 		"cloud_cover_low": [60, 100, null],
 		"cloud_cover_mid": [0, 100, null],
@@ -37,6 +39,7 @@ func test_an_hour_becomes_conditions() -> void:
 	assert_almost_eq(dry.gustiness, 1.0, 1e-6, "gusting to twice its speed")
 	assert_vec3_almost_eq(dry.wind_aloft, Vector3(0.0, 0.0, 20.0), 1e-4, "a north wind aloft blows south, +Z")
 	assert_lt(dry.towering, 0.01, "no thunderheads in still air")
+	assert_eq(dry.visibility, 20000.0, "clear air past 20 km is clear")
 	var storm: OvercastConditions = hours[1]
 	assert_almost_eq(storm.rain, 1.0, 1e-6, "10 mm an hour is a downpour")
 	assert_gt(storm.towering, 0.89, "a thunderstorm towers")
@@ -44,6 +47,8 @@ func test_an_hour_becomes_conditions() -> void:
 	assert_vec3_almost_eq(storm.wind, Vector3(0.0, 0.0, -4.0), 1e-4, "a south wind blows north, -Z")
 	assert_eq(storm.gustiness, 0.0, "steady")
 	assert_eq(storm.wind_aloft, Vector3.ZERO, "none aloft given: the weather's guess")
+	assert_eq(storm.visibility, 4000.0, "hazed by the rain")
+	assert_eq(storm.snow_share, 0.0, "and all of it rain")
 
 
 func test_the_worlds_north_turns_the_wind() -> void:
@@ -61,6 +66,12 @@ func test_rain_from_steady_cloud_and_from_showers() -> void:
 	assert_gt(showers.towering, 0.3, "built up")
 	var drizzle := Forecast.conditions_of({"weather_code": 53, "cloud_cover_low": 40})
 	assert_eq(drizzle.low_sheet, 1.0, "drizzle from stratus")
+	var sleet := Forecast.conditions_of({"temperature_2m": 2.0, "precipitation": 2.0, "snowfall": 0.7})
+	assert_almost_eq(sleet.snow_share, 0.5, 1e-6, "half of it snow, as the model has it, warm or not")
+	assert_almost_eq(Forecast.conditions_of({"temperature_2m": -5.0}).snow_share, 1.0, 1e-6,
+		"dry, by the temperature")
+	var fog := Forecast.conditions_of({"weather_code": 45})
+	assert_eq(fog.visibility, 300.0, "fog with no visibility given: a few hundred metres")
 	var empty := Forecast.conditions_of({})
 	assert_eq(empty.rain, 0.0, "nothing given: dry")
 	assert_eq(empty.low_cover, 0.0, "and clear")

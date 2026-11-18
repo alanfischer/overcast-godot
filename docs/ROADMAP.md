@@ -52,7 +52,9 @@ to a third party only when they agree).
 - Open-Meteo (done): `OvercastForecast` fetches the hours about the placed sky's moment, the
   forecast or the record, and hands the weather conditions blended between them. The clouds now
   drift with the wind (summed on the CPU into `overcast_cloud_drift`), the 850 hPa wind when the
-  forecast gives it. Not taken yet: visibility (fog and haze), and the freezing level.
+  forecast gives it. Visibility becomes fog and haze (OvercastWeather.visibility), and how much
+  of the rain is snow is the model's (snowfall against precipitation) rather than the ground
+  temperature's alone, which covers what the freezing level would.
 - METAR, near airports: observed cloud bases, and towering cumulus and cumulonimbus by name.
 - Satellite, last: geostationary cloud imagery (NASA GIBS tiles, about every ten minutes) cropped
   round the place into a cover texture that steers the cloud noise, so the clouds overhead are

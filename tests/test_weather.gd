@@ -1444,3 +1444,19 @@ func test_the_wind_is_quieter_under_a_roof() -> void:
 		w._process(0.1)
 	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather._WIND_INDOOR_GAIN), 0.01,
 		"indoors, WIND_INDOOR_GAIN of it")
+
+
+func test_fog_hazes_with_no_rain() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w._process(0.01)
+	assert_true(w._haze == null or not w._haze.visible, "clear air: no haze pass")
+	w.visibility = 200.0
+	w._process(0.01)
+	assert_true(w._haze != null and w._haze.visible, "fog brings it up, dry as it is")
+	assert_almost_eq(w._haze_material.get_shader_parameter("mist"), w.mist(), 1e-9, "as thick as the fog")
+	assert_gt(w.mist(), 0.019, "200 m of fog takes most of the light over 200 m")
+	w.visibility = Weather.CLEAR_VISIBILITY
+	w._process(0.01)
+	assert_false(w._haze.visible, "cleared, it goes")

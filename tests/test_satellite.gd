@@ -63,7 +63,7 @@ func test_a_cover_map_is_laid_and_taken_up() -> void:
 	sky.set_cover_map(map, 200000.0)
 	assert_eq(Globals.value("overcast_cover_map"), map, "laid")
 	var frame: Vector4 = Globals.value("overcast_cover_map_frame")
-	assert_vec3_almost_eq(Vector3(frame.x, 0.0, frame.y), Vector3(0.0, 0.0, 1.0), 1e-5,
+	assert_vec2_almost_eq(Vector2(frame.x, frame.y), Vector2(0.0, 1.0), 1e-5,
 		"east turned with the world's north: north at +X puts east at +Z")
 	assert_eq(frame.z, 200000.0, "its span")
 	assert_almost_eq(frame.w, sky.world_scale, 1e-6, "and the world's scale")

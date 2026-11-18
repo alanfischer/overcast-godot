@@ -69,9 +69,13 @@ static func _to_world(lst: float, latitude: float, north: float) -> Basis:
 		Vector3(-sin(t), -sin(p) * cos(t), cos(p) * cos(t)),
 		Vector3(cos(t), -sin(p) * sin(t), cos(p) * sin(t)),
 		Vector3(0.0, cos(p), sin(p)))
-	var north_w := Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north))
-	var east_w := north_w.rotated(Vector3.UP, -PI * 0.5)
-	return Basis(east_w, north_w, Vector3.UP) * enu
+	return Basis(bearing(90.0, north), bearing(0.0, north), Vector3.UP) * enu
+
+
+## The world's way toward compass bearing `degrees` (clockwise from north), its north turned
+## `north` degrees from -Z, clockwise seen from above.
+static func bearing(degrees: float, north := 0.0) -> Vector3:
+	return Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north + degrees))
 
 
 ## Ecliptic longitude and latitude (degrees) to a unit equatorial vector, d days in.

@@ -49,11 +49,9 @@ var hours: Array[OvercastConditions] = []
 
 var _http: HTTPRequest
 var _place := Vector2.INF
-var _north := NAN
 var _fetched_at := -INF
 var _retry_at := -INF
-var _shown := NAN
-var _raw := {}
+var _shown := Vector2(NAN, NAN)  # the moment and north the weather was last handed
 
 
 func _ready() -> void:
@@ -74,16 +72,13 @@ func _process(_delta: float) -> void:
 	if not _covers(t) or place.distance_to(_place) > _MOVED \
 			or (t > now - 2 * 86400.0 and now - _fetched_at > refresh):
 		_fetch(t, place, now)
-	if sky.north != _north and not _raw.is_empty():
-		_north = sky.north
-		_build()
-		_shown = NAN
-	if _covers(t) and not absf(t - _shown) < _STEP:
-		_shown = t
-		w.conditions = conditions_at(t)
+	if _covers(t) and (not absf(t - _shown.x) < _STEP or sky.north != _shown.y):
+		_shown = Vector2(t, sky.north)
+		w.conditions = turned(conditions_at(t), sky.north)
 
 
 ## The conditions at `t` (Unix seconds), between the two hours either side; null outside them.
+## Their winds blow in a world whose north is -Z (turned).
 func conditions_at(t: float) -> OvercastConditions:
 	if not _covers(t):
 		return null
@@ -119,6 +114,8 @@ func _fetch(t: float, place: Vector2, now: float) -> void:
 	if _http.request(url, ["User-Agent: overcast-godot"]) == OK:
 		_place = place
 		_fetched_at = now
+		# Not again soon, answered or not: hours that still miss the moment would ask at once.
+		_retry_at = now + _RETRY
 	else:
 		_failed("could not start the request")
 
@@ -129,9 +126,10 @@ func _on_response(result: int, code: int, _headers: PackedStringArray, body: Pac
 		var reason: String = json.get("reason", "") if json is Dictionary else ""
 		_failed("HTTP %d %s" % [code, reason] if result == HTTPRequest.RESULT_SUCCESS else "request failed (%d)" % result)
 		return
-	_raw = json["hourly"]
-	_build()
-	_shown = NAN
+	var parsed := parse(json["hourly"])
+	times = parsed[0]
+	hours = parsed[1]
+	_shown = Vector2(NAN, NAN)
 	updated.emit()
 
 
@@ -141,15 +139,17 @@ func _failed(message: String) -> void:
 	failed.emit(message)
 
 
-func _build() -> void:
-	var parsed := parse(_raw, 0.0 if is_nan(_north) else _north)
-	times = parsed[0]
-	hours = parsed[1]
+## `c` in a world whose north is turned `north` degrees from -Z, clockwise seen from above
+## (OvercastSky.north), as a new one.
+static func turned(c: OvercastConditions, north: float) -> OvercastConditions:
+	var out: OvercastConditions = c.duplicate()
+	out.wind = c.wind.rotated(Vector3.UP, -deg_to_rad(north))
+	out.wind_aloft = c.wind_aloft.rotated(Vector3.UP, -deg_to_rad(north))
+	return out
 
 
-## Open-Meteo's `hourly` block as [times, conditions], the world's north turned `north` degrees
-## from -Z, clockwise seen from above (OvercastSky.north).
-static func parse(hourly: Dictionary, north := 0.0) -> Array:
+## Open-Meteo's `hourly` block as [times, conditions].
+static func parse(hourly: Dictionary) -> Array:
 	var ts := PackedFloat64Array()
 	var cs: Array[OvercastConditions] = []
 	var at: Array = hourly.get("time", [])
@@ -161,18 +161,19 @@ static func parse(hourly: Dictionary, north := 0.0) -> Array:
 		if v["temperature_2m"] == null or v["cloud_cover_low"] == null:
 			continue  # an hour not yet in the record
 		ts.append(at[i])
-		cs.append(conditions_of(v, north))
+		cs.append(conditions_of(v))
 	return [ts, cs]
 
 
-## One hour of Open-Meteo's values (by its names; any may be null) as conditions.
-static func conditions_of(v: Dictionary, north := 0.0) -> OvercastConditions:
+## One hour of Open-Meteo's values (by its names; any may be null) as conditions, north -Z.
+static func conditions_of(v: Dictionary) -> OvercastConditions:
 	var c := OvercastConditions.new()
 	var temperature := _num(v, "temperature_2m", 10.0)
 	var code := int(_num(v, "weather_code", 0.0))
 	var showery := code in [80, 81, 82, 85, 86, 95, 96, 99]
 	var steady := (code >= 51 and code <= 67) or (code >= 71 and code <= 77)
-	var dull := (code >= 51 and code <= 57) or code == 45 or code == 48  # drizzle or fog: stratus
+	var foggy := code == 45 or code == 48
+	var dull := (code >= 51 and code <= 57) or foggy  # drizzle or fog: stratus
 	var cape := _num(v, "cape", 0.0)
 	var convective := maxf(smoothstep(50.0, 800.0, cape), 0.6 if showery else 0.0)
 	c.temperature = temperature
@@ -197,20 +198,18 @@ static func conditions_of(v: Dictionary, north := 0.0) -> OvercastConditions:
 	c.rain = sqrt(mm / _DOWNPOUR) if mm >= 0.05 else 0.0
 	# Which falls as snow is the model's, which knows the air aloft; dry, it is the temperature's.
 	c.snow_share = clampf(_num(v, "snowfall", 0.0) * _SNOW_WATER / mm, 0.0, 1.0) if c.rain > 0.0 \
-		else 1.0 - smoothstep(OvercastWeather.SLEET.x, OvercastWeather.SLEET.y, temperature)
-	c.visibility = clampf(_num(v, "visibility", _FOG if code == 45 or code == 48 else OvercastWeather.CLEAR_VISIBILITY),
+		else OvercastWeather.snow_share_at(temperature)
+	c.visibility = clampf(_num(v, "visibility", _FOG if foggy else OvercastWeather.CLEAR_VISIBILITY),
 		10.0, OvercastWeather.CLEAR_VISIBILITY)
 	var speed := _num(v, "wind_speed_10m", 0.0)
-	c.wind = _blowing(_num(v, "wind_direction_10m", 0.0), north) * speed
+	# A wind from a bearing blows toward the opposite one.
+	c.wind = OvercastEphemeris.bearing(_num(v, "wind_direction_10m", 0.0) + 180.0) * speed
 	c.gustiness = clampf(_num(v, "wind_gusts_10m", speed) / maxf(speed, 1.0) - 1.0, 0.0, 1.0)
-	if v.get("wind_speed_850hPa") != null and v.get("wind_direction_850hPa") != null:
-		c.wind_aloft = _blowing(v["wind_direction_850hPa"], north) * float(v["wind_speed_850hPa"])
+	# Without the 850 hPa wind, the weather's own guess, filled in so hours blend evenly.
+	c.wind_aloft = OvercastEphemeris.bearing(float(v["wind_direction_850hPa"]) + 180.0) \
+		* float(v["wind_speed_850hPa"]) if v.get("wind_speed_850hPa") != null \
+		and v.get("wind_direction_850hPa") != null else c.wind * OvercastWeather.ALOFT
 	return c
-
-
-## Which way, in the world, a wind from `from` degrees (compass, clockwise from north) blows.
-static func _blowing(from: float, north: float) -> Vector3:
-	return Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north + from + 180.0))
 
 
 static func _num(v: Dictionary, key: String, fallback: float) -> float:

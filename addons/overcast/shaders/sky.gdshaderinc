@@ -245,21 +245,22 @@ float storm_body_of(float n) {
 	return clamp(0.55 + 0.7 * n, 0.4, 1.3);
 }
 
+// The lower half's fold of the star catalogue's octahedral map, each way (as sign(), but 0 is +).
+vec2 star_fold(vec2 p) {
+	return (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+}
+
 // Where unit n lands on the star catalogue's octahedral map, 0 to 1, and back.
 vec2 star_octahedral(vec3 n) {
 	n /= abs(n.x) + abs(n.y) + abs(n.z);
-	vec2 p = n.xy;
-	if (n.z < 0.0) {
-		p = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
-	}
-	return p * 0.5 + 0.5;
+	return (n.z < 0.0 ? star_fold(n.xy) : n.xy) * 0.5 + 0.5;
 }
 
 vec3 star_unoctahedral(vec2 uv) {
 	vec2 p = uv * 2.0 - 1.0;
 	vec3 n = vec3(p, 1.0 - abs(p.x) - abs(p.y));
 	if (n.z < 0.0) {
-		n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+		n.xy = star_fold(n.xy);
 	}
 	return normalize(n);
 }
@@ -313,14 +314,14 @@ vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
 			}
 			vec3 sd = star_unoctahedral((vec2(tc) + (t.rg * 255.0 + 0.5) / 256.0) / vec2(size));
 			float d = length(dir - sd);
-			// Brightness on a perceptual scale, the flux ratio to the power 0.75; the brightest a
-			// little larger as well, as glare makes them.
-			float bright = pow(10.0, -0.3 * (mag - 1.5)) * smoothstep(limit, limit - 0.8, mag);
+			// The brightest a little larger, as glare makes them.
 			float r = mix(0.0006, 0.0022, smoothstep(5.0, -1.0, mag));
 			float rr = max(r, px * 0.9);
 			if (d >= rr) {
 				continue;
 			}
+			// Brightness on a perceptual scale, the flux ratio to the power 0.75.
+			float bright = pow(10.0, -0.3 * (mag - 1.5)) * smoothstep(limit, limit - 0.8, mag);
 			float bv = t.a * 255.0 / 100.0 - 0.5;
 			vec3 tint = mix(vec3(1.0, 0.78, 0.55), vec3(0.72, 0.84, 1.0), smoothstep(1.4, -0.1, bv));
 			float h = overcast_hash12(vec2(tc));
@@ -356,7 +357,7 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (cirrus_amount > 0.0) {
 		float h = CLOUD_HEIGHT * cirrus_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
-		float amount = cloud_map_amount(cam.xz + eye_dir.xz * d, h, cirrus_amount);
+		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, cirrus_amount);
 		vec2 hp = cloud_layer_at(cam, eye_dir, d, h) * 0.6;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		float c = cloud_tex(vec2(hp.x * 0.25, hp.y) + wind * 2.5 + vec2(3.7, 1.3));
@@ -381,7 +382,7 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (mid_cloud_amount > 0.0) {
 		float h = CLOUD_HEIGHT * mid_cloud_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
-		float amount = cloud_map_amount(cam.xz + eye_dir.xz * d, h, mid_cloud_amount);
+		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, mid_cloud_amount);
 		vec2 mp = cloud_layer_at(cam, eye_dir, d, h) + wind * 1.3;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		// Where the sheet is: broad patches that join up as there is more of it.

@@ -155,13 +155,7 @@ func _set_real(on: bool) -> void:
 	if on:
 		for key in _UNSLID:
 			_unslid[key] = sky.get(key)
-	if on and not has_node("Weather/Forecast"):
-		var forecast := OvercastForecast.new()
-		forecast.name = "Forecast"
-		forecast.failed.connect(func(m: String) -> void: push_warning("Open-Meteo: " + m))
-		weather.add_child(forecast)
-	if has_node("Weather/Forecast"):
-		$Weather/Forecast.enabled = on
+	_feed(OvercastForecast, "Open-Meteo", on)
 	if not on:
 		weather.conditions = null
 		for key in _unslid:
@@ -173,13 +167,20 @@ func _set_real(on: bool) -> void:
 
 ## The satellite's clouds round the place at its date and time. Sends the place to NASA.
 func _set_satellite(on: bool) -> void:
-	if on and not has_node("Weather/Satellite"):
-		var satellite := OvercastSatellite.new()
-		satellite.name = "Satellite"
-		satellite.failed.connect(func(m: String) -> void: push_warning("Satellite: " + m))
-		weather.add_child(satellite)
-	if has_node("Weather/Satellite"):
-		$Weather/Satellite.enabled = on
+	_feed(OvercastSatellite, "NASA", on)
+
+
+## Turns the weather's feed of `kind` on or off, making it the first time; `source` names it in
+## its warnings.
+func _feed(kind: GDScript, source: String, on: bool) -> void:
+	var feed: Node = weather.get_node_or_null(source)
+	if feed == null and on:
+		feed = kind.new()
+		feed.name = source
+		feed.failed.connect(func(m: String) -> void: push_warning(source + ": " + m))
+		weather.add_child(feed)
+	if feed:
+		feed.enabled = on
 
 
 func _set_date(day: float) -> void:

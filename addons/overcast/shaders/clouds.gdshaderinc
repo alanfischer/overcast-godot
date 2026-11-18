@@ -135,10 +135,10 @@ vec3 cloud_map_uv(vec2 w, float height) {
 	float rho = length(w);
 	float r = CLOUD_EARTH * CLOUD_HEIGHT;
 	float y = sqrt(max((r + height) * (r + height) - rho * rho, 0.0)) - r;
-	float e = atan(y, max(rho, 1e-3));
-	// Kilometres along the ground to the real layer at elevation e, the stable form.
+	// The sine of its elevation, and kilometres along the ground to the real layer seen there,
+	// the stable form.
+	float s = y * inversesqrt(y * y + max(rho * rho, 1e-6));
 	float h = height / overcast_cover_map_frame.w * 0.001;
-	float s = sin(e);
 	float d = (2.0 * EARTH_KM * h + h * h)
 		/ (sqrt(EARTH_KM * EARTH_KM * s * s + 2.0 * EARTH_KM * h + h * h) + EARTH_KM * s);
 	vec2 real = rho > 1e-3 ? w / rho * d * 1000.0 : vec2(0.0);
@@ -148,27 +148,26 @@ vec3 cloud_map_uv(vec2 w, float height) {
 	return vec3(uv, 1.0 - smoothstep(0.42, 0.5, max(abs(uv.x - 0.5), abs(uv.y - 0.5))));
 }
 
-// How far the cover maps push toward cloud (up to +0.5) or clear sky at noise point q (as cp, the
-// wind in) on a shell `height` over the origin: the map laid, and the one before as it fades.
-float cloud_map_push(vec2 q, float height) {
-	float k = CLOUD_HEIGHT / overcast_scale;
-	float push = 0.0;
-	if (overcast_cover_map_place.z > 0.0) {
-		vec3 at = cloud_map_uv((q - overcast_cover_map_place.xy) * k, height);
-		push += (textureLod(overcast_cover_map, at.xy, 0.0).r - 0.5) * at.z * overcast_cover_map_place.z;
+// One cover map's push toward cloud (up to +0.5) or clear sky at noise point q, laid at `place`.
+float cloud_map_one(sampler2D map, vec4 place, vec2 q, float height) {
+	if (place.z <= 0.0) {
+		return 0.0;
 	}
-	if (overcast_cover_map_was_place.z > 0.0) {
-		vec3 at = cloud_map_uv((q - overcast_cover_map_was_place.xy) * k, height);
-		push += (textureLod(overcast_cover_map_was, at.xy, 0.0).r - 0.5) * at.z * overcast_cover_map_was_place.z;
-	}
-	return push;
+	vec3 at = cloud_map_uv((q - place.xy) * (CLOUD_HEIGHT / overcast_scale), height);
+	return (textureLod(map, at.xy, 0.0).r - 0.5) * at.z * place.z;
 }
 
-// How much of a higher layer stands where a ray meets its shell `height` at world point p (xz),
-// `amount` of it over the whole sky: moved about by the cover maps, where there are any.
-float cloud_map_amount(vec2 p, float height, float amount) {
-	return clamp(amount + cloud_map_push(p * (overcast_scale / CLOUD_HEIGHT) + cloud_wind(), height)
-		* CLOUD_MAP_AMOUNT, 0.0, 1.0);
+// How far the cover maps push at noise point q (as cp, the wind in) on a shell `height` over the
+// origin: the map laid, and the one before as it fades.
+float cloud_map_push(vec2 q, float height) {
+	return cloud_map_one(overcast_cover_map, overcast_cover_map_place, q, height)
+		+ cloud_map_one(overcast_cover_map_was, overcast_cover_map_was_place, q, height);
+}
+
+// How much of a higher layer stands at noise point q (as cp: the cloud layer's, the wind in) on
+// its shell `height` up, `amount` of it over the whole sky: moved about by the cover maps.
+float cloud_map_amount(vec2 q, float height, float amount) {
+	return clamp(amount + cloud_map_push(q, height) * CLOUD_MAP_AMOUNT, 0.0, 1.0);
 }
 
 // The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp: the cover

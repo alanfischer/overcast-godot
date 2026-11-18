@@ -51,10 +51,8 @@ var _http: HTTPRequest
 var _colormap := []
 var _colors := {}
 var _busy := false
-var _place := Vector2.INF
-var _want := 0
+var _asked := []  # the place and frame last fetched for
 var _retry_at := -INF
-var _laid_on: OvercastSky
 
 
 func _ready() -> void:
@@ -68,15 +66,18 @@ func _exit_tree() -> void:
 
 
 func _process(_delta: float) -> void:
-	var w := weather if weather else get_parent() as OvercastWeather
+	var w := _target()
 	var sky := w.current_sky() if w else null
 	if not enabled or sky == null or not sky.placed or _busy:
 		return
 	var now := Time.get_unix_time_from_system()
-	var want := frame_time(sky.unix_time, now)
-	var place := Vector2(sky.latitude, sky.longitude)
-	if (want != _want or place != _place or sky != _laid_on) and now >= _retry_at:
-		_fetch(sky, place, want)
+	var asked := [Vector2(sky.latitude, sky.longitude), frame_time(sky.unix_time, now)]
+	if asked != _asked and now >= _retry_at:
+		_fetch(w, asked[0], asked[1])
+
+
+func _target() -> OvercastWeather:
+	return weather if weather else get_parent() as OvercastWeather
 
 
 ## The frame to show at `t`: the last at or before it, and none newer than is published by `now`.
@@ -96,10 +97,9 @@ static func layer_for(longitude: float) -> String:
 	return best
 
 
-func _fetch(sky: OvercastSky, place: Vector2, want: int) -> void:
+func _fetch(w: OvercastWeather, place: Vector2, want: int) -> void:
 	_busy = true
-	_want = want
-	_place = place
+	_asked = [place, want]
 	var layer := layer_for(place.y)
 	var error := ""
 	if layer.is_empty():
@@ -136,13 +136,13 @@ func _fetch(sky: OvercastSky, place: Vector2, want: int) -> void:
 		return
 	if map == null:
 		_retry_at = Time.get_unix_time_from_system() + _RETRY
+		_asked = []  # so it is asked again
 		failed.emit(error)
 		return
+	# A sky's clock run fast asks for frame after frame: no sooner than one has faded in.
+	_retry_at = Time.get_unix_time_from_system() + OvercastClouds.COVER_FADE
 	frame = t
-	if _laid_on and _laid_on != sky:
-		_laid_on.set_cover_map(null, SPAN)
-	_laid_on = sky
-	sky.set_cover_map(ImageTexture.create_from_image(map), SPAN)
+	w.set_cover_map(ImageTexture.create_from_image(map), SPAN)
 	updated.emit()
 
 
@@ -163,11 +163,11 @@ func _download(url: String) -> PackedByteArray:
 
 
 func _clear() -> void:
-	if _laid_on:
-		_laid_on.set_cover_map(null, SPAN)
-	_laid_on = null
+	var w := _target() if is_inside_tree() else weather
+	if w and frame != 0:
+		w.set_cover_map(null, SPAN)
 	frame = 0
-	_want = 0
+	_asked = []
 
 
 ## GIBS' colour map: its colours in order of temperature, as [Vector3 rgb, °C] (each colour's

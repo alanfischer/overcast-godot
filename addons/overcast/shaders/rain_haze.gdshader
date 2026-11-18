@@ -122,7 +122,8 @@ void fragment() {
 	// GPUs.
 	float jitter = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 	float rainy = 0.0;
-	for (int i = 0; i < STEPS; i++) {
+	// Fog alone hazes with no rain to march through.
+	for (int i = 0; i < (density > 0.0 || streak_opacity > 0.0 ? STEPS : 0); i++) {
 		vec3 p = cam + dir * (t0 + (float(i) + jitter) * step_len);
 		if (raining_at(p)) {
 			float gust = textureLod(gust_noise, p / GUST_CELL + gust_offset, 0.0).r;

@@ -8,6 +8,8 @@ const SkyScript = preload("res://addons/overcast/overcast_sky.gd")
 const _Ephemeris = preload("res://addons/overcast/overcast_ephemeris.gd")
 const SIZE := 1024
 const OUT := "res://addons/overcast/stars.res"
+## Steps of the blue channel a magnitude, from magnitude -2 at 255 (0 is no star).
+const _PER_MAGNITUDE := 25.0
 
 
 func _initialize() -> void:
@@ -38,7 +40,7 @@ func _initialize() -> void:
 		var uv := octahedral(dir) * SIZE
 		var texel := Vector2i(mini(int(uv.x), SIZE - 1), mini(int(uv.y), SIZE - 1))
 		var o := (texel.y * SIZE + texel.x) * 4
-		var b := clampi(roundi(255.0 - (mag + 2.0) * 25.0), 1, 255)
+		var b := clampi(roundi(255.0 - (mag + 2.0) * _PER_MAGNITUDE), 1, 255)
 		if data[o + 2] >= b:
 			dropped += 1  # a brighter one is there already
 			continue
@@ -54,6 +56,11 @@ func _initialize() -> void:
 	print("%d stars, %d sharing a texel with a brighter one; %s: %s" % [stars - dropped, dropped, OUT,
 		error_string(err)])
 	quit(0 if err == OK else 1)
+
+
+## The magnitude a texel holds (as sky.gdshaderinc reads it).
+static func magnitude(texel: Color) -> float:
+	return (1.0 - texel.b) * 255.0 / _PER_MAGNITUDE - 2.0
 
 
 ## Where unit `n` lands on the octahedral map, 0 to 1 (as star_octahedral in sky.gdshaderinc).

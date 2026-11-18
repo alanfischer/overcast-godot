@@ -32,20 +32,20 @@ func _disable_plugin() -> void:
 
 
 func _declare() -> void:
-	var added := false
+	var changed := false
 	for key in Globals.GLOBALS:
 		var setting: String = "shader_globals/" + key
 		if not ProjectSettings.has_setting(setting):
 			ProjectSettings.set_setting(setting,
 				{"type": Globals.GLOBALS[key][0], "value": Globals.GLOBALS[key][1]})
-			added = true
+			changed = true
 	# One an older version declared and this one dropped.
 	for p in ProjectSettings.get_property_list():
 		var setting: String = p["name"]
 		if setting.begins_with("shader_globals/overcast_") \
 				and not Globals.GLOBALS.has(setting.trim_prefix("shader_globals/")):
 			ProjectSettings.set_setting(setting, null)
-			added = true
-	if added:
+			changed = true
+	if changed:
 		ProjectSettings.save()
 	Globals.declare()  # this session's RenderingServer too, which read the settings at startup

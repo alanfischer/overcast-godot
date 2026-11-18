@@ -284,6 +284,7 @@ var _started := false
 var _told_wind := Vector3.INF
 var _cover_map: Texture2D
 var _cover_span := 1.0
+var _stars_bound := false
 var _storm := 0.0
 var _snowy := 0.0
 var _mist := 0.0
@@ -325,8 +326,6 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 			set_shader_parameter(key, null)
 	time_of_day = time_of_day
 	_sync_heights()
-	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
-	RenderingServer.material_set_param(get_rid(), &"star_catalogue", _star_catalogue().get_rid())
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
 	# before it ever draws.
@@ -341,7 +340,8 @@ func _start() -> void:
 ## The Yale Bright Star Catalogue, as tools/bake_stars.gd lays it out: made once.
 static func _star_catalogue() -> Texture2D:
 	if _catalogue == null:
-		_catalogue = ImageTexture.create_from_image(load("res://addons/overcast/stars.res"))
+		_catalogue = ImageTexture.create_from_image(
+			ResourceLoader.load("res://addons/overcast/stars.res", "", ResourceLoader.CACHE_MODE_IGNORE))
 	return _catalogue
 
 
@@ -581,6 +581,12 @@ func _sync_light() -> void:
 	set_shader_parameter("moon_lit_from", _now["lit_from"])
 	set_shader_parameter("moonlight", _moonlight())
 	set_shader_parameter("star_basis", _now["stars"])
+	# The catalogue only once there are stars to draw, and not at all where nothing is drawn.
+	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
+	if not _stars_bound and (night > 0.0 or _float_param(&"star_amount") > 0.0) \
+			and DisplayServer.get_name() != "headless":
+		_stars_bound = true
+		RenderingServer.material_set_param(get_rid(), &"star_catalogue", _star_catalogue().get_rid())
 	_sync_air()
 	_sync_layer()
 
@@ -826,10 +832,8 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		var claimed := _Clouds._owner != _id
 		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, _drift(), cloud_softness)
-		if claimed:
-			_sync_cover_map()
+		_sync_cover_map()
 		_push_weather()
 	else:
 		_Clouds._release(_id)
@@ -857,7 +861,8 @@ func set_wind(aloft: Vector3) -> void:
 
 ## Where the cloud really is round the place: `map` white where cloudy, black where clear, mid
 ## grey where it has no say, north up, centred on the scene's origin and `span` real metres
-## across. Each layer's amount stays its own: the map moves it about. From here on it rides the wind. Null takes it away. OvercastForecast lays the satellite's.
+## across. Each layer's amount stays its own: the map moves it about. From here on it rides the
+## wind, and a new one fades in over it. Null takes it away. OvercastSatellite lays NASA's.
 func set_cover_map(map: Texture2D, span: float) -> void:
 	_cover_map = map
 	_cover_span = span
@@ -866,7 +871,7 @@ func set_cover_map(map: Texture2D, span: float) -> void:
 
 func _sync_cover_map() -> void:
 	if _started and drawing:
-		var east := Vector3.RIGHT.rotated(Vector3.UP, -deg_to_rad(north))
+		var east := _Ephemeris.bearing(90.0, north)
 		_Clouds._set_cover_map(_id, _cover_map, Vector2(east.x, east.z), _cover_span, world_scale)
 
 

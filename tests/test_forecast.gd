@@ -46,14 +46,17 @@ func test_an_hour_becomes_conditions() -> void:
 	assert_lt(storm.low_base, 300.0, "under a low base in the damp air")
 	assert_vec3_almost_eq(storm.wind, Vector3(0.0, 0.0, -4.0), 1e-4, "a south wind blows north, -Z")
 	assert_eq(storm.gustiness, 0.0, "steady")
-	assert_eq(storm.wind_aloft, Vector3.ZERO, "none aloft given: the weather's guess")
+	assert_vec3_almost_eq(storm.wind_aloft, storm.wind * 2.0, 1e-5, "none aloft given: the weather's guess, filled in")
 	assert_eq(storm.visibility, 4000.0, "hazed by the rain")
 	assert_eq(storm.snow_share, 0.0, "and all of it rain")
 
 
 func test_the_worlds_north_turns_the_wind() -> void:
-	var c := Forecast.conditions_of({"wind_speed_10m": 5.0, "wind_direction_10m": 180.0}, 90.0)
-	assert_vec3_almost_eq(c.wind, Vector3(5.0, 0.0, 0.0), 1e-4, "north turned to +X: a south wind blows there")
+	var c := Forecast.conditions_of({"wind_speed_10m": 5.0, "wind_direction_10m": 180.0})
+	var turned := Forecast.turned(c, 90.0)
+	assert_vec3_almost_eq(turned.wind, Vector3(5.0, 0.0, 0.0), 1e-4, "north turned to +X: a south wind blows there")
+	assert_vec3_almost_eq(turned.wind_aloft, Vector3(10.0, 0.0, 0.0), 1e-4, "aloft as well")
+	assert_vec3_almost_eq(c.wind, Vector3(0.0, 0.0, -5.0), 1e-4, "a copy, the hour left as it was")
 
 
 func test_rain_from_steady_cloud_and_from_showers() -> void:

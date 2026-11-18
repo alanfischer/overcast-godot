@@ -27,6 +27,10 @@ static var _drift_usec := 0
 ## Seconds a new cover map takes to fade in over the one before.
 const COVER_FADE := 60.0
 static var _fade := 1.0
+## The cover map laid and the drift it was laid at, and where the one before it was laid.
+static var _laid: Texture2D
+static var _laid_at := Vector2.ZERO
+static var _was_at := Vector2.ZERO
 ## The longest frame gap carried, so a stall does not jump the clouds.
 const _DRIFT_STEP_MAX := 0.25
 
@@ -76,26 +80,30 @@ static func _set_drift(owner: int, drift: Vector2) -> void:
 
 ## OvercastSky's: lay `map` (white cloudy, north up, `span` real metres across, centred on the
 ## origin) with east toward `east` (world xz) under a world shrunk `world_scale`, if `owner` holds
-## the layer; null takes it away. It rides the wind from here on.
+## the layer; null takes it away. It rides the wind from here on; laid again, it stays put.
 static func _set_cover_map(owner: int, map: Texture2D, east: Vector2, span: float,
 		world_scale: float) -> void:
 	if owner != _owner:
 		return
-	var laid: Vector4 = Globals.value("overcast_cover_map_place")
 	if map == null:
 		_clear_cover_maps()
 		return
-	# The frame before fades out under this one rather than giving way to it at once.
-	_fade = 0.0 if laid.z > 0.0 else 1.0
-	if laid.z > 0.0:
-		_set_global("overcast_cover_map_was", Globals.value("overcast_cover_map"))
-		_set_global("overcast_cover_map_was_place", Vector4(laid.x, laid.y, 1.0, 0.0))
-	_set_global("overcast_cover_map", map)
 	_set_global("overcast_cover_map_frame", Vector4(east.x, east.y, span, world_scale))
-	_set_global("overcast_cover_map_place", Vector4(_drift_x, _drift_y, _fade, 0.0))
+	if map == _laid:
+		return
+	# The frame before fades out under this one rather than giving way to it at once.
+	if _laid:
+		_was_at = _laid_at
+		_set_global("overcast_cover_map_was", _laid)
+	_fade = 0.0 if _laid else 1.0
+	_laid = map
+	_laid_at = Vector2(_drift_x, _drift_y)
+	_set_global("overcast_cover_map", map)
+	_push_cover_fade()
 
 
 static func _clear_cover_maps() -> void:
+	_laid = null
 	_fade = 1.0
 	_set_global("overcast_cover_map_place", Vector4.ZERO)
 	_set_global("overcast_cover_map_was_place", Vector4.ZERO)
@@ -104,10 +112,12 @@ static func _clear_cover_maps() -> void:
 ## How far the frame laid has faded in over the one before, 0 to 1.
 static func _fade_cover_maps(dt: float) -> void:
 	_fade = minf(_fade + dt / COVER_FADE, 1.0)
-	var laid: Vector4 = Globals.value("overcast_cover_map_place")
-	_set_global("overcast_cover_map_place", Vector4(laid.x, laid.y, _fade, 0.0))
-	var was: Vector4 = Globals.value("overcast_cover_map_was_place")
-	_set_global("overcast_cover_map_was_place", Vector4(was.x, was.y, 1.0 - _fade, 0.0))
+	_push_cover_fade()
+
+
+static func _push_cover_fade() -> void:
+	_set_global("overcast_cover_map_place", Vector4(_laid_at.x, _laid_at.y, _fade, 0.0))
+	_set_global("overcast_cover_map_was_place", Vector4(_was_at.x, _was_at.y, 1.0 - _fade, 0.0))
 
 
 static func _advance() -> void:
@@ -142,6 +152,9 @@ static func _release(owner: int) -> void:
 	_drift_rate = Vector2.ZERO
 	_set_cover(0.0, 0.0)
 	_clear_cover_maps()
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree and tree.process_frame.is_connected(_advance):
+		tree.process_frame.disconnect(_advance)
 	while not _drawing.is_empty():
 		var sky = instance_from_id(_drawing[-1])
 		if sky and sky.drawing:

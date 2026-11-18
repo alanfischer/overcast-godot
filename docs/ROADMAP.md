@@ -63,4 +63,4 @@ to a third party only when they agree).
   temperatures barely differ. The shell meets the horizon a few heights out where the real layer
   runs on for a hundred km, so the map is looked up by elevation and bearing. Not yet: Europe,
   Africa and India (no Meteosat in GIBS); telling the layers apart by temperature (every layer
-  takes the same map); cross-fading frames rather than swapping them; the daytime visible band.
+  takes the same map); the daytime visible band. A new frame fades in over the last for a minute.

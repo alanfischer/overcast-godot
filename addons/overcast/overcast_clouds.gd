@@ -24,6 +24,9 @@ static var _drift_y := 0.0
 ## Noise units per second the owner's wind carries it.
 static var _drift_rate := Vector2.ZERO
 static var _drift_usec := 0
+## Seconds a new cover map takes to fade in over the one before.
+const COVER_FADE := 60.0
+static var _fade := 1.0
 ## The longest frame gap carried, so a stall does not jump the clouds.
 const _DRIFT_STEP_MAX := 0.25
 
@@ -78,18 +81,41 @@ static func _set_cover_map(owner: int, map: Texture2D, east: Vector2, span: floa
 		world_scale: float) -> void:
 	if owner != _owner:
 		return
+	var laid: Vector4 = Globals.value("overcast_cover_map_place")
 	if map == null:
-		_set_global("overcast_cover_map_place", Vector4.ZERO)
+		_clear_cover_maps()
 		return
+	# The frame before fades out under this one rather than giving way to it at once.
+	_fade = 0.0 if laid.z > 0.0 else 1.0
+	if laid.z > 0.0:
+		_set_global("overcast_cover_map_was", Globals.value("overcast_cover_map"))
+		_set_global("overcast_cover_map_was_place", Vector4(laid.x, laid.y, 1.0, 0.0))
 	_set_global("overcast_cover_map", map)
 	_set_global("overcast_cover_map_frame", Vector4(east.x, east.y, span, world_scale))
-	_set_global("overcast_cover_map_place", Vector4(_drift_x, _drift_y, 1.0, 0.0))
+	_set_global("overcast_cover_map_place", Vector4(_drift_x, _drift_y, _fade, 0.0))
+
+
+static func _clear_cover_maps() -> void:
+	_fade = 1.0
+	_set_global("overcast_cover_map_place", Vector4.ZERO)
+	_set_global("overcast_cover_map_was_place", Vector4.ZERO)
+
+
+## How far the frame laid has faded in over the one before, 0 to 1.
+static func _fade_cover_maps(dt: float) -> void:
+	_fade = minf(_fade + dt / COVER_FADE, 1.0)
+	var laid: Vector4 = Globals.value("overcast_cover_map_place")
+	_set_global("overcast_cover_map_place", Vector4(laid.x, laid.y, _fade, 0.0))
+	var was: Vector4 = Globals.value("overcast_cover_map_was_place")
+	_set_global("overcast_cover_map_was_place", Vector4(was.x, was.y, 1.0 - _fade, 0.0))
 
 
 static func _advance() -> void:
 	var now := Time.get_ticks_usec()
 	var dt := minf((now - _drift_usec) / 1e6, _DRIFT_STEP_MAX)
 	_drift_usec = now
+	if _fade < 1.0:
+		_fade_cover_maps(dt)
 	if _drift_rate == Vector2.ZERO:
 		return
 	_drift_x += _drift_rate.x * dt
@@ -115,7 +141,7 @@ static func _release(owner: int) -> void:
 	_owner = 0
 	_drift_rate = Vector2.ZERO
 	_set_cover(0.0, 0.0)
-	_set_global("overcast_cover_map_place", Vector4.ZERO)
+	_clear_cover_maps()
 	while not _drawing.is_empty():
 		var sky = instance_from_id(_drawing[-1])
 		if sky and sky.drawing:

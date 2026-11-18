@@ -22,6 +22,8 @@ const GLOBALS := {
 	"overcast_cover_map": ["sampler2D", ""],
 	"overcast_cover_map_frame": ["vec4", Vector4(1, 0, 1, 1)],
 	"overcast_cover_map_place": ["vec4", Vector4.ZERO],
+	"overcast_cover_map_was": ["sampler2D", ""],
+	"overcast_cover_map_was_place": ["vec4", Vector4.ZERO],
 	"overcast_rain_floor": ["sampler2D", ""],
 	"overcast_rain_under": ["sampler2D", ""],
 	"overcast_has_rain_floor": ["bool", false],

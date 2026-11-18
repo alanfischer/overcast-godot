@@ -246,6 +246,37 @@ func test_the_sun_crosses_the_sky_with_the_time() -> void:
 	assert_vec3_almost_eq(sky.sun_dir, noon, 1e-5, "and sun_dir is never moved")
 
 
+func test_a_placed_sky_is_the_real_one() -> void:
+	# Greenwich, 21 June 2026, 13:00 BST.
+	var sky := SkyScript.new({"drawing": false, "placed": true, "latitude": 51.4769, "longitude": 0.0,
+		"date": "2026-06-21", "utc_offset": 1.0, "time_of_day": 13.0})
+	assert_almost_eq(sky.unix_time, 1782043200.0, 1e-3, "the local clock, back to UTC")
+	var sun: Vector3 = sky.light_dir()
+	assert_almost_eq(rad_to_deg(asin(sun.y)), 61.96, 0.05, "the sun as high as midsummer puts it")
+	assert_gt(sun.z, 0.4, "in the south, -Z being north")
+	assert_eq(sky.night, 0.0, "day")
+	assert_almost_eq(sky.phase(), 0.236, 0.002, "the moon's phase is the date's")
+	assert_vec3_almost_eq(sky.get_shader_parameter("moon_lit_from"), sun, 1e-6, "lit from the sun")
+	sky.moon_phase = 0.9
+	assert_almost_eq(sky.phase(), 0.236, 0.002, "and moon_phase goes unused")
+	sky.north = 180.0
+	assert_lt(sky.light_dir().z, -0.4, "north turned round puts the sun the other way")
+	sky.north = 0.0
+	sky.unix_time = 1782043200.0 + 12 * 3600.0
+	assert_eq(sky.date, "2026-06-22", "setting the moment rolls the date over")
+	assert_almost_eq(sky.time_of_day, 1.0, 1e-6, "past local midnight")
+	assert_gt(sky.night, 0.9, "into the short summer night")
+	sky.latitude = 69.65
+	sky.longitude = 18.96
+	assert_lt(sky.night, 0.1, "which Tromsø does not have")
+	sky.unix_time = 1797849000.0  # 21 December, 10:30 UTC
+	assert_lt(sky._placed_sky["sun"].y, 0.0, "the polar night's noon: the sun stays down")
+	assert_gt(sky.dusk, 0.5, "a long twilight")
+	sky.placed = false
+	assert_vec3_almost_eq(sky.light_dir(), SkyScript.light_dir_at(sky.sun_dir, sky.time_of_day, sky.moon_phase), 1e-6,
+		"off, the arc again")
+
+
 func test_the_moon_keeps_its_own_time() -> void:
 	var noon := Vector3(0.3, 0.8, -0.5).normalized()
 	assert_vec3_almost_eq(SkyScript.moon_at(noon, 0.0, 0.5), noon, 1e-5, "a full moon stands at midnight where the sun did at noon")

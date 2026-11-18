@@ -127,3 +127,18 @@ layout_mode = 2
 max_value = 1.0
 step = 0.01
 value = 0.5
+
+[node name="Place" type="OptionButton" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="DateLabel" type="Label" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Date"
+
+[node name="Date" type="HSlider" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 364.0
+value = 171.0

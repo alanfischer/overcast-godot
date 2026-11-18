@@ -8,6 +8,9 @@ const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const GroundShader = preload("res://demo/ground.gdshader")
 
 const FIELD := 120.0
+## Name, latitude, longitude, hours ahead of UTC: the Place menu, after the day's plain arc.
+const PLACES := [["Greenwich", 51.48, 0.0, 0.0], ["Tromsø", 69.65, 18.96, 1.0],
+	["Quito", -0.18, -78.47, -5.0], ["Sydney", -33.87, 151.21, 10.0]]
 ## Photographed surfaces (textures/CREDITS.md): the maps' name, and metres one spans.
 const GROUND := ["forrest_ground_01", 2.0]
 const POSTS := ["rough_wood", 0.6]
@@ -54,6 +57,12 @@ func _ready() -> void:
 	%Strike.pressed.connect(func() -> void: weather.strike(randi()))
 	%Time.value_changed.connect(_set_time)
 	%Moon.value_changed.connect(func(phase: float) -> void: sky.moon_phase = phase)
+	%Place.add_item("The day's arc")
+	for place in PLACES:
+		%Place.add_item("%s, %.2f° %.2f°" % place.slice(0, 3))
+	%Place.item_selected.connect(_set_place)
+	%Date.value_changed.connect(_set_date)
+	_set_date(%Date.value)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
 
 
@@ -112,6 +121,32 @@ func _set_temperature(degrees: float) -> void:
 
 func _set_time(hours: float) -> void:
 	sky.time_of_day = hours  # the weather turns the sun, and lights its rain, to match
+	_show_phase()
+
+
+## 0 is the day's arc through sun_dir; after it the sky over PLACES, its moon the date's.
+func _set_place(index: int) -> void:
+	if index > 0:
+		var place: Array = PLACES[index - 1]
+		sky.latitude = place[1]
+		sky.longitude = place[2]
+		sky.utc_offset = place[3]
+	sky.placed = index > 0
+	%Moon.editable = not sky.placed
+	%Date.editable = sky.placed
+	_show_phase()
+
+
+func _set_date(day: float) -> void:
+	var unix := Time.get_unix_time_from_datetime_string("2026-01-01") + int(day) * 86400
+	sky.date = Time.get_date_string_from_unix_time(unix)
+	%DateLabel.text = "Date %s" % sky.date
+	_show_phase()
+
+
+func _show_phase() -> void:
+	if sky.placed:
+		%Moon.set_value_no_signal(sky.phase())
 
 
 func _process(delta: float) -> void:

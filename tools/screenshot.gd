@@ -2,7 +2,8 @@ extends SceneTree
 ## Screenshots of the demo for the README: OUT=dir, and RAIN=0.8 TEMP=-5 WIND=6 VOL=1 TIME=18.5 to
 ## vary it (as the demo's sliders: how much falls, and degrees C); CLOUDS=0 for a clear sky, MOON=0.25
 ## for the moon's phase, MOONVIEW=12 to shoot the moon through a lens that many degrees tall;
-## CLEARED=1 clears the sky over the settled weather.
+## CLEARED=1 clears the sky over the settled weather; PLACE=lat,lon[,utc offset] and DATE=YYYY-MM-DD
+## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole.
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -24,6 +25,14 @@ func _run() -> void:
 		demo.sky.cloud_amount = float(OS.get_environment("CLOUDS"))
 	if OS.get_environment("MOON") != "":
 		demo.sky.moon_phase = float(OS.get_environment("MOON"))
+	if OS.get_environment("PLACE") != "":
+		var place := OS.get_environment("PLACE").split_floats(",")
+		demo.sky.latitude = place[0]
+		demo.sky.longitude = place[1]
+		demo.sky.utc_offset = place[2] if place.size() > 2 else 0.0
+		if OS.get_environment("DATE") != "":
+			demo.sky.date = OS.get_environment("DATE")
+		demo.sky.placed = true
 	if OS.get_environment("TIME") != "":
 		demo.get_node("%Time").value = float(OS.get_environment("TIME"))
 	var rain := float(OS.get_environment("RAIN")) if OS.get_environment("RAIN") != "" else 0.0
@@ -43,7 +52,7 @@ func _run() -> void:
 	var views := {"field": [Vector3(0, 1.7, 8), 0.12, 0.0], "up": [Vector3(0, 1.7, 8), 0.7, 0.6],
 		"hut": [Vector3(-4, 1.7, -4), -0.05, 0.9], "ground": [Vector3(0, 1.7, 8), -0.45, 0.0]}
 	if OS.get_environment("SUNVIEWS") == "1":  # level, toward the sun's bearing and away from it
-		var s: Vector3 = demo.sky.sun_at(demo.sky.sun_dir, demo.sky.time_of_day)
+		var s: Vector3 = demo.sky.light_dir()
 		var yaw := atan2(-s.x, -s.z)
 		views = {"sun": [Vector3(0, 1.7, 8), 0.12, yaw], "anti": [Vector3(0, 1.7, 8), 0.12, yaw + PI],
 			"high": [Vector3(0, 1.7, 8), 0.9, yaw]}
@@ -51,6 +60,9 @@ func _run() -> void:
 		var m: Vector3 = demo.sky.moon_dir()
 		demo.camera.fov = float(OS.get_environment("MOONVIEW"))
 		views = {"moon": [Vector3(0, 1.7, 8), asin(m.y), atan2(-m.x, -m.z)]}
+	if OS.get_environment("POLE") == "1":  # the pole the stars turn about, due north or south
+		var lat: float = deg_to_rad(demo.sky.latitude)
+		views = {"pole": [Vector3(0, 1.7, 8), absf(lat), 0.0 if lat >= 0.0 else PI]}
 	for name in views:
 		var v: Array = views[name]
 		demo._yaw = v[2]

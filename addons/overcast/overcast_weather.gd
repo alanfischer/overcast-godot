@@ -1352,7 +1352,7 @@ func _drive_sun(drawn: OvercastSky) -> void:
 		_sun_color = sun.light_color
 	if sun.basis != _sun_set_basis:
 		_sun_basis = sun.basis
-	if drawn and drawn.sun_follows_time:
+	if drawn and drawn.sun_moves:
 		var toward := drawn.light_dir()
 		if not toward.is_equal_approx(sun.global_basis.z):
 			var up := Vector3.UP if absf(toward.y) < 0.999 else Vector3.FORWARD

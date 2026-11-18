@@ -39,7 +39,7 @@ $OvercastWeather.temperature = -5.0  # °C: snow below -1, rain above 3, sleet b
 ```
 
 Run `demo/demo.tscn` to see all of it. It has a field and a few open huts, with sliders for
-rain, temperature and the time of day, a lightning button, volumetric-clouds and lit-by-the-air
+rain, temperature, the time of day and a real place and date, a lightning button, volumetric-clouds and lit-by-the-air
 switches, and a mode where showers come and go on their own.
 
 ## What's in it
@@ -62,6 +62,12 @@ switches, and a mode where showers come and go on their own.
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
+- **A real place**: turn on `placed` and give `latitude`, `longitude`, `date` and `utc_offset`,
+  and the sun, moon and stars stand where they do there at `time_of_day` local time (or set
+  `unix_time`). The moon's phase is the date's, the stars turn about the real pole with the
+  Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
+  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
+  gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
 - **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
   Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
   instead. Overhead it's blue, at the horizon pale.

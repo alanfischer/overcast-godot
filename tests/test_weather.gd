@@ -1197,6 +1197,9 @@ func test_the_sun_light_turns_with_the_sky() -> void:
 	sky.time_of_day = 9.0
 	w._process(0.0)
 	assert_true(sun.global_basis.is_equal_approx(before), "a sun that does not follow the time is left where it is")
+	sky.placed = true
+	w._process(0.0)
+	assert_vec3_almost_eq(SkyScript.sun_dir_of(sun), sky.light_dir(), 1e-4, "but a placed sky's sun moves all the same")
 
 
 func test_lying_snow_comes_back_with_the_weather() -> void:

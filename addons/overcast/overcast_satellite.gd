@@ -1,10 +1,13 @@
 class_name OvercastSatellite
 extends Node
 ## Where the clouds really are round a placed sky (OvercastSky.placed): geostationary infrared
-## from NASA GIBS (gibs.earthdata.nasa.gov), every ten minutes, laid as the sky's cover map. How
-## much cloud there is stays the sky's to say (an OvercastForecast's, say); this says where it
-## lies: the coldest tops are cloud first. 2 km pixels: overhead that is one or two, so mostly it
-## places the banks and gaps toward the horizon. GOES-East, GOES-West and Himawari see the
+## from NASA GIBS (gibs.earthdata.nasa.gov), every ten minutes, laid as the sky's cover map. Tops
+## well colder than clear ground are cloud, and how cold says how high: each layer takes what is
+## at its height and is clear where the satellite sees clear ground, whatever a forecast says.
+## Under a top it has no say, so a forecast's lower layers stay there. It reads by the weather's
+## `temperature`, the air at the ground. Fog and low cloud as warm as the ground are lost to it.
+## 2 km pixels: overhead that is one or two, so mostly it places the banks and gaps toward the
+## horizon. GOES-East, GOES-West and Himawari see the
 ## Americas, the Pacific and East Asia; Europe, Africa and India are out of their sight.
 ##
 ## Off until `enabled`: turning it on sends the sky's latitude and longitude to NASA, so ask the
@@ -32,8 +35,13 @@ const SPAN := 200000.0
 const _SIZE := 160
 const _RETRY := 60.0
 const _METRES_PER_DEGREE := 111320.0
-## °C between a frame's warm and cold tenths over which its map goes from no say to full say.
-const _SPREAD := Vector2(3.0, 20.0)
+## °C under clear ground over which a pixel goes from clear to cloud.
+const _CLOUD_COLDER := Vector2(9.0, 16.0)
+## °C clear ground can lie under the air, on a still clear night.
+const _GROUND_UNDER_AIR := 8.0
+## °C the air cools per km up, and the km of a top at the map's green 1 (the shader's too).
+const _LAPSE := 6.5
+const COVER_TOP_KM := 16.0
 
 ## Fetch and lay the satellite's clouds. Sends the sky's place to NASA.
 @export var enabled := false:
@@ -121,7 +129,8 @@ func _fetch(w: OvercastWeather, place: Vector2, want: int) -> void:
 			if img.load_png_from_buffer(got) == OK:
 				# Off the main thread: a frame's colours take a good part of a frame to read.
 				var out := [null]
-				var task := WorkerThreadPool.add_task(func() -> void: out[0] = cover_from(img, _colormap, _colors))
+				var air := w.temperature
+				var task := WorkerThreadPool.add_task(func() -> void: out[0] = cover_from(img, _colormap, air, _colors))
 				while not WorkerThreadPool.is_task_completed(task):
 					await get_tree().process_frame
 				WorkerThreadPool.wait_for_task_completion(task)
@@ -204,10 +213,11 @@ static func temperature_of(rgb: int, colormap: Array, cache: Dictionary) -> floa
 	return t
 
 
-## The cover map from an infrared frame: each pixel by how cold it is among the frame's, white the
-## coldest, pressed toward mid grey (no say) as far as the frame's temperatures barely differ.
-## Null if the frame holds nothing.
-static func cover_from(frame_image: Image, colormap: Array, cache := {}) -> Image:
+## The cover map from an infrared frame, with `air` the ground's air in °C: red how cloudy (a top
+## well colder than clear ground, which is the frame's warm tenth or a little under the air,
+## whichever is warmer), green how high its top is (COVER_TOP_KM at 1, by the lapse rate from the
+## air), alpha the say: none where the frame holds nothing. Null if it holds next to nothing.
+static func cover_from(frame_image: Image, colormap: Array, air: float, cache := {}) -> Image:
 	frame_image.convert(Image.FORMAT_RGBA8)
 	var data := frame_image.get_data()
 	var n := frame_image.get_width() * frame_image.get_height()
@@ -225,18 +235,15 @@ static func cover_from(frame_image: Image, colormap: Array, cache := {}) -> Imag
 	if known.size() < n / 4:
 		return null
 	known.sort()
-	var spread := known[int(known.size() * 0.9)] - known[int(known.size() * 0.1)]
-	var contrast := smoothstep(_SPREAD.x, _SPREAD.y, spread)
+	var clear := maxf(known[int(known.size() * 0.9)], air - _GROUND_UNDER_AIR)
 	var cover := PackedByteArray()
-	cover.resize(n)
-	var count := float(known.size())
+	cover.resize(n * 4)
 	for i in n:
 		var c := temps[i]
 		if is_nan(c):
-			cover[i] = 128
 			continue
-		# Ties take their middle rank, so a field of one temperature is one grey.
-		var rank := (known.bsearch(c, true) + known.bsearch(c, false)) * 0.5 / count
-		cover[i] = clampi(int((0.5 + (0.5 - rank) * contrast) * 255.0), 0, 255)
+		cover[i * 4] = int(smoothstep(_CLOUD_COLDER.x, _CLOUD_COLDER.y, clear - c) * 255.0)
+		cover[i * 4 + 1] = int(clampf((air - c) / _LAPSE / COVER_TOP_KM, 0.0, 1.0) * 255.0)
+		cover[i * 4 + 3] = 255
 	return Image.create_from_data(frame_image.get_width(), frame_image.get_height(), false,
-		Image.FORMAT_L8, cover)
+		Image.FORMAT_RGBA8, cover)

@@ -859,10 +859,11 @@ func set_wind(aloft: Vector3) -> void:
 	_sync_drift()
 
 
-## Where the cloud really is round the place: `map` white where cloudy, black where clear, mid
-## grey where it has no say, north up, centred on the scene's origin and `span` real metres
-## across. Each layer's amount stays its own: the map moves it about. From here on it rides the
-## wind, and a new one fades in over it. Null takes it away. OvercastSatellite lays NASA's.
+## Where the cloud really is round the place: `map` red how cloudy, green how high the tops are
+## (OvercastSatellite.COVER_TOP_KM at 1), alpha how sure, north up, centred on the scene's origin
+## and `span` real metres across. Where it is sure, a layer at a top's height takes its cloud and
+## one with no top near it is clear; under a top it keeps its own. From here on it rides the wind,
+## and a new one fades in over it. Null takes it away. OvercastSatellite lays NASA's.
 func set_cover_map(map: Texture2D, span: float) -> void:
 	_cover_map = map
 	_cover_span = span

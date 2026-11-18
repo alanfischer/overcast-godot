@@ -8,7 +8,7 @@ extends SceneTree
 ## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any. FORECAST=1 takes the real
 ## weather at PLACE from Open-Meteo, at DATE and TIME or now. VIS=300 for fog that thick (m).
 ## SATELLITE=1 lays NASA's infrared round PLACE at DATE and TIME as the cover map.
-## COVERMAP=png lays a cover map (white cloudy, north up) SPAN metres across (200 km).
+## COVERMAP=png lays a cover map (OvercastSky.set_cover_map, north up) SPAN metres across (200 km).
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -50,19 +50,19 @@ func _run() -> void:
 	var weather = demo.get_node("Weather")
 	if OS.get_environment("COVERMAP") != "":
 		var span := float(OS.get_environment("SPAN")) if OS.get_environment("SPAN") != "" else 200000.0
-		demo.sky.set_cover_map(ImageTexture.create_from_image(Image.load_from_file(OS.get_environment("COVERMAP"))), span)
+		weather.set_cover_map(ImageTexture.create_from_image(Image.load_from_file(OS.get_environment("COVERMAP"))), span)
 	var live := OS.get_environment("SATELLITE") == "1" or OS.get_environment("FORECAST") == "1"
 	if live and OS.get_environment("DATE") == "" and OS.get_environment("TIME") == "":
 		demo.sky.unix_time = Time.get_unix_time_from_system()
-	if OS.get_environment("SATELLITE") == "1":
-		var satellite: OvercastSatellite = await _feed(OvercastSatellite.new(), weather, "satellite")
-		print("satellite: frame ", Time.get_datetime_string_from_unix_time(satellite.frame))
 	if OS.get_environment("VIS") != "":
 		weather.visibility = float(OS.get_environment("VIS"))
 	if OS.get_environment("FORECAST") == "1":
 		var forecast: OvercastForecast = await _feed(OvercastForecast.new(), weather, "forecast")
 		await process_frame
 		print("forecast: ", inst_to_dict(forecast.conditions_at(demo.sky.unix_time)))
+	if OS.get_environment("SATELLITE") == "1":
+		var satellite: OvercastSatellite = await _feed(OvercastSatellite.new(), weather, "satellite")
+		print("satellite: frame ", Time.get_datetime_string_from_unix_time(satellite.frame))
 	for i in 20:
 		await physics_frame
 	weather.settle()

@@ -26,23 +26,29 @@ func test_the_colour_map_reads_back_to_temperatures() -> void:
 	assert_true(cache.has(0x969696), "kept for the next frame")
 
 
-func test_cold_tops_are_cover_and_a_flat_frame_has_no_say() -> void:
+func test_tops_colder_than_clear_ground_are_cloud_and_say_how_high() -> void:
 	var map := Satellite.parse_colormap(XML)
 	var frame := Image.create(8, 8, false, Image.FORMAT_RGBA8)
 	frame.fill(Color8(100, 100, 100))
 	for y in 8:
-		for x in 4:
-			frame.set_pixel(x, y, Color8(0, 200, 0))
-	var cover := Satellite.cover_from(frame, map)
-	assert_eq(cover.get_format(), Image.FORMAT_L8, "one channel")
-	assert_gt(cover.get_pixel(1, 1).r, 0.7, "the cold half cloudy")
-	assert_lt(cover.get_pixel(6, 1).r, 0.3, "the warm half clear")
+		frame.set_pixel(0, y, Color8(200, 200, 200))
+	var cover := Satellite.cover_from(frame, map, 20.0)
+	assert_eq(cover.get_format(), Image.FORMAT_RGBA8, "cloud, top and say")
+	assert_eq(cover.get_pixel(0, 1).r, 1.0, "a -20 C top over 20 C ground is cloud")
+	assert_almost_eq(cover.get_pixel(0, 1).g * Satellite.COVER_TOP_KM, 40.0 / 6.5, 0.1,
+		"its top by the lapse rate")
+	assert_eq(cover.get_pixel(5, 1).r, 0.0, "the ground clear")
+	assert_eq(cover.get_pixel(5, 1).a, 1.0, "and sure of it")
 	frame.fill(Color8(100, 100, 100))
 	frame.set_pixel(0, 0, Color8(110, 110, 110))
-	var flat := Satellite.cover_from(frame, map)
-	assert_almost_eq(flat.get_pixel(0, 0).r, 0.5, 0.02, "a degree or two apart is no say at all")
+	var flat := Satellite.cover_from(frame, map, 26.0)
+	assert_eq(flat.get_pixel(3, 3).r, 0.0, "a clear night: ground under the air is still clear")
+	assert_eq(flat.get_pixel(3, 3).a, 1.0, "and says so")
+	frame.fill(Color8(200, 200, 200))
+	assert_eq(Satellite.cover_from(frame, map, 20.0).get_pixel(3, 3).r, 1.0,
+		"a frame cloudy all over is cloud, by the air")
 	frame.fill(Color(0, 0, 0, 0))
-	assert_eq(Satellite.cover_from(frame, map), null, "an empty frame is none")
+	assert_eq(Satellite.cover_from(frame, map, 20.0), null, "an empty frame is none")
 
 
 func test_frames_and_satellites() -> void:

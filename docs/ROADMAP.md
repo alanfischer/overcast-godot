@@ -59,8 +59,9 @@ to a third party only when they agree).
   temperature's alone, which covers what the freezing level would.
 - METAR, near airports: observed cloud bases, and towering cumulus and cumulonimbus by name.
 - Satellite (done): `OvercastSatellite` lays NASA GIBS' geostationary infrared round the place as
-  the sky's cover map, a rank of how cold each pixel is, pressed toward no say when the frame's
-  temperatures barely differ. The shell meets the horizon a few heights out where the real layer
+  the sky's cover map: cloud where a top is well colder than clear ground (the frame's warm tenth
+  or a little under the air), its height by the lapse rate from the air, so each layer takes what
+  is at its height and the satellite overrules a forecast overhead. The shell meets the horizon a few heights out where the real layer
   runs on for a hundred km, so the map is looked up by elevation and bearing. Not yet: Europe,
-  Africa and India (no Meteosat in GIBS); telling the layers apart by temperature (every layer
-  takes the same map); the daytime visible band. A new frame fades in over the last for a minute.
+  Africa and India (no Meteosat in GIBS); the daytime visible band; a night inversion makes
+  tops read low. A new frame fades in over the last for a minute.

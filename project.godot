@@ -18,6 +18,10 @@ config/name="overcast"
 run/main_scene="res://demo/demo.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
+[autoload]
+
+AudioDrain="*res://demo/audio_drain.gd"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/overcast/plugin.cfg")

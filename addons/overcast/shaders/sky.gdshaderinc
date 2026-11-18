@@ -55,6 +55,8 @@ uniform vec3 star_color : source_color = vec3(1.0, 1.0, 1.0);
 // Takes a view ray back to where it looked at noon, as the stars turn with the sun (OvercastSky
 // sets it).
 uniform mat3 star_basis = mat3(1.0);
+// The Yale Bright Star Catalogue on an octahedral map, in star_basis' frame (OvercastSky sets it).
+uniform sampler2D star_catalogue : filter_nearest, repeat_disable;
 
 // Time of day (OvercastSky.time_of_day sets the two amounts): the colours above are the day's.
 // Toward dusk they warm to dusk_color, low and on the sun's side; at night they give way to these,
@@ -243,6 +245,25 @@ float storm_body_of(float n) {
 	return clamp(0.55 + 0.7 * n, 0.4, 1.3);
 }
 
+// Where unit n lands on the star catalogue's octahedral map, 0 to 1, and back.
+vec2 star_octahedral(vec3 n) {
+	n /= abs(n.x) + abs(n.y) + abs(n.z);
+	vec2 p = n.xy;
+	if (n.z < 0.0) {
+		p = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+	}
+	return p * 0.5 + 0.5;
+}
+
+vec3 star_unoctahedral(vec2 uv) {
+	vec2 p = uv * 2.0 - 1.0;
+	vec3 n = vec3(p, 1.0 - abs(p.x) - abs(p.y));
+	if (n.z < 0.0) {
+		n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+	}
+	return normalize(n);
+}
+
 // Stars and the Milky Way along eye_dir, for a sky `sky_lum` bright behind them. `amount` is how
 // many are out.
 vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
@@ -273,24 +294,42 @@ vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
 	float seen = smoothstep(0.0, 0.02, up) * mix(1.0, 0.35, low) * (1.0 - drowned);
 	vec3 col = mix(night_horizon_color, star_color, 0.5) * band * 0.22 * min(amount * 1.5, 1.0) * seen;
 
-	vec3 sp = dir * 320.0;
-	vec3 cell = floor(sp);
-	float h = overcast_hash13(cell);
-	// `amount` is a density, but the useful range is tiny: a cell in a few dozen.
-	float threshold = 1.0 - min(amount * 0.06 * (1.0 + 4.0 * band), 1.0);
-	if (h < threshold) {
-		return col;
+	// The catalogue's stars (stars.res, tools/bake_stars.gd), down to the faintest the sky lets
+	// through: a moonless dark sky shows them all, to about magnitude 6.5.
+	float limit = mix(1.0, 6.6, min(amount * 1.2, 1.0)) - drowned * 5.0;
+	ivec2 size = textureSize(star_catalogue, 0);
+	vec2 at = star_octahedral(dir) * vec2(size);
+	ivec2 home = ivec2(at);
+	// How wide a pixel is here, so a faint star is never smaller than one.
+	float px = max(length(fwidth(dir)), 1e-5);
+	vec3 lit = vec3(0.0);
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			ivec2 tc = clamp(home + ivec2(x, y), ivec2(0), size - 1);
+			vec4 t = texelFetch(star_catalogue, tc, 0);
+			float mag = (1.0 - t.b) * 255.0 / 25.0 - 2.0;
+			if (t.b <= 0.0 || mag > limit) {
+				continue;
+			}
+			vec3 sd = star_unoctahedral((vec2(tc) + (t.rg * 255.0 + 0.5) / 256.0) / vec2(size));
+			float d = length(dir - sd);
+			// Brightness on a perceptual scale, the flux ratio to the power 0.75; the brightest a
+			// little larger as well, as glare makes them.
+			float bright = pow(10.0, -0.3 * (mag - 1.5)) * smoothstep(limit, limit - 0.8, mag);
+			float r = mix(0.0006, 0.0022, smoothstep(5.0, -1.0, mag));
+			float rr = max(r, px * 0.9);
+			if (d >= rr) {
+				continue;
+			}
+			float bv = t.a * 255.0 / 100.0 - 0.5;
+			vec3 tint = mix(vec3(1.0, 0.78, 0.55), vec3(0.72, 0.84, 1.0), smoothstep(1.4, -0.1, bv));
+			float h = overcast_hash12(vec2(tc));
+			float twinkle = 1.0 - mix(0.15, 0.6, low) * (0.5 + 0.5 * sin(TIME * mix(1.7, 5.0, h) + h * 4217.0));
+			// Spread over a pixel when smaller than one, keeping its light.
+			lit += star_color * tint * smoothstep(rr, rr * 0.3, d) * bright * twinkle * sqrt(min(r / rr, 1.0)) * 4.0;
+		}
 	}
-	// Few are bright and most are faint; the bright ones are the first out at dusk.
-	float rank = (h - threshold) / max(1.0 - threshold, 1e-4);
-	float bright = 0.12 + 0.88 * pow(rank, 3.5);
-	float tint = overcast_hash13(cell + 41.3);
-	vec3 star = star_color * mix(vec3(1.0, 0.82, 0.62), vec3(0.72, 0.84, 1.0), smoothstep(0.15, 0.7, tint));
-	float d = length(fract(sp) - 0.5);
-	float twinkle = 1.0 - mix(0.2, 0.6, low) * (0.5 + 0.5 * sin(TIME * mix(1.7, 5.0, tint) + h * 4217.0));
-	float faint = 1.0 - smoothstep(bright * 0.6, bright * 0.6 + 0.3, drowned);
-	float size = mix(0.3, 0.48, bright);
-	return col + star * smoothstep(size, size * 0.4, d) * bright * 1.6 * twinkle * seen * faint;
+	return col + lit * seen;
 }
 
 // The grey a cloud out of the sun takes: lit by the sky, so the sky's colour rather than a grey.

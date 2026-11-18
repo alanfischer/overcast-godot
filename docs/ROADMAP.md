@@ -17,8 +17,10 @@ Pure arithmetic, no network.
 - Night, dusk and moonlight go by how high the sun and moon really stand, so polar summer has no
   night and polar winter no day. The hour-keyed arc (`time_of_day` round `sun_dir`) stays the
   simple mode.
-- Later: real stars from the Yale Bright Star Catalogue (public domain) instead of the procedural
-  field.
+- Real stars (done): the Yale Bright Star Catalogue, about 9,000 to magnitude 6.5, baked by
+  `tools/bake_stars.gd` into `stars.res`, an octahedral map in the sky's star frame. Not yet:
+  precession (the catalogue is J2000; by 2026 the sky has turned about 0.35° from it) and proper
+  motion.
 
 ## 2. One weather state, in layers (done)
 

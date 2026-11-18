@@ -66,8 +66,9 @@ switches, and a mode where showers come and go on their own.
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
 - **A real place**: turn on `placed` and give `latitude`, `longitude`, `date` and `utc_offset`,
   and the sun, moon and stars stand where they do there at `time_of_day` local time (or set
-  `unix_time`). The moon's phase is the date's, the stars turn about the real pole with the
-  Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
+  `unix_time`). The moon's phase is the date's, the stars are the real ones (the Yale Bright Star
+  Catalogue, to about magnitude 6.5, the brightest first out at dusk) turning about the real pole
+  with the Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
   has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
   gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
 - **Three layers of cloud**: the low layer (`cloud_amount`, `cloud_height`), a middle one

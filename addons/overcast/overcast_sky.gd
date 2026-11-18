@@ -302,6 +302,7 @@ var _clouds := {}
 static var _air_noon_zenith := {}
 ## The noon sun on the ground, by haze: what the air's light on the scene is measured against.
 static var _air_noon_light := {}
+static var _catalogue: Texture2D
 ## Turns the galaxy's real pole to where the sky shader draws the Milky Way.
 static var _galaxy_turn := Basis(Quaternion(
 	_Ephemeris.radec(_Ephemeris.GALACTIC_POLE.x, _Ephemeris.GALACTIC_POLE.y), _STAR_POLE.normalized()))
@@ -324,6 +325,8 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 			set_shader_parameter(key, null)
 	time_of_day = time_of_day
 	_sync_heights()
+	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
+	RenderingServer.material_set_param(get_rid(), &"star_catalogue", _star_catalogue().get_rid())
 	apply(params)
 	# A loaded sky has its settings only once loading is done; one made in code may be turned off
 	# before it ever draws.
@@ -333,6 +336,13 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 func _start() -> void:
 	_started = true
 	_sync_light()
+
+
+## The Yale Bright Star Catalogue, as tools/bake_stars.gd lays it out: made once.
+static func _star_catalogue() -> Texture2D:
+	if _catalogue == null:
+		_catalogue = ImageTexture.create_from_image(load("res://addons/overcast/stars.res"))
+	return _catalogue
 
 
 ## A sky must let go of the cloud layer it holds, or its clouds' shadows outlive it.

@@ -138,9 +138,11 @@ func test_a_storm_and_a_flash_are_not_saved_with_the_sky() -> void:
 func test_the_layer_takes_its_height() -> void:
 	var sky := SkyScript.new()
 	sky.drawing = true
-	assert_eq(_global("overcast_height"), 100.0, "100 m by default")
-	sky.cloud_height = 400.0
-	assert_eq(_global("overcast_height"), 400.0, "and the shaders follow a higher layer")
+	assert_almost_eq(_global("overcast_height"), 100.0, 1e-3, "100 m by default: 1500 real, shrunk")
+	sky.cloud_height = 6000.0
+	assert_almost_eq(_global("overcast_height"), 400.0, 1e-3, "and the shaders follow a higher layer")
+	sky.world_scale = 1.0
+	assert_almost_eq(_global("overcast_height"), 6000.0, 1e-3, "at its real height in a world at real size")
 	sky.drawing = false
 
 func test_a_passing_sky_gives_the_layer_back() -> void:

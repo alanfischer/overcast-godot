@@ -254,8 +254,10 @@ ported to Godot. Its maps are lit by baked lightmaps, which is why cloud shadows
 work through a light multiplier rather than through Godot's dynamic lights. The game plays on
 Quest as well as desktop, which is why everything works on Compatibility.
 
-The cloud layer sits 100 m up by default, tuned to maps a few dozen metres across. For a bigger
-world, raise the sky's `cloud_height`: the clouds and lightning scale with it.
+The sky's `cloud_height` is the clouds' real base, 1500 m by default, and `world_scale` shrinks it
+into the world: 1/15 by default, putting the clouds 100 m up for maps a few dozen metres across.
+For a world at real size, set `world_scale` to 1: the clouds look the same from the ground, and
+their shadows and the lightning grow to match.
 
 ## Tests
 

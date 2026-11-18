@@ -118,11 +118,17 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 @export var dusk_light := DUSK_LIGHT
 @export var moon_light := MOON_LIGHT
 @export_group("Cloud layer")
-## Metres over the scene's origin. Tuned for levels a few dozen metres across at 100; the clouds
-## and lightning scale with it, so a bigger world raises it.
-@export_range(10.0, 5000.0, 1.0, "or_greater", "suffix:m") var cloud_height := 100.0:
+## The cloud's base, real metres: drawn world_scale times this over the scene's origin.
+@export_range(100.0, 15000.0, 10.0, "or_greater", "suffix:m") var cloud_height := 1500.0:
 	set(v):
 		cloud_height = v
+		_sync_layer()
+## World metres per real metre, for the clouds, their shadows and the lightning: 1 for a world
+## at real size. The default puts the clouds 100 m up, for levels a few dozen metres across,
+## where real ones would shade the whole level at once.
+@export_range(0.001, 1.0, 0.001, "or_greater") var world_scale := 1.0 / 15.0:
+	set(v):
+		world_scale = v
 		_sync_layer()
 ## Noise units per cloud height: bigger is smaller clouds.
 @export_range(0.25, 8.0, 0.01) var cloud_scale := 2.2:
@@ -684,7 +690,7 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		_Clouds._claim(_id, light_dir(), cloud_height, cloud_scale, cloud_speed, cloud_softness)
+		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, cloud_speed, cloud_softness)
 		_push_weather()
 	else:
 		_Clouds._release(_id)

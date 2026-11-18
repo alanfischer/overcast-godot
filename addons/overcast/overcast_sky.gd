@@ -725,7 +725,11 @@ static func _air_toward_eye(light: Vector3) -> Vector3:
 
 
 static func _air_seen(light: Color, gain: float, dark: float) -> Color:
-	var c := Color(1.0 - exp(-light.r * gain), 1.0 - exp(-light.g * gain), 1.0 - exp(-light.b * gain))
+	var x := Vector3(light.r, light.g, light.b) * gain
+	var c := Color(1.0 - exp(-x.x), 1.0 - exp(-x.y), 1.0 - exp(-x.z))
+	var peak := maxf(maxf(x.x, x.y), maxf(x.z, 1e-6))
+	var kept := x * (1.0 - exp(-peak)) / peak
+	c = c.lerp(Color(kept.x, kept.y, kept.z), smoothstep(0.45, 0.85, 1.0 - x.z / maxf(x.x, 1e-6)))
 	var luma := _luma709(Vector3(c.r, c.g, c.b))
 	return c.lerp(Color(0.6, 0.8, 1.35) * luma, dark)
 

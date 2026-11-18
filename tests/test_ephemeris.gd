@@ -42,10 +42,13 @@ func test_north_turns_the_sky() -> void:
 
 func test_the_stars_turn_about_the_pole() -> void:
 	for hours in [0.0, 6.0, 13.5]:
-		var sky := Ephemeris.sky_at(1797811200 + hours * 3600.0, 51.4769, 0.0)
+		var unix: float = 1797811200 + hours * 3600.0
+		var sky := Ephemeris.sky_at(unix, 51.4769, 0.0)
 		var pole := _toward(51.4769, 0.0)
-		assert_vec3_almost_eq(sky["stars"] * pole, Vector3(0, 0, 1), 1e-6, "the pole stands at the latitude, due north")
-		var sun_among_stars: Vector3 = sky["stars"] * sky["sun"]
+		# The stars are J2000's: the pole of date, precessed back, stands at the latitude.
+		var of_date: Basis = Ephemeris.precession(Ephemeris.days(unix)) * sky["stars"]
+		assert_vec3_almost_eq(of_date * pole, Vector3(0, 0, 1), 1e-6, "the pole stands at the latitude, due north")
+		var sun_among_stars: Vector3 = of_date * sky["sun"]
 		assert_almost_eq(rad_to_deg(asin(sun_among_stars.z)), -23.43, 0.05, "and midwinter's sun is as far south as it goes")
 
 
@@ -55,3 +58,12 @@ func test_the_clock_is_universal_time() -> void:
 	assert_almost_eq(Ephemeris.sidereal(1782043200, 90.0), fposmod(greenwich + 90.0, 360.0), 1e-9, "east is later")
 	var next_day := Ephemeris.sidereal(1782043200 + 86400, 0.0)
 	assert_almost_eq(fposmod(next_day - greenwich, 360.0), 0.9856, 0.001, "the stars gain a degree a day")
+
+
+func test_the_stars_precess_from_j2000() -> void:
+	var p := Ephemeris.precession(Ephemeris.days(Time.get_unix_time_from_datetime_string("2026-01-01T00:00:00")))
+	var equator: Vector3 = p * Ephemeris.radec(90.0, 0.0)
+	assert_almost_eq(rad_to_deg(atan2(equator.y, equator.x)) - 90.0, 80.0 / 240.0, 0.005,
+		"at 6h on the equator, 3.07 s of right ascension a year")
+	var polaris: Vector3 = p * Ephemeris.radec(37.95, 89.264)
+	assert_almost_eq(rad_to_deg(asin(polaris.z)), 89.371, 0.003, "Polaris nearer the pole, +89°22'")

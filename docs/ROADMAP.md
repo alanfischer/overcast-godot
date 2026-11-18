@@ -18,9 +18,9 @@ Pure arithmetic, no network.
   night and polar winter no day. The hour-keyed arc (`time_of_day` round `sun_dir`) stays the
   simple mode.
 - Real stars (done): the Yale Bright Star Catalogue, about 9,000 to magnitude 6.5, baked by
-  `tools/bake_stars.gd` into `stars.res`, an octahedral map in the sky's star frame. Not yet:
-  precession (the catalogue is J2000; by 2026 the sky has turned about 0.35° from it) and proper
-  motion.
+  `tools/bake_stars.gd` into `stars.res`, an octahedral map in the sky's star frame, precessed
+  from J2000 to the date (IAU 1976). Not yet: proper motion (Barnard's star aside, under an
+  arcminute since 2000).
 
 ## 2. One weather state, in layers (done)
 

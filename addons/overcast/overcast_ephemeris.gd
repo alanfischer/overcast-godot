@@ -17,7 +17,8 @@ static func days(unix: float) -> float:
 
 ## The sun and moon, world space, and the stars' turn, at `unix` from the place given.
 ## sun and moon: unit, toward them. phase: the moon's, 0 new, 0.5 full, waxing between.
-## stars: takes a world direction to one fixed among the stars (equatorial, +Z the celestial pole).
+## stars: takes a world direction to one fixed among the stars (equatorial of J2000, +Z the
+## celestial pole then), as catalogues give them.
 static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0) -> Dictionary:
 	var d := days(unix)
 	var sun := _sun(d)
@@ -29,8 +30,19 @@ static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0)
 		"sun": to_world * _equatorial(sun["lon"], 0.0, d),
 		"moon": to_world * near_moon.normalized(),
 		"phase": fposmod(moon["lon"] - sun["lon"], 360.0) / 360.0,
-		"stars": to_world.transposed(),
+		"stars": precession(d).transposed() * to_world.transposed(),
 	}
+
+
+## J2000 equatorial to the equator and equinox of `d` days in (IAU 1976): the frame the sun and
+## sidereal time here are in, the pole wandering about 0.35° a quarter century.
+static func precession(d: float) -> Basis:
+	var t := d / 36525.0
+	var arcsec := PI / 648000.0
+	var zeta := (2306.2181 + (0.30188 + 0.017998 * t) * t) * t * arcsec
+	var z := (2306.2181 + (1.09468 + 0.018203 * t) * t) * t * arcsec
+	var theta := (2004.3109 - (0.42665 + 0.041833 * t) * t) * t * arcsec
+	return Basis(Vector3.BACK, z) * Basis(Vector3.UP, -theta) * Basis(Vector3.BACK, zeta)
 
 
 ## Local sidereal time, degrees: the right ascension standing on the meridian.

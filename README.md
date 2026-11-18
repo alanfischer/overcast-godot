@@ -92,6 +92,14 @@ switches, and a mode where showers come and go on their own.
   the sky's latitude and longitude to Open-Meteo, so ask the player first. Open-Meteo is free
   without a key for non-commercial use only (`api_key` for its paid service), and its data is
   CC BY 4.0: credit it.
+- **`OvercastSatellite`**: where the clouds really are, from NASA's geostationary infrared
+  (GIBS, every ten minutes, a few months back). Put one beside an OvercastForecast and turn on
+  `enabled`: it lays the frame for the sky's moment, 200 km round the place, as the sky's cover
+  map (`set_cover_map`), coldest tops first. Each layer keeps its own amount; the map moves it about,
+  and rides the wind. The pixels are 2 km: overhead that is one or two, so mostly it places the
+  banks and the clear gaps toward the horizon. GOES-East, GOES-West and Himawari see the Americas,
+  the Pacific and East Asia; Europe, Africa and India are out of their sight. Turning it on sends
+  the place to NASA.
 - **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
   Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
   instead. Overhead it's blue, at the horizon pale.

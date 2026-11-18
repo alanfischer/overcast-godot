@@ -282,6 +282,8 @@ var veil: float:
 var _id := get_instance_id()
 var _started := false
 var _told_wind := Vector3.INF
+var _cover_map: Texture2D
+var _cover_span := 1.0
 var _storm := 0.0
 var _snowy := 0.0
 var _mist := 0.0
@@ -814,7 +816,10 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
+		var claimed := _Clouds._owner != _id
 		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, _drift(), cloud_softness)
+		if claimed:
+			_sync_cover_map()
 		_push_weather()
 	else:
 		_Clouds._release(_id)
@@ -838,6 +843,21 @@ func set_weather(storm_amount: float, snowy_amount: float, mist := 0.0) -> void:
 func set_wind(aloft: Vector3) -> void:
 	_told_wind = aloft
 	_sync_drift()
+
+
+## Where the cloud really is round the place: `map` white where cloudy, black where clear, mid
+## grey where it has no say, north up, centred on the scene's origin and `span` real metres
+## across. Each layer's amount stays its own: the map moves it about. From here on it rides the wind. Null takes it away. OvercastForecast lays the satellite's.
+func set_cover_map(map: Texture2D, span: float) -> void:
+	_cover_map = map
+	_cover_span = span
+	_sync_cover_map()
+
+
+func _sync_cover_map() -> void:
+	if _started and drawing:
+		var east := Vector3.RIGHT.rotated(Vector3.UP, -deg_to_rad(north))
+		_Clouds._set_cover_map(_id, _cover_map, Vector2(east.x, east.z), _cover_span, world_scale)
 
 
 ## Noise units per second the wind carries the pattern; it moves against the noise coordinates.

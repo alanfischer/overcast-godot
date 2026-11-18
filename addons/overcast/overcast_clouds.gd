@@ -71,6 +71,21 @@ static func _set_drift(owner: int, drift: Vector2) -> void:
 		_drift_rate = drift
 
 
+## OvercastSky's: lay `map` (white cloudy, north up, `span` real metres across, centred on the
+## origin) with east toward `east` (world xz) under a world shrunk `world_scale`, if `owner` holds
+## the layer; null takes it away. It rides the wind from here on.
+static func _set_cover_map(owner: int, map: Texture2D, east: Vector2, span: float,
+		world_scale: float) -> void:
+	if owner != _owner:
+		return
+	if map == null:
+		_set_global("overcast_cover_map_place", Vector4.ZERO)
+		return
+	_set_global("overcast_cover_map", map)
+	_set_global("overcast_cover_map_frame", Vector4(east.x, east.y, span, world_scale))
+	_set_global("overcast_cover_map_place", Vector4(_drift_x, _drift_y, 1.0, 0.0))
+
+
 static func _advance() -> void:
 	var now := Time.get_ticks_usec()
 	var dt := minf((now - _drift_usec) / 1e6, _DRIFT_STEP_MAX)
@@ -100,6 +115,7 @@ static func _release(owner: int) -> void:
 	_owner = 0
 	_drift_rate = Vector2.ZERO
 	_set_cover(0.0, 0.0)
+	_set_global("overcast_cover_map_place", Vector4.ZERO)
 	while not _drawing.is_empty():
 		var sky = instance_from_id(_drawing[-1])
 		if sky and sky.drawing:

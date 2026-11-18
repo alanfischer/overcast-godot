@@ -317,17 +317,18 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (cirrus_amount > 0.0) {
 		float h = CLOUD_HEIGHT * cirrus_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
+		float amount = cloud_map_amount(cam.xz + eye_dir.xz * d, h, cirrus_amount);
 		vec2 hp = cloud_layer_at(cam, eye_dir, d, h) * 0.6;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		float c = cloud_tex(vec2(hp.x * 0.25, hp.y) + wind * 2.5 + vec2(3.7, 1.3));
 		float streaks = smoothstep(0.55, 0.85, c) * 0.45 * (1.0 - far);
 		// Cirrostratus: a milky veil, faintly fibrous, thickening toward the horizon.
 		float milky = (0.32 + 0.12 * c) * mix(1.0, 1.6, smoothstep(0.4, 0.0, up));
-		float ci = mix(streaks, milky, cirrus_sheet) * cirrus_amount * clear * smoothstep(0.0, 0.15, up);
+		float ci = mix(streaks, milky, cirrus_sheet) * amount * clear * smoothstep(0.0, 0.15, up);
 		vec3 lit = overcast_cloud_lit(cloud_col, sun_col, atmosphere_high_light);
 		out_col = mix(out_col, mix(ambient, lit, 0.7), ci);
 		// The 22° halo, from ice crystals: a sharp reddish inner edge, white and diffuse outward.
-		float halo_veil = milky * cirrus_amount * cirrus_sheet * clear;
+		float halo_veil = milky * amount * cirrus_sheet * clear;
 		float cos_ang = dot(eye_dir, sun);
 		if (halo_veil > 0.0 && cos_ang > 0.8) {
 			float ang = acos(min(cos_ang, 1.0));
@@ -341,11 +342,12 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (mid_cloud_amount > 0.0) {
 		float h = CLOUD_HEIGHT * mid_cloud_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
+		float amount = cloud_map_amount(cam.xz + eye_dir.xz * d, h, mid_cloud_amount);
 		vec2 mp = cloud_layer_at(cam, eye_dir, d, h) + wind * 1.3;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		// Where the sheet is: broad patches that join up as there is more of it.
 		float patches = cloud_tex(mp * 0.3 + vec2(9.1, 4.4)) + (cloud_tex(mp * 0.8 + vec2(1.7, 6.3)) - 0.5) * 0.5;
-		float edge = mix(0.78, 0.18, mid_cloud_amount);
+		float edge = mix(0.78, 0.18, amount);
 		float sheet = smoothstep(edge - 0.06, edge + 0.14, patches);
 		// The puffs: worley cells drawn out across the wind into rows, their outlines broken.
 		vec2 t = cloud_tex2(vec2(mp.x * 3.0, mp.y * 5.5) + vec2(2.3, 7.7));
@@ -355,7 +357,7 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		float size = mix(0.1, 0.5, sheet);
 		float puff = 1.0 - smoothstep(size * 0.4, size + 0.04, cell);
 		// Far off, a cell is finer than a pixel: the sheet's average, banking up toward the horizon.
-		puff = mix(puff, mix(0.5, 0.85, mid_cloud_amount), far);
+		puff = mix(puff, mix(0.5, 0.85, amount), far);
 		// Altostratus: the patches spread smooth and grey, seen through.
 		float smooth_sheet = smoothstep(edge - 0.2, edge + 0.25, patches);
 		float cover = mix(puff * sheet, smooth_sheet * 0.85, mid_cloud_sheet) * clear * smoothstep(0.0, 0.06, up);

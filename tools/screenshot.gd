@@ -7,6 +7,8 @@ extends SceneTree
 ## MID=0.6 and CIRRUS=0.8 for the higher layers, MIDSHEET, CIRRUSSHEET, SHEET and TOWERING for their
 ## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any. FORECAST=1 takes the real
 ## weather at PLACE from Open-Meteo, at DATE and TIME or now. VIS=300 for fog that thick (m).
+## SATELLITE=1 lays NASA's infrared round PLACE at DATE and TIME as the cover map.
+## COVERMAP=png lays a cover map (white cloudy, north up) SPAN metres across (200 km).
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -46,6 +48,18 @@ func _run() -> void:
 	if OS.get_environment("TEMP") != "":
 		demo.get_node("%Temperature").value = float(OS.get_environment("TEMP"))
 	var weather = demo.get_node("Weather")
+	if OS.get_environment("COVERMAP") != "":
+		var span := float(OS.get_environment("SPAN")) if OS.get_environment("SPAN") != "" else 200000.0
+		demo.sky.set_cover_map(ImageTexture.create_from_image(Image.load_from_file(OS.get_environment("COVERMAP"))), span)
+	if OS.get_environment("SATELLITE") == "1":
+		if OS.get_environment("DATE") == "" and OS.get_environment("TIME") == "":
+			demo.sky.unix_time = Time.get_unix_time_from_system()
+		var satellite := OvercastSatellite.new()
+		satellite.enabled = true
+		satellite.failed.connect(func(m: String) -> void: printerr("satellite: ", m))
+		weather.add_child(satellite)
+		await satellite.updated
+		print("satellite: frame ", Time.get_datetime_string_from_unix_time(satellite.frame))
 	if OS.get_environment("VIS") != "":
 		weather.visibility = float(OS.get_environment("VIS"))
 	if OS.get_environment("FORECAST") == "1":

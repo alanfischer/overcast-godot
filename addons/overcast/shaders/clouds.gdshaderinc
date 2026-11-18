@@ -21,6 +21,13 @@ global uniform float overcast_sheet;     // 0 heaped cumulus, 0.5 stratocumulus,
 global uniform vec3 overcast_sun_dir;    // unit, toward the sun
 #endif
 global uniform float overcast_volumetric; // 1 when the sky ray-marches its clouds
+// Where the clouds really are (OvercastSky.set_cover_map): a map, white where cloudy, black where
+// clear and mid grey where it has no say, of the real
+// ground round the scene's origin, north up. frame: east's world direction (xz), the real metres
+// the map spans, the sky's world_scale. place: the drift when it was laid, and its weight (0 off).
+global uniform sampler2D overcast_cover_map : filter_linear, repeat_disable;
+global uniform vec4 overcast_cover_map_frame;
+global uniform vec4 overcast_cover_map_place;
 const float CLOUD_TILE = 12.0;
 // Every length below is tuned at a height of 100 m and scales with it, so a higher layer looks
 // the same, only bigger.
@@ -111,10 +118,56 @@ vec2 cloud_layer(vec3 origin, vec3 dir, float dist) {
 	return cloud_layer_at(origin, dir, dist, CLOUD_HEIGHT);
 }
 
-// The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp.
+// How far a cover map's cloudy and clear push the density from the noise's own swing.
+const float CLOUD_MAP_FIELD = 0.8;
+// How far a cover map moves a higher layer's amount either way.
+const float CLOUD_MAP_AMOUNT = 1.6;
+const float EARTH_KM = 6371.0;
+
+// The cover map's say at world point w on a shell `height` over the origin (world xz, the wind's
+// carrying taken off), and how much say it has (0 off the map) in .y. The shell curls down to the
+// horizon a few heights out, where the real layer runs on for a hundred km or more: a point is
+// looked up where the real cloud seen at its elevation and bearing would be.
+vec2 cloud_map_at(vec2 w, float height) {
+	if (overcast_cover_map_place.z <= 0.0) {
+		return vec2(0.0);
+	}
+	float rho = length(w);
+	float r = CLOUD_EARTH * CLOUD_HEIGHT;
+	float y = sqrt(max((r + height) * (r + height) - rho * rho, 0.0)) - r;
+	float e = atan(y, max(rho, 1e-3));
+	// Kilometres along the ground to the real layer at elevation e, the stable form.
+	float h = height / overcast_cover_map_frame.w * 0.001;
+	float s = sin(e);
+	float d = (2.0 * EARTH_KM * h + h * h)
+		/ (sqrt(EARTH_KM * EARTH_KM * s * s + 2.0 * EARTH_KM * h + h * h) + EARTH_KM * s);
+	vec2 real = rho > 1e-3 ? w / rho * d * 1000.0 : vec2(0.0);
+	vec2 east = overcast_cover_map_frame.xy;
+	vec2 north = vec2(east.y, -east.x);
+	vec2 uv = 0.5 + vec2(dot(real, east), -dot(real, north)) / overcast_cover_map_frame.z;
+	float inside = 1.0 - smoothstep(0.42, 0.5, max(abs(uv.x - 0.5), abs(uv.y - 0.5)));
+	return vec2(textureLod(overcast_cover_map, uv, 0.0).r, inside * overcast_cover_map_place.z);
+}
+
+// cloud_map_at for the cloud layer's noise point cp.
+vec2 cloud_map(vec2 cp) {
+	return cloud_map_at((cp - overcast_cover_map_place.xy) * (CLOUD_HEIGHT / overcast_scale), CLOUD_HEIGHT);
+}
+
+// How much of a higher layer stands where a ray meets its shell `height` at world point p (xz),
+// `amount` of it over the whole sky: the cover map's coldest share of it, where there is one.
+float cloud_map_amount(vec2 p, float height, float amount) {
+	vec2 map = cloud_map_at(p + (cloud_wind() - overcast_cover_map_place.xy) * (CLOUD_HEIGHT / overcast_scale), height);
+	return clamp(amount + (map.x - 0.5) * CLOUD_MAP_AMOUNT * map.y, 0.0, 1.0);
+}
+
+// The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp: the cover
+// map's where it has one.
 float cloud_field(vec2 cp) {
-	return (cloud_tex(cp * CLOUD_FIELD_SCALE + vec2(2.1, 8.7) - cloud_wind() * 0.6) - 0.5)
+	float swing = (cloud_tex(cp * CLOUD_FIELD_SCALE + vec2(2.1, 8.7) - cloud_wind() * 0.6) - 0.5)
 		* CLOUD_FIELDS * cloud_fair();
+	vec2 map = cloud_map(cp);
+	return swing + (map.x - 0.5) * CLOUD_MAP_FIELD * map.y;
 }
 
 // Cloud density at `cp`, which comes back moved to where the shape was sampled (billows are the

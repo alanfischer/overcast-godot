@@ -72,6 +72,18 @@ overcast_volume={
 "type": "sampler3D",
 "value": ""
 }
+overcast_cover_map={
+"type": "sampler2D",
+"value": ""
+}
+overcast_cover_map_frame={
+"type": "vec4",
+"value": Vector4(1, 0, 1, 1)
+}
+overcast_cover_map_place={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 overcast_height={
 "type": "float",
 "value": 100.0

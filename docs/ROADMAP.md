@@ -56,7 +56,9 @@ to a third party only when they agree).
   of the rain is snow is the model's (snowfall against precipitation) rather than the ground
   temperature's alone, which covers what the freezing level would.
 - METAR, near airports: observed cloud bases, and towering cumulus and cumulonimbus by name.
-- Satellite, last: geostationary cloud imagery (NASA GIBS tiles, about every ten minutes) cropped
-  round the place into a cover texture that steers the cloud noise, so the clouds overhead are
-  roughly the real ones. Needs one new sky input: a world-space cover map that drifts with the
-  wind.
+- Satellite (done): `OvercastSatellite` lays NASA GIBS' geostationary infrared round the place as
+  the sky's cover map, a rank of how cold each pixel is, pressed toward no say when the frame's
+  temperatures barely differ. The shell meets the horizon a few heights out where the real layer
+  runs on for a hundred km, so the map is looked up by elevation and bearing. Not yet: Europe,
+  Africa and India (no Meteosat in GIBS); telling the layers apart by temperature (every layer
+  takes the same map); cross-fading frames rather than swapping them; the daytime visible band.

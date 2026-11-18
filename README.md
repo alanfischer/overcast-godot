@@ -58,14 +58,17 @@ switches, and a mode where showers come and go on their own.
   sun, a moon, stars, cirrus and a cumulus layer that closes over into a storm deck as the weather's storm rises
   (`set_weather(storm, snowy)`, and `set_flash` for lightning: an OvercastWeather calls both, and
   a sky without one can be told by hand). Its look is its shader parameters;
-  the cloud layer's scale, speed and shadows are its own properties. Save it as a `.tres` to
+  the cloud layer's scale and shadows are its own properties. The clouds ride `wind_aloft` at
+  its real speed for their real height (`cloud_speedup` to hurry them); an OvercastWeather hands
+  its own wind up instead, blowing twice as hard aloft. Save it as a `.tres` to
   share one sky between scenes. The sky shader is `shaders/sky.gdshader`, built on
   `sky.gdshaderinc`. To draw the sky on your own geometry instead of a Godot `Sky`, include that
   file in a spatial shader and pass it as `OvercastSky.new({}, shader)`.
 - **A real place**: turn on `placed` and give `latitude`, `longitude`, `date` and `utc_offset`,
   and the sun, moon and stars stand where they do there at `time_of_day` local time (or set
-  `unix_time`). The moon's phase is the date's, the stars turn about the real pole with the
-  Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
+  `unix_time`). The moon's phase is the date's, the stars are the real ones (the Yale Bright Star
+  Catalogue, to about magnitude 6.5, the brightest first out at dusk) turning about the real pole
+  with the Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
   has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
   gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
 - **Three layers of cloud**: the low layer (`cloud_amount`, `cloud_height`), a middle one
@@ -81,6 +84,23 @@ switches, and a mode where showers come and go on their own.
 - **`OvercastConditions`**: the weather at one moment as forecasts give it: cover and base of a
   low, a middle and a high layer, rain, temperature and wind. Set it as an OvercastWeather's
   `conditions` and the weather and its sky follow it; `OvercastConditions.blend` goes between two.
+- **`OvercastForecast`**: the real weather, from [Open-Meteo](https://open-meteo.com). Put one
+  under an OvercastWeather whose sky is placed and turn on `enabled`: it fetches the hours about
+  the sky's `unix_time` (the forecast, or further back the record) and hands the weather
+  conditions blended between them: cloud in each layer and its kind, the base from the air's dew
+  point, thunderheads from how unstable the air is, rain and how much of it is snow (the model's
+  say, which knows the air aloft), fog, temperature, wind and gusts, and the wind the clouds ride. Set the sky's `unix_time` to the clock for the weather now. Turning it on sends
+  the sky's latitude and longitude to Open-Meteo, so ask the player first. Open-Meteo is free
+  without a key for non-commercial use only (`api_key` for its paid service), and its data is
+  CC BY 4.0: credit it.
+- **`OvercastSatellite`**: where the clouds really are, from NASA's geostationary infrared
+  (GIBS, every ten minutes, a few months back). Put one beside an OvercastForecast and turn on
+  `enabled`: it lays the frame for the sky's moment, 200 km round the place, as the sky's cover
+  map (`set_cover_map`), coldest tops first. Each layer keeps its own amount; the map moves it about,
+  and rides the wind. The pixels are 2 km: overhead that is one or two, so mostly it places the
+  banks and the clear gaps toward the horizon. GOES-East, GOES-West and Himawari see the Americas,
+  the Pacific and East Asia; Europe, Africa and India are out of their sight. Turning it on sends
+  the place to NASA.
 - **Sky lit by the air**: by default the sky's colours come from sunlight scattered in the air.
   Set `atmosphere` to 0 for the painted gradient (`zenith_color`, `horizon_color`, `dusk_color`)
   instead. Overhead it's blue, at the horizon pale.
@@ -117,12 +137,14 @@ switches, and a mode where showers come and go on their own.
     Flakes tumble, come in clumps as well as singly, and blur out of focus right at the eye.
     Most drops are fine and a few big; they show against the ground and hardly at all against
     the sky, as real rain does
-  - `wind`, with gusts (`gustiness`): the rain slants and sways, the snow is carried off on it, and
+  - `wind`, with gusts (`gustiness`): the clouds ride it, the rain slants and sways, the snow is carried off on it, and
     whatever stands upwind keeps rain and snow off the ground in its lee
   - splashes where the rain lands, on roofs and the open ground, with rings where it lands in
     standing water. They land on the rain floor, so they need one
   - haze and far rain only through air that rain is actually falling in; snow turns the storm
     sky a pale grey, and hazes less
+  - fog and mist by `visibility` (m): it fills the air up to the cloud's base, rain or none, hides
+    the sky and veils the sun, so shadows go soft
   - wet ground and puddles on every material that includes `shaders/wet.gdshaderinc` and calls
     `overcast_wet_pbr(albedo, roughness, specular, world_pos, world_normal)` from `fragment()`:
     darker, smoother, puddles that reflect the sky. Nothing to register; each material's
@@ -216,7 +238,8 @@ switches, and a mode where showers come and go on their own.
 Overcast has no networking of its own; you sync two things.
 
 1. **Rain:** sync `rain`, `temperature` and `wind`, or share `cycle_seed` and `cycle_time` (and
-   `temperature` and `wind`). Gusts are each peer's own: they only sway what is drawn.
+   `temperature` and `wind`). Gusts are each peer's own: they only sway what is drawn. With an
+   OvercastForecast, run it on one peer and send the others its `conditions`.
 2. **Lightning:** let one peer time the strikes (`times_strikes = true`) and send the seed from
    `struck` to the others, which call `strike(seed)`. The bolt, flash direction and thunder all
    derive from the seed, so every peer sees the same strike.

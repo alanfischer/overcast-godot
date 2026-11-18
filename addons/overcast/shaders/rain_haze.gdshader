@@ -21,6 +21,9 @@ uniform sampler3D gust_noise : repeat_enable, filter_linear;
 uniform vec3 gust_offset = vec3(0.0);
 uniform float gust_amount = 0.0;
 uniform vec3 haze_color = vec3(0.4, 0.43, 0.48);
+// Fog or haze in all the air up to mist_top (world y, the cloud's base), rain or none: per metre.
+uniform float mist = 0.0;
+uniform float mist_top = 100.0;
 uniform vec3 streak_color = vec3(0.0);  // as the drops', lit
 uniform float streak_opacity = 0.0;
 uniform float presence = 1.0;  // the share of streak slots holding a drop
@@ -119,14 +122,21 @@ void fragment() {
 	// GPUs.
 	float jitter = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 	float rainy = 0.0;
-	for (int i = 0; i < STEPS; i++) {
+	// Fog alone hazes with no rain to march through.
+	for (int i = 0; i < (density > 0.0 || streak_opacity > 0.0 ? STEPS : 0); i++) {
 		vec3 p = cam + dir * (t0 + (float(i) + jitter) * step_len);
 		if (raining_at(p)) {
 			float gust = textureLod(gust_noise, p / GUST_CELL + gust_offset, 0.0).r;
 			rainy += step_len * (1.0 + gust_amount * (gust * 2.0 - 1.0));
 		}
 	}
-	float haze = 1.0 - exp(-density * rainy);
+	float misty = length(view_pos);
+	if (dir.y > 1e-4) {
+		misty = min(misty, max((mist_top - cam.y) / dir.y, 0.0));
+	} else if (cam.y > mist_top) {
+		misty = dir.y < -1e-4 ? max(misty - (cam.y - mist_top) / -dir.y, 0.0) : 0.0;
+	}
+	float haze = 1.0 - exp(-density * rainy - mist * misty);
 
 	float streak = 0.0;
 	// Walked in the frame the wind carries them in, where every column stands still.

@@ -55,6 +55,8 @@ uniform vec3 star_color : source_color = vec3(1.0, 1.0, 1.0);
 // Takes a view ray back to where it looked at noon, as the stars turn with the sun (OvercastSky
 // sets it).
 uniform mat3 star_basis = mat3(1.0);
+// The Yale Bright Star Catalogue on an octahedral map, in star_basis' frame (OvercastSky sets it).
+uniform sampler2D star_catalogue : filter_nearest, repeat_disable;
 
 // Time of day (OvercastSky.time_of_day sets the two amounts): the colours above are the day's.
 // Toward dusk they warm to dusk_color, low and on the sun's side; at night they give way to these,
@@ -243,6 +245,26 @@ float storm_body_of(float n) {
 	return clamp(0.55 + 0.7 * n, 0.4, 1.3);
 }
 
+// The lower half's fold of the star catalogue's octahedral map, each way (as sign(), but 0 is +).
+vec2 star_fold(vec2 p) {
+	return (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+}
+
+// Where unit n lands on the star catalogue's octahedral map, 0 to 1, and back.
+vec2 star_octahedral(vec3 n) {
+	n /= abs(n.x) + abs(n.y) + abs(n.z);
+	return (n.z < 0.0 ? star_fold(n.xy) : n.xy) * 0.5 + 0.5;
+}
+
+vec3 star_unoctahedral(vec2 uv) {
+	vec2 p = uv * 2.0 - 1.0;
+	vec3 n = vec3(p, 1.0 - abs(p.x) - abs(p.y));
+	if (n.z < 0.0) {
+		n.xy = star_fold(n.xy);
+	}
+	return normalize(n);
+}
+
 // Stars and the Milky Way along eye_dir, for a sky `sky_lum` bright behind them. `amount` is how
 // many are out.
 vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
@@ -273,24 +295,42 @@ vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
 	float seen = smoothstep(0.0, 0.02, up) * mix(1.0, 0.35, low) * (1.0 - drowned);
 	vec3 col = mix(night_horizon_color, star_color, 0.5) * band * 0.22 * min(amount * 1.5, 1.0) * seen;
 
-	vec3 sp = dir * 320.0;
-	vec3 cell = floor(sp);
-	float h = overcast_hash13(cell);
-	// `amount` is a density, but the useful range is tiny: a cell in a few dozen.
-	float threshold = 1.0 - min(amount * 0.06 * (1.0 + 4.0 * band), 1.0);
-	if (h < threshold) {
-		return col;
+	// The catalogue's stars (stars.res, tools/bake_stars.gd), down to the faintest the sky lets
+	// through: a moonless dark sky shows them all, to about magnitude 6.5.
+	float limit = mix(1.0, 6.6, min(amount * 1.2, 1.0)) - drowned * 5.0;
+	ivec2 size = textureSize(star_catalogue, 0);
+	vec2 at = star_octahedral(dir) * vec2(size);
+	ivec2 home = ivec2(at);
+	// How wide a pixel is here, so a faint star is never smaller than one.
+	float px = max(length(fwidth(dir)), 1e-5);
+	vec3 lit = vec3(0.0);
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			ivec2 tc = clamp(home + ivec2(x, y), ivec2(0), size - 1);
+			vec4 t = texelFetch(star_catalogue, tc, 0);
+			float mag = (1.0 - t.b) * 255.0 / 25.0 - 2.0;
+			if (t.b <= 0.0 || mag > limit) {
+				continue;
+			}
+			vec3 sd = star_unoctahedral((vec2(tc) + (t.rg * 255.0 + 0.5) / 256.0) / vec2(size));
+			float d = length(dir - sd);
+			// The brightest a little larger, as glare makes them.
+			float r = mix(0.0006, 0.0022, smoothstep(5.0, -1.0, mag));
+			float rr = max(r, px * 0.9);
+			if (d >= rr) {
+				continue;
+			}
+			// Brightness on a perceptual scale, the flux ratio to the power 0.75.
+			float bright = pow(10.0, -0.3 * (mag - 1.5)) * smoothstep(limit, limit - 0.8, mag);
+			float bv = t.a * 255.0 / 100.0 - 0.5;
+			vec3 tint = mix(vec3(1.0, 0.78, 0.55), vec3(0.72, 0.84, 1.0), smoothstep(1.4, -0.1, bv));
+			float h = overcast_hash12(vec2(tc));
+			float twinkle = 1.0 - mix(0.15, 0.6, low) * (0.5 + 0.5 * sin(TIME * mix(1.7, 5.0, h) + h * 4217.0));
+			// Spread over a pixel when smaller than one, keeping its light.
+			lit += star_color * tint * smoothstep(rr, rr * 0.3, d) * bright * twinkle * sqrt(min(r / rr, 1.0)) * 4.0;
+		}
 	}
-	// Few are bright and most are faint; the bright ones are the first out at dusk.
-	float rank = (h - threshold) / max(1.0 - threshold, 1e-4);
-	float bright = 0.12 + 0.88 * pow(rank, 3.5);
-	float tint = overcast_hash13(cell + 41.3);
-	vec3 star = star_color * mix(vec3(1.0, 0.82, 0.62), vec3(0.72, 0.84, 1.0), smoothstep(0.15, 0.7, tint));
-	float d = length(fract(sp) - 0.5);
-	float twinkle = 1.0 - mix(0.2, 0.6, low) * (0.5 + 0.5 * sin(TIME * mix(1.7, 5.0, tint) + h * 4217.0));
-	float faint = 1.0 - smoothstep(bright * 0.6, bright * 0.6 + 0.3, drowned);
-	float size = mix(0.3, 0.48, bright);
-	return col + star * smoothstep(size, size * 0.4, d) * bright * 1.6 * twinkle * seen * faint;
+	return col + lit * seen;
 }
 
 // The grey a cloud out of the sun takes: lit by the sky, so the sky's colour rather than a grey.
@@ -317,17 +357,18 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (cirrus_amount > 0.0) {
 		float h = CLOUD_HEIGHT * cirrus_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
+		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, cirrus_amount);
 		vec2 hp = cloud_layer_at(cam, eye_dir, d, h) * 0.6;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		float c = cloud_tex(vec2(hp.x * 0.25, hp.y) + wind * 2.5 + vec2(3.7, 1.3));
 		float streaks = smoothstep(0.55, 0.85, c) * 0.45 * (1.0 - far);
 		// Cirrostratus: a milky veil, faintly fibrous, thickening toward the horizon.
 		float milky = (0.32 + 0.12 * c) * mix(1.0, 1.6, smoothstep(0.4, 0.0, up));
-		float ci = mix(streaks, milky, cirrus_sheet) * cirrus_amount * clear * smoothstep(0.0, 0.15, up);
+		float ci = mix(streaks, milky, cirrus_sheet) * amount * clear * smoothstep(0.0, 0.15, up);
 		vec3 lit = overcast_cloud_lit(cloud_col, sun_col, atmosphere_high_light);
 		out_col = mix(out_col, mix(ambient, lit, 0.7), ci);
 		// The 22° halo, from ice crystals: a sharp reddish inner edge, white and diffuse outward.
-		float halo_veil = milky * cirrus_amount * cirrus_sheet * clear;
+		float halo_veil = milky * amount * cirrus_sheet * clear;
 		float cos_ang = dot(eye_dir, sun);
 		if (halo_veil > 0.0 && cos_ang > 0.8) {
 			float ang = acos(min(cos_ang, 1.0));
@@ -341,19 +382,22 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	if (mid_cloud_amount > 0.0) {
 		float h = CLOUD_HEIGHT * mid_cloud_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
+		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, mid_cloud_amount);
 		vec2 mp = cloud_layer_at(cam, eye_dir, d, h) + wind * 1.3;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		// Where the sheet is: broad patches that join up as there is more of it.
 		float patches = cloud_tex(mp * 0.3 + vec2(9.1, 4.4)) + (cloud_tex(mp * 0.8 + vec2(1.7, 6.3)) - 0.5) * 0.5;
-		float edge = mix(0.78, 0.18, mid_cloud_amount);
+		float edge = mix(0.78, 0.18, amount);
 		float sheet = smoothstep(edge - 0.06, edge + 0.14, patches);
 		// The puffs: worley cells drawn out across the wind into rows, their outlines broken.
 		vec2 t = cloud_tex2(vec2(mp.x * 3.0, mp.y * 5.5) + vec2(2.3, 7.7));
 		float cell = t.g + (t.r - 0.5) * 0.3;
-		float size = mix(0.3, 0.55, sheet * mid_cloud_amount);
-		float puff = 1.0 - smoothstep(size - 0.1, size + 0.03, cell);
+		// Smaller toward a patch's edge, so a thin patch frays out rather than ending in flecks;
+		// thick at a puff's core and thinning to its rim.
+		float size = mix(0.1, 0.5, sheet);
+		float puff = 1.0 - smoothstep(size * 0.4, size + 0.04, cell);
 		// Far off, a cell is finer than a pixel: the sheet's average, banking up toward the horizon.
-		puff = mix(puff, mix(0.5, 0.85, mid_cloud_amount), far);
+		puff = mix(puff, mix(0.5, 0.85, amount), far);
 		// Altostratus: the patches spread smooth and grey, seen through.
 		float smooth_sheet = smoothstep(edge - 0.2, edge + 0.25, patches);
 		float cover = mix(puff * sheet, smooth_sheet * 0.85, mid_cloud_sheet) * clear * smoothstep(0.0, 0.06, up);
@@ -402,7 +446,7 @@ vec4 overcast_towers(vec3 eye_dir, vec3 sun, vec3 ambient, vec3 cloud_col, vec3 
 		if (h > cloud_towering) {
 			continue;
 		}
-		float centre = overcast_hash12(vec2(fi, 2.3)) * TAU + TIME * overcast_speed * 0.02;
+		float centre = overcast_hash12(vec2(fi, 2.3)) * TAU + length(overcast_cloud_drift) * 0.02;
 		float top = mix(0.07, 0.2, overcast_hash12(vec2(fi, 5.9))) * mix(0.5, 1.0, cloud_towering);
 		// In units of the cloud's height: x across, y up from the horizon.
 		vec2 p = vec2(mod(az - centre + PI, TAU) - PI, e) / top;

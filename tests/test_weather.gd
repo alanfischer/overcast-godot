@@ -1261,7 +1261,16 @@ func test_a_sky_is_let_go_of_clear() -> void:
 	assert_gt(sky.storm, 0.9, "the storm is on the sky")
 	assert_ne(sky.flash, Color.BLACK, "and so is the flash")
 	assert_gt(flashes[-1].b, flashes[-1].r, "the scene's flash is a bluish light")
+	w.wind = Vector3(4.0, 0.0, 0.0)
+	w._process(0.01)
+	assert_eq(sky._told_wind, Vector3(8.0, 0.0, 0.0), "the clouds ride its wind")
+	var map := ImageTexture.create_from_image(Image.create(2, 2, false, Image.FORMAT_L8))
+	w.set_cover_map(map, 1000.0)
+	w._process(0.01)
+	assert_eq(sky._cover_map, map, "and it hands down where the clouds are")
 	_root().remove_child(w)
+	assert_false(sky._told_wind.is_finite(), "gone, they ride the sky's own again")
+	assert_eq(sky._cover_map, null, "and its map goes with it")
 	assert_eq(sky.storm, 0.0, "gone, the weather takes its storm")
 	assert_eq(sky.snowy, 0.0, "and its snow")
 	assert_eq(sky.flash, Color.BLACK, "and its flash")
@@ -1440,3 +1449,19 @@ func test_the_wind_is_quieter_under_a_roof() -> void:
 		w._process(0.1)
 	assert_almost_eq(w._wind_audio.volume_db, open + linear_to_db(Weather._WIND_INDOOR_GAIN), 0.01,
 		"indoors, WIND_INDOOR_GAIN of it")
+
+
+func test_fog_hazes_with_no_rain() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w._process(0.01)
+	assert_true(w._haze == null or not w._haze.visible, "clear air: no haze pass")
+	w.visibility = 200.0
+	w._process(0.01)
+	assert_true(w._haze != null and w._haze.visible, "fog brings it up, dry as it is")
+	assert_almost_eq(w._haze_material.get_shader_parameter("mist"), w.mist(), 1e-9, "as thick as the fog")
+	assert_gt(w.mist(), 0.019, "200 m of fog takes most of the light over 200 m")
+	w.visibility = Weather.CLEAR_VISIBILITY
+	w._process(0.01)
+	assert_false(w._haze.visible, "cleared, it goes")

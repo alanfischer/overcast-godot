@@ -17,8 +17,10 @@ Pure arithmetic, no network.
 - Night, dusk and moonlight go by how high the sun and moon really stand, so polar summer has no
   night and polar winter no day. The hour-keyed arc (`time_of_day` round `sun_dir`) stays the
   simple mode.
-- Later: real stars from the Yale Bright Star Catalogue (public domain) instead of the procedural
-  field.
+- Real stars (done): the Yale Bright Star Catalogue, about 9,000 to magnitude 6.5, baked by
+  `tools/bake_stars.gd` into `stars.res`, an octahedral map in the sky's star frame, precessed
+  from J2000 to the date (IAU 1976). Not yet: proper motion (Barnard's star aside, under an
+  arcminute since 2000).
 
 ## 2. One weather state, in layers (done)
 
@@ -49,10 +51,16 @@ ray-marched layer. Only the low layer ray-marches.
 Optional, off by default, and the game hands it the place (the place is the player's; it goes
 to a third party only when they agree).
 
-- Open-Meteo first: current and hourly temperature, rain, snow, weather code, low/mid/high cloud
-  cover, wind and gusts, visibility. Free without a key for non-commercial use only.
+- Open-Meteo (done): `OvercastForecast` fetches the hours about the placed sky's moment, the
+  forecast or the record, and hands the weather conditions blended between them. The clouds now
+  drift with the wind (summed on the CPU into `overcast_cloud_drift`), the 850 hPa wind when the
+  forecast gives it. Visibility becomes fog and haze (OvercastWeather.visibility), and how much
+  of the rain is snow is the model's (snowfall against precipitation) rather than the ground
+  temperature's alone, which covers what the freezing level would.
 - METAR, near airports: observed cloud bases, and towering cumulus and cumulonimbus by name.
-- Satellite, last: geostationary cloud imagery (NASA GIBS tiles, about every ten minutes) cropped
-  round the place into a cover texture that steers the cloud noise, so the clouds overhead are
-  roughly the real ones. Needs one new sky input: a world-space cover map that drifts with the
-  wind.
+- Satellite (done): `OvercastSatellite` lays NASA GIBS' geostationary infrared round the place as
+  the sky's cover map, a rank of how cold each pixel is, pressed toward no say when the frame's
+  temperatures barely differ. The shell meets the horizon a few heights out where the real layer
+  runs on for a hundred km, so the map is looked up by elevation and bearing. Not yet: Europe,
+  Africa and India (no Meteosat in GIBS); telling the layers apart by temperature (every layer
+  takes the same map); the daytime visible band. A new frame fades in over the last for a minute.

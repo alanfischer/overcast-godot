@@ -124,6 +124,12 @@ const _BOLT_HEIGHT := Vector2(1.1, 1.7)
 const _SOUND_SPEED := 340.0
 ## How far a full storm dims `sun` when there is no sky to say (OvercastSky.storm_shadow).
 const _SUN_STORM_SHADOW := 0.88
+## Visibility (m) that counts as clear air, and the extinction that leaves 2% of the light over the
+## distance one can see (Koschmieder).
+const CLEAR_VISIBILITY := 20000.0
+const _SEEN := 3.912
+## How much harder the wind blows at the clouds than at the ground, when nothing says.
+const ALOFT := 2.0
 ## How far under where rain stops ground still takes it (rains_on).
 const _GROUND_REACH := 1.0
 
@@ -145,6 +151,14 @@ const _GROUND_REACH := 1.0
 ## Wind across the ground, m/s (y is ignored): rain slants with it, snow is carried off on it, and
 ## the haze's curtains blow along it.
 @export var wind := Vector3.ZERO
+## How far one can see through the air, m: fog under 1 km, mist and haze to a few km. Past
+## CLEAR_VISIBILITY it is clear, and the sky's own air does the distance. Fills the air up to the
+## cloud's base, under roofs as well.
+@export_range(10.0, CLEAR_VISIBILITY, 10.0, "exp", "suffix:m") var visibility := CLEAR_VISIBILITY:
+	set(value):
+		visibility = value
+		if is_node_ready():
+			_refresh(rain)
 ## How far the wind swings in gusts, in speed and a little in direction: 0 steady, 1 from still to
 ## twice its speed.
 @export_range(0.0, 1.0, 0.01) var gustiness := 0.4
@@ -334,9 +348,12 @@ var bolt_drawer: Callable
 ## networked game to keep one peer's and have the others take it up.
 var ground := OvercastGround.new(self)
 ## How much of what falls is snow at `temperature`: 0 all rain, 1 all snow, sleet between.
+## The conditions' share when they give one.
 var snow_share: float:
 	get:
-		return 1.0 - smoothstep(SLEET.x, SLEET.y, temperature)
+		if conditions and conditions.snow_share >= 0.0:
+			return conditions.snow_share
+		return snow_share_at(temperature)
 ## How much of `rain` falls as rain, and how much as snow.
 var rainfall: float:
 	get:
@@ -360,8 +377,12 @@ var cycle_time := 0.0:
 			_cycle = null
 		cycle_time = t
 var _cycle: _Cycle
-var _sky_told := 0  # the instance id of the sky last told the storm, and what it was told
-var _sky_storm := Vector2(NAN, NAN)
+var _sky_told := 0  # the instance id of the sky last told, and what it was told
+var _sky_storm := Vector3(NAN, NAN, NAN)
+var _sky_wind := Vector3.INF
+var _sky_cover_told := false
+var _cover_map: Texture2D
+var _cover_span := 1.0
 ## How much of the storm is snow: follows snow_share at _STORM_RATE, as the sky turns pale.
 var snowy: float:
 	get:
@@ -596,11 +617,42 @@ func _notification(what: int) -> void:
 
 
 ## The sky this has been closing over, back to clear: no storm, no snow, no flash.
+## Where the clouds really are, for the sky this draws under (OvercastSky.set_cover_map), and taken
+## back from it when it lets it go. OvercastSatellite lays NASA's.
+func set_cover_map(map: Texture2D, span: float) -> void:
+	_cover_map = map
+	_cover_span = span
+	_sky_cover_told = false
+
+
+## Hands `drawn` the storm, the wind and the cover map: all of it to a sky new to it, then what
+## changed.
+func _tell(drawn: OvercastSky) -> void:
+	if drawn.get_instance_id() != _sky_told:
+		_sky_told = drawn.get_instance_id()
+		_sky_storm = Vector3(NAN, NAN, NAN)
+		_sky_wind = Vector3.INF
+		_sky_cover_told = false
+	var told := Vector3(storm, snowy, mist())
+	if told != _sky_storm:
+		drawn.set_weather(_storm, _snowy, told.z)
+		_sky_storm = told
+	var aloft := wind_aloft()
+	if aloft != _sky_wind:
+		drawn.set_wind(aloft)
+		_sky_wind = aloft
+	if not _sky_cover_told:
+		drawn.set_cover_map(_cover_map, _cover_span)
+		_sky_cover_told = true
+
+
 func _let_sky_go() -> void:
 	var told := instance_from_id(_sky_told) as OvercastSky
 	if told:
 		told.set_weather(0.0, 0.0)
 		told.set_flash(Color.BLACK, Vector3.UP)
+		told.set_wind(Vector3.INF)
+		told.set_cover_map(null, _cover_span)
 	_sky_told = 0
 
 
@@ -928,7 +980,7 @@ func _refresh(was: float) -> void:
 		_next_strike = minf(_next_strike, lerpf(strike_gap_light.y, strike_gap_heavy.y, _heaviness(rain)))
 	if not presenting:
 		return
-	if rain > 0.0 and _haze == null:
+	if (rain > 0.0 or mist() > 0.0) and _haze == null:
 		_build_haze()
 	_refresh_flakes()
 	var wet := rainfall
@@ -1189,7 +1241,8 @@ func _turn_ground(delta: float, slant: Vector2) -> void:
 
 func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	var density := haze_density * storm * storm * lerpf(1.0, _SNOW_HAZE, snowy)
-	_haze.visible = (density > 0.0005 or rain > 0.0) and not underwater
+	var thick := mist()
+	_haze.visible = (density > 0.0005 or rain > 0.0 or thick > 0.0) and not underwater
 	if not _haze.visible:
 		return
 	# Kept in [0, 1) rather than driven off TIME, which loses precision as it grows.
@@ -1202,6 +1255,8 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	_haze_material.set_shader_parameter("slant", blow / _far_fall)
 	_haze_material.set_shader_parameter("gust_offset", _gust_offset)
 	_haze_material.set_shader_parameter("density", density)
+	_haze_material.set_shader_parameter("mist", thick)
+	_haze_material.set_shader_parameter("mist_top", _Globals.value("overcast_height"))
 	_drop_material.set_shader_parameter("haze_density", density)
 	_splash_material.set_shader_parameter("haze_density", density)
 	_flake_material.set_shader_parameter("haze_density", density)
@@ -1309,10 +1364,8 @@ func _process(delta: float) -> void:
 		return
 	var drawn := current_sky()
 	_snowy = move_toward(_snowy, snow_share, _STORM_RATE * delta)
-	if drawn and (drawn.get_instance_id() != _sky_told or Vector2(storm, snowy) != _sky_storm):
-		drawn.set_weather(_storm, _snowy)
-		_sky_told = drawn.get_instance_id()
-		_sky_storm = Vector2(storm, snowy)
+	if drawn:
+		_tell(drawn)
 	_live.update(delta)
 	_blow(delta)
 	_drops.visible = rainfall > 0.0 and not underwater
@@ -1349,6 +1402,24 @@ func _process(delta: float) -> void:
 		_update_wet(haze_color)
 
 
+## How much of what falls is snow at `degrees` °C.
+static func snow_share_at(degrees: float) -> float:
+	return 1.0 - smoothstep(SLEET.x, SLEET.y, degrees)
+
+
+## Fog or haze, per metre of air, past what clear air has.
+func mist() -> float:
+	return maxf(_SEEN / maxf(visibility, 1.0) - _SEEN / CLEAR_VISIBILITY, 0.0)
+
+
+## The wind the clouds ride: the conditions' when they give one, else `wind` blown ALOFT times
+## as hard.
+func wind_aloft() -> Vector3:
+	if conditions and conditions.wind_aloft != Vector3.ZERO:
+		return conditions.wind_aloft
+	return wind * ALOFT
+
+
 func _drive_sun(drawn: OvercastSky) -> void:
 	# Changed since this last set it: someone else's doing, and the sun's own from now on.
 	if sun.light_energy != _sun_set_energy:
@@ -1376,6 +1447,9 @@ func _follow(c: OvercastConditions) -> void:
 	if temperature != c.temperature:
 		temperature = c.temperature
 	wind = c.wind
+	gustiness = c.gustiness
+	if visibility != c.visibility:
+		visibility = c.visibility
 	var s := current_sky()
 	if s:
 		s.set_clouds(c)

@@ -17,7 +17,8 @@ static func days(unix: float) -> float:
 
 ## The sun and moon, world space, and the stars' turn, at `unix` from the place given.
 ## sun and moon: unit, toward them. phase: the moon's, 0 new, 0.5 full, waxing between.
-## stars: takes a world direction to one fixed among the stars (equatorial, +Z the celestial pole).
+## stars: takes a world direction to one fixed among the stars (equatorial of J2000, +Z the
+## celestial pole then), as catalogues give them.
 static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0) -> Dictionary:
 	var d := days(unix)
 	var sun := _sun(d)
@@ -29,8 +30,19 @@ static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0)
 		"sun": to_world * _equatorial(sun["lon"], 0.0, d),
 		"moon": to_world * near_moon.normalized(),
 		"phase": fposmod(moon["lon"] - sun["lon"], 360.0) / 360.0,
-		"stars": to_world.transposed(),
+		"stars": precession(d).transposed() * to_world.transposed(),
 	}
+
+
+## J2000 equatorial to the equator and equinox of `d` days in (IAU 1976): the frame the sun and
+## sidereal time here are in, the pole wandering about 0.35° a quarter century.
+static func precession(d: float) -> Basis:
+	var t := d / 36525.0
+	var arcsec := PI / 648000.0
+	var zeta := (2306.2181 + (0.30188 + 0.017998 * t) * t) * t * arcsec
+	var z := (2306.2181 + (1.09468 + 0.018203 * t) * t) * t * arcsec
+	var theta := (2004.3109 - (0.42665 + 0.041833 * t) * t) * t * arcsec
+	return Basis(Vector3.BACK, z) * Basis(Vector3.UP, -theta) * Basis(Vector3.BACK, zeta)
 
 
 ## Local sidereal time, degrees: the right ascension standing on the meridian.
@@ -57,9 +69,13 @@ static func _to_world(lst: float, latitude: float, north: float) -> Basis:
 		Vector3(-sin(t), -sin(p) * cos(t), cos(p) * cos(t)),
 		Vector3(cos(t), -sin(p) * sin(t), cos(p) * sin(t)),
 		Vector3(0.0, cos(p), sin(p)))
-	var north_w := Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north))
-	var east_w := north_w.rotated(Vector3.UP, -PI * 0.5)
-	return Basis(east_w, north_w, Vector3.UP) * enu
+	return Basis(bearing(90.0, north), bearing(0.0, north), Vector3.UP) * enu
+
+
+## The world's way toward compass bearing `degrees` (clockwise from north), its north turned
+## `north` degrees from -Z, clockwise seen from above.
+static func bearing(degrees: float, north := 0.0) -> Vector3:
+	return Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north + degrees))
 
 
 ## Ecliptic longitude and latitude (degrees) to a unit equatorial vector, d days in.

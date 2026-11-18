@@ -85,6 +85,18 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Showers come and go"
 
+[node name="Real" type="CheckBox" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Real weather there (Open-Meteo)"
+
+[node name="Satellite" type="CheckBox" parent="UI/Panel/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Where the clouds are there (NASA)"
+
 [node name="Strike" type="Button" parent="UI/Panel/Box"]
 unique_name_in_owner = true
 layout_mode = 2

@@ -5,7 +5,10 @@ extends SceneTree
 ## CLEARED=1 clears the sky over the settled weather; PLACE=lat,lon[,utc offset] and DATE=YYYY-MM-DD
 ## put the sky over a real place, TIME its local time, and POLE=1 looks at the celestial pole;
 ## MID=0.6 and CIRRUS=0.8 for the higher layers, MIDSHEET, CIRRUSSHEET, SHEET and TOWERING for their
-## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any.
+## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any. FORECAST=1 takes the real
+## weather at PLACE from Open-Meteo, at DATE and TIME or now. VIS=300 for fog that thick (m).
+## SATELLITE=1 lays NASA's infrared round PLACE at DATE and TIME as the cover map.
+## COVERMAP=png lays a cover map (white cloudy, north up) SPAN metres across (200 km).
 ##   godot --path . -s res://tools/screenshot.gd
 
 const Clouds = preload("res://addons/overcast/overcast_clouds.gd")
@@ -44,9 +47,24 @@ func _run() -> void:
 		demo.get_node("%Wind").value = float(OS.get_environment("WIND"))
 	if OS.get_environment("TEMP") != "":
 		demo.get_node("%Temperature").value = float(OS.get_environment("TEMP"))
+	var weather = demo.get_node("Weather")
+	if OS.get_environment("COVERMAP") != "":
+		var span := float(OS.get_environment("SPAN")) if OS.get_environment("SPAN") != "" else 200000.0
+		demo.sky.set_cover_map(ImageTexture.create_from_image(Image.load_from_file(OS.get_environment("COVERMAP"))), span)
+	var live := OS.get_environment("SATELLITE") == "1" or OS.get_environment("FORECAST") == "1"
+	if live and OS.get_environment("DATE") == "" and OS.get_environment("TIME") == "":
+		demo.sky.unix_time = Time.get_unix_time_from_system()
+	if OS.get_environment("SATELLITE") == "1":
+		var satellite: OvercastSatellite = await _feed(OvercastSatellite.new(), weather, "satellite")
+		print("satellite: frame ", Time.get_datetime_string_from_unix_time(satellite.frame))
+	if OS.get_environment("VIS") != "":
+		weather.visibility = float(OS.get_environment("VIS"))
+	if OS.get_environment("FORECAST") == "1":
+		var forecast: OvercastForecast = await _feed(OvercastForecast.new(), weather, "forecast")
+		await process_frame
+		print("forecast: ", inst_to_dict(forecast.conditions_at(demo.sky.unix_time)))
 	for i in 20:
 		await physics_frame
-	var weather = demo.get_node("Weather")
 	weather.settle()
 	if OS.get_environment("CLEARED") == "1":  # the snow lying, and the sky cleared over it
 		weather.rain = 0.0
@@ -84,3 +102,12 @@ func _run() -> void:
 				await process_frame
 		root.get_texture().get_image().save_png("%s/%s.png" % [out, name])
 	quit()
+
+
+## `feed` on, under `weather`, once it has laid what it fetched.
+func _feed(feed: Node, weather: Node, label: String) -> Node:
+	feed.enabled = true
+	feed.failed.connect(func(m: String) -> void: printerr(label, ": ", m))
+	weather.add_child(feed)
+	await feed.updated
+	return feed

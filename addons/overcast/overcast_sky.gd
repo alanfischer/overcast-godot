@@ -148,11 +148,17 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 	set(v):
 		cloud_scale = v
 		_sync_layer()
-## Noise units per second.
-@export_range(0.0, 0.5, 0.001) var cloud_speed := 0.035:
+## The wind the clouds ride, m/s at their real height (y is ignored), while no weather says
+## otherwise (set_wind).
+@export var wind_aloft := Vector3(-10.0, 0.0, -3.5):
 	set(v):
-		cloud_speed = v
-		_sync_layer()
+		wind_aloft = v
+		_sync_drift()
+## How many times faster than life the clouds go: 1 is real, which in a game can look still.
+@export_range(0.0, 20.0, 0.1, "or_greater") var cloud_speedup := 1.0:
+	set(v):
+		cloud_speedup = v
+		_sync_drift()
 @export_range(0.0, 0.5, 0.01) var cloud_softness := 0.1:
 	set(v):
 		cloud_softness = v
@@ -261,18 +267,27 @@ var cloud_towering: float:
 		return _float_param(&"cloud_towering")
 	set(v):
 		set("shader_parameter/cloud_towering", v)
-## How much of the sun's light the cloud over the low layer takes off the ground, evenly, 0 to 1.
+## How much of the sun's light the cloud over the low layer, and fog under it, take off the
+## ground, evenly, 0 to 1.
 var veil: float:
 	get:
 		var mid := mid_cloud_amount * lerpf(_MID_VEIL.x, _MID_VEIL.y, mid_cloud_sheet)
 		var high := cirrus_amount * cirrus_sheet * _HIGH_VEIL
-		return (1.0 - (1.0 - mid) * (1.0 - high)) * (1.0 - storm)
+		var above := (1.0 - (1.0 - mid) * (1.0 - high)) * (1.0 - storm)
+		# Fog fills the air to the cloud's base: the sun comes through that much of it, slanting.
+		var fog := 1.0 - exp(-_mist * cloud_height * world_scale / maxf(light_dir().y, 0.1))
+		return 1.0 - (1.0 - above) * (1.0 - fog)
 
 ## Kept for releasing the cloud layer as the sky is freed, when `self` is no longer to hand.
 var _id := get_instance_id()
 var _started := false
+var _told_wind := Vector3.INF
+var _cover_map: Texture2D
+var _cover_span := 1.0
+var _stars_bound := false
 var _storm := 0.0
 var _snowy := 0.0
+var _mist := 0.0
 ## The air's light level across the sun's bearing, linear, as _sync_air last took it.
 var _air_horizon := Color.BLACK
 ## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
@@ -288,6 +303,7 @@ var _clouds := {}
 static var _air_noon_zenith := {}
 ## The noon sun on the ground, by haze: what the air's light on the scene is measured against.
 static var _air_noon_light := {}
+static var _catalogue: Texture2D
 ## Turns the galaxy's real pole to where the sky shader draws the Milky Way.
 static var _galaxy_turn := Basis(Quaternion(
 	_Ephemeris.radec(_Ephemeris.GALACTIC_POLE.x, _Ephemeris.GALACTIC_POLE.y), _STAR_POLE.normalized()))
@@ -319,6 +335,14 @@ func _init(params: Dictionary = {}, sky_shader: Shader = null) -> void:
 func _start() -> void:
 	_started = true
 	_sync_light()
+
+
+## The Yale Bright Star Catalogue, as tools/bake_stars.gd lays it out: made once.
+static func _star_catalogue() -> Texture2D:
+	if _catalogue == null:
+		_catalogue = ImageTexture.create_from_image(
+			ResourceLoader.load("res://addons/overcast/stars.res", "", ResourceLoader.CACHE_MODE_IGNORE))
+	return _catalogue
 
 
 ## A sky must let go of the cloud layer it holds, or its clouds' shadows outlive it.
@@ -557,6 +581,12 @@ func _sync_light() -> void:
 	set_shader_parameter("moon_lit_from", _now["lit_from"])
 	set_shader_parameter("moonlight", _moonlight())
 	set_shader_parameter("star_basis", _now["stars"])
+	# The catalogue only once there are stars to draw, and not at all where nothing is drawn.
+	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
+	if not _stars_bound and (night > 0.0 or _float_param(&"star_amount") > 0.0) \
+			and DisplayServer.get_name() != "headless":
+		_stars_bound = true
+		RenderingServer.material_set_param(get_rid(), &"star_catalogue", _star_catalogue().get_rid())
 	_sync_air()
 	_sync_layer()
 
@@ -802,7 +832,8 @@ func _sync_layer() -> void:
 	if not _started:
 		return
 	if drawing:
-		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, cloud_speed, cloud_softness)
+		_Clouds._claim(_id, light_dir(), cloud_height * world_scale, cloud_scale, _drift(), cloud_softness)
+		_sync_cover_map()
 		_push_weather()
 	else:
 		_Clouds._release(_id)
@@ -810,13 +841,49 @@ func _sync_layer() -> void:
 
 ## The weather's say over the sky: OvercastWeather calls these, and a sky with no weather can be
 ## told by hand. How far it has closed over for rain (`storm`), and how much of that is snow
-## (`snowy`, a pale sky rather than a dark one), 0 to 1 each.
-func set_weather(storm_amount: float, snowy_amount: float) -> void:
+## (`snowy`, a pale sky rather than a dark one), 0 to 1 each; and fog under the cloud, per metre
+## (OvercastWeather.mist), which veils the sun.
+func set_weather(storm_amount: float, snowy_amount: float, mist := 0.0) -> void:
 	_storm = storm_amount
 	_snowy = snowy_amount
+	_mist = mist
 	RenderingServer.material_set_param(get_rid(), &"storm", storm_amount)
 	RenderingServer.material_set_param(get_rid(), &"snowy", snowy_amount)
 	_push_weather()
+
+
+## The wind the clouds ride, m/s at their height, over wind_aloft: OvercastWeather's say.
+## Vector3.INF hands them back to wind_aloft.
+func set_wind(aloft: Vector3) -> void:
+	_told_wind = aloft
+	_sync_drift()
+
+
+## Where the cloud really is round the place: `map` white where cloudy, black where clear, mid
+## grey where it has no say, north up, centred on the scene's origin and `span` real metres
+## across. Each layer's amount stays its own: the map moves it about. From here on it rides the
+## wind, and a new one fades in over it. Null takes it away. OvercastSatellite lays NASA's.
+func set_cover_map(map: Texture2D, span: float) -> void:
+	_cover_map = map
+	_cover_span = span
+	_sync_cover_map()
+
+
+func _sync_cover_map() -> void:
+	if _started and drawing:
+		var east := _Ephemeris.bearing(90.0, north)
+		_Clouds._set_cover_map(_id, _cover_map, Vector2(east.x, east.z), _cover_span, world_scale)
+
+
+## Noise units per second the wind carries the pattern; it moves against the noise coordinates.
+func _drift() -> Vector2:
+	var w := _told_wind if _told_wind.is_finite() else wind_aloft
+	return -Vector2(w.x, w.z) * cloud_scale / cloud_height * cloud_speedup
+
+
+func _sync_drift() -> void:
+	if _started and drawing:
+		_Clouds._set_drift(_id, _drift())
 
 
 ## Lightning: light the sky from within, brightest toward `dir` (world space); black puts it out.

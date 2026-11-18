@@ -25,6 +25,9 @@ const ROOF := ["weathered_brown_planks", 1.8]
 ## The sky in the scene's WorldEnvironment, which the weather finds by itself.
 var sky: SkyScript
 var _surfaces := {}
+## What real weather sets that no slider puts back.
+const _UNSLID := [&"cloud_amount", &"cloud_height", &"mid_cloud_height", &"cirrus_height"]
+var _unslid := {}
 var _yaw := 0.0
 var _pitch := 0.15
 
@@ -67,6 +70,8 @@ func _ready() -> void:
 		knob[0].value_changed.connect(func(v: float) -> void: sky.set(knob[1], v))
 	_set_date(%Date.value)
 	cycle_check.toggled.connect(func(on: bool) -> void: weather.cycle = on)
+	%Real.toggled.connect(_set_real)
+	%Satellite.toggled.connect(_set_satellite)
 
 
 ## Returns the box's material.
@@ -135,9 +140,47 @@ func _set_place(index: int) -> void:
 		sky.longitude = place[2]
 		sky.utc_offset = place[3]
 	sky.placed = index > 0
+	%Real.disabled = not sky.placed
+	%Satellite.disabled = not sky.placed
+	if not sky.placed:
+		%Real.button_pressed = false
+		%Satellite.button_pressed = false
 	%Moon.editable = not sky.placed
 	%Date.editable = sky.placed
 	_show_phase()
+
+
+## The weather Open-Meteo has for the place at its date and time. Sends the place to it.
+func _set_real(on: bool) -> void:
+	if on:
+		for key in _UNSLID:
+			_unslid[key] = sky.get(key)
+	_feed(OvercastForecast, "Open-Meteo", on)
+	if not on:
+		weather.conditions = null
+		for key in _unslid:
+			sky.set(key, _unslid[key])
+		for knob in [%Rain, %Temperature, %Wind, %Mid, %Cirrus, %LowSheet, %MidSheet,
+				%CirrusSheet, %Towering]:
+			knob.value_changed.emit(knob.value)
+
+
+## The satellite's clouds round the place at its date and time. Sends the place to NASA.
+func _set_satellite(on: bool) -> void:
+	_feed(OvercastSatellite, "NASA", on)
+
+
+## Turns the weather's feed of `kind` on or off, making it the first time; `source` names it in
+## its warnings.
+func _feed(kind: GDScript, source: String, on: bool) -> void:
+	var feed: Node = weather.get_node_or_null(source)
+	if feed == null and on:
+		feed = kind.new()
+		feed.name = source
+		feed.failed.connect(func(m: String) -> void: push_warning(source + ": " + m))
+		weather.add_child(feed)
+	if feed:
+		feed.enabled = on
 
 
 func _set_date(day: float) -> void:

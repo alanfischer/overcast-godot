@@ -17,6 +17,22 @@ static var _volumetric := false
 static var _owner := 0
 ## Instance ids of the skies that want the layer, oldest claim first.
 static var _drawing: Array[int] = []
+## How far the wind has carried the pattern (noise units), summed here in doubles: a float shader
+## TIME would run out of precision, and could not follow a wind that changes.
+static var _drift_x := 0.0
+static var _drift_y := 0.0
+## Noise units per second the owner's wind carries it.
+static var _drift_rate := Vector2.ZERO
+static var _drift_usec := 0
+## Seconds a new cover map takes to fade in over the one before.
+const COVER_FADE := 60.0
+static var _fade := 1.0
+## The cover map laid and the drift it was laid at, and where the one before it was laid.
+static var _laid: Texture2D
+static var _laid_at := Vector2.ZERO
+static var _was_at := Vector2.ZERO
+## The longest frame gap carried, so a stall does not jump the clouds.
+const _DRIFT_STEP_MAX := 0.25
 
 
 static func _set_global(key: String, v: Variant) -> void:
@@ -34,9 +50,9 @@ static func set_volumetric(enabled: bool) -> void:
 
 
 ## OvercastSky's: the sky with instance id `owner` takes the layer. `sun_dir` toward the sun,
-## `height` metres over the origin, `scale` noise units per height, `speed` noise units per
-## second, `softness` of the edges.
-static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, speed: float,
+## `height` metres over the origin, `scale` noise units per height, `drift` noise units per second
+## the wind carries the pattern, `softness` of the edges.
+static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, drift: Vector2,
 		softness: float) -> void:
 	if _owner != owner:
 		_drawing.erase(owner)
@@ -48,8 +64,73 @@ static func _claim(owner: int, sun_dir: Vector3, height: float, scale: float, sp
 	_set_global("overcast_sun_dir", sun_dir.normalized())
 	_set_global("overcast_height", height)
 	_set_global("overcast_scale", scale)
-	_set_global("overcast_speed", speed)
 	_set_global("overcast_softness", softness)
+	_drift_rate = drift
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree and not tree.process_frame.is_connected(_advance):
+		_drift_usec = Time.get_ticks_usec()
+		tree.process_frame.connect(_advance)
+
+
+## OvercastSky's: the wind now carries the pattern `drift` noise units per second.
+static func _set_drift(owner: int, drift: Vector2) -> void:
+	if owner == _owner:
+		_drift_rate = drift
+
+
+## OvercastSky's: lay `map` (white cloudy, north up, `span` real metres across, centred on the
+## origin) with east toward `east` (world xz) under a world shrunk `world_scale`, if `owner` holds
+## the layer; null takes it away. It rides the wind from here on; laid again, it stays put.
+static func _set_cover_map(owner: int, map: Texture2D, east: Vector2, span: float,
+		world_scale: float) -> void:
+	if owner != _owner:
+		return
+	if map == null:
+		_clear_cover_maps()
+		return
+	_set_global("overcast_cover_map_frame", Vector4(east.x, east.y, span, world_scale))
+	if map == _laid:
+		return
+	# The frame before fades out under this one rather than giving way to it at once.
+	if _laid:
+		_was_at = _laid_at
+		_set_global("overcast_cover_map_was", _laid)
+	_fade = 0.0 if _laid else 1.0
+	_laid = map
+	_laid_at = Vector2(_drift_x, _drift_y)
+	_set_global("overcast_cover_map", map)
+	_push_cover_fade()
+
+
+static func _clear_cover_maps() -> void:
+	_laid = null
+	_fade = 1.0
+	_set_global("overcast_cover_map_place", Vector4.ZERO)
+	_set_global("overcast_cover_map_was_place", Vector4.ZERO)
+
+
+## How far the frame laid has faded in over the one before, 0 to 1.
+static func _fade_cover_maps(dt: float) -> void:
+	_fade = minf(_fade + dt / COVER_FADE, 1.0)
+	_push_cover_fade()
+
+
+static func _push_cover_fade() -> void:
+	_set_global("overcast_cover_map_place", Vector4(_laid_at.x, _laid_at.y, _fade, 0.0))
+	_set_global("overcast_cover_map_was_place", Vector4(_was_at.x, _was_at.y, 1.0 - _fade, 0.0))
+
+
+static func _advance() -> void:
+	var now := Time.get_ticks_usec()
+	var dt := minf((now - _drift_usec) / 1e6, _DRIFT_STEP_MAX)
+	_drift_usec = now
+	if _fade < 1.0:
+		_fade_cover_maps(dt)
+	if _drift_rate == Vector2.ZERO:
+		return
+	_drift_x += _drift_rate.x * dt
+	_drift_y += _drift_rate.y * dt
+	_set_global("overcast_cloud_drift", Vector2(_drift_x, _drift_y))
 
 
 ## OvercastSky's: how much of the sky is cloud, and how much of the sun's share of the light a
@@ -68,7 +149,12 @@ static func _release(owner: int) -> void:
 	if owner != _owner:
 		return
 	_owner = 0
+	_drift_rate = Vector2.ZERO
 	_set_cover(0.0, 0.0)
+	_clear_cover_maps()
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree and tree.process_frame.is_connected(_advance):
+		tree.process_frame.disconnect(_advance)
 	while not _drawing.is_empty():
 		var sky = instance_from_id(_drawing[-1])
 		if sky and sky.drawing:

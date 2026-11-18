@@ -120,10 +120,9 @@ vec2 cloud_layer(vec3 origin, vec3 dir, float dist) {
 	return cloud_layer_at(origin, dir, dist, CLOUD_HEIGHT);
 }
 
-// How far a cover map's cloudy and clear push the density from the noise's own swing.
-const float CLOUD_MAP_FIELD = 0.8;
-// How far a cover map moves a higher layer's amount either way.
-const float CLOUD_MAP_AMOUNT = 1.6;
+// How far the density moves per unit of amount the cover map adds: cloud_edge's slope, so the
+// low layer there looks as at the amount the map sees.
+const float CLOUD_MAP_FIELD = 0.73;
 const float EARTH_KM = 6371.0;
 
 // Where on a cover map a shell `height` over the origin is met at world point w (xz, the wind's
@@ -148,26 +147,41 @@ vec3 cloud_map_uv(vec2 w, float height) {
 	return vec3(uv, 1.0 - smoothstep(0.42, 0.5, max(abs(uv.x - 0.5), abs(uv.y - 0.5))));
 }
 
-// One cover map's push toward cloud (up to +0.5) or clear sky at noise point q, laid at `place`.
-float cloud_map_one(sampler2D map, vec4 place, vec2 q, float height) {
+// The cover maps' tops, real km, at green 1.
+const float COVER_TOP_KM = 16.0;
+
+// What one cover map, laid at `place`, sees of a layer `height` up at noise point q, as
+// (cloud seen there times say, say). A top at the layer's height is that layer's cloud; one well
+// above it hides it, so the map has no say over what lies under.
+vec2 cloud_map_one(sampler2D map, vec4 place, vec2 q, float height) {
 	if (place.z <= 0.0) {
-		return 0.0;
+		return vec2(0.0);
 	}
 	vec3 at = cloud_map_uv((q - place.xy) * (CLOUD_HEIGHT / overcast_scale), height);
-	return (textureLod(map, at.xy, 0.0).r - 0.5) * at.z * place.z;
+	vec4 m = textureLod(map, at.xy, 0.0);
+	float rise = log(max(m.g * COVER_TOP_KM, 0.05) / max(height / overcast_cover_map_frame.w * 0.001, 0.05));
+	float say = m.a * at.z * place.z * (1.0 - m.r * smoothstep(0.4, 0.8, rise));
+	return vec2(m.r * (1.0 - smoothstep(0.4, 0.8, abs(rise))), 1.0) * say;
 }
 
-// How far the cover maps push at noise point q (as cp, the wind in) on a shell `height` over the
-// origin: the map laid, and the one before as it fades.
-float cloud_map_push(vec2 q, float height) {
-	return cloud_map_one(overcast_cover_map, overcast_cover_map_place, q, height)
-		+ cloud_map_one(overcast_cover_map_was, overcast_cover_map_was_place, q, height);
-}
-
-// How much of a higher layer stands at noise point q (as cp: the cloud layer's, the wind in) on
-// its shell `height` up, `amount` of it over the whole sky: moved about by the cover maps.
+// How much of a layer `height` up stands at noise point q (as cp: the cloud layer's, the wind
+// in), `amount` of it over the whole sky: the cover maps' where they see it, the laid one and the
+// one before as it fades.
 float cloud_map_amount(vec2 q, float height, float amount) {
-	return clamp(amount + cloud_map_push(q, height) * CLOUD_MAP_AMOUNT, 0.0, 1.0);
+	vec2 seen = cloud_map_one(overcast_cover_map, overcast_cover_map_place, q, height)
+		+ cloud_map_one(overcast_cover_map_was, overcast_cover_map_was_place, q, height);
+	return mix(amount, seen.x / max(seen.y, 1e-4), min(seen.y, 1.0));
+}
+
+// A higher layer's kind (`sheet`, its own) where a cover map has made `amount` of what the sky
+// gave as `own`: what the map adds is a sheet, as a cold shield 2 km pixels can see mostly is.
+float cloud_map_sheet(float amount, float own, float sheet) {
+	return mix(sheet, 1.0, clamp((amount - own) / max(amount, 1e-3), 0.0, 1.0));
+}
+
+// Whether a cover map is laid: a layer it sees may be one the sky has none of.
+bool cloud_map_laid() {
+	return overcast_cover_map_place.z + overcast_cover_map_was_place.z > 0.0;
 }
 
 // The broad swing that gathers clouds into fields (CLOUD_FIELDS), at noise point cp: the cover
@@ -175,7 +189,12 @@ float cloud_map_amount(vec2 q, float height, float amount) {
 float cloud_field(vec2 cp) {
 	float swing = (cloud_tex(cp * CLOUD_FIELD_SCALE + vec2(2.1, 8.7) - cloud_wind() * 0.6) - 0.5)
 		* CLOUD_FIELDS * cloud_fair();
-	return swing + cloud_map_push(cp, CLOUD_HEIGHT) * CLOUD_MAP_FIELD;
+	if (!cloud_map_laid()) {
+		return swing;
+	}
+	// Where the map leaves none at all, none: at amount 0 the swing can still reach the edge.
+	float amount = cloud_map_amount(cp, CLOUD_HEIGHT, overcast_cover);
+	return swing + (amount - overcast_cover) * CLOUD_MAP_FIELD - (1.0 - smoothstep(0.0, 0.05, amount));
 }
 
 // Cloud density at `cp`, which comes back moved to where the shape was sampled (billows are the

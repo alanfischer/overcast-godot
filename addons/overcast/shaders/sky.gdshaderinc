@@ -354,21 +354,22 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 	float out_cover = 0.0;
 	vec2 wind = cloud_wind();
 	float clear = 1.0 - storm;
-	if (cirrus_amount > 0.0) {
+	if (cirrus_amount > 0.0 || cloud_map_laid()) {
 		float h = CLOUD_HEIGHT * cirrus_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
 		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, cirrus_amount);
+		float csheet = cloud_map_sheet(amount, cirrus_amount, cirrus_sheet);
 		vec2 hp = cloud_layer_at(cam, eye_dir, d, h) * 0.6;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		float c = cloud_tex(vec2(hp.x * 0.25, hp.y) + wind * 2.5 + vec2(3.7, 1.3));
 		float streaks = smoothstep(0.55, 0.85, c) * 0.45 * (1.0 - far);
 		// Cirrostratus: a milky veil, faintly fibrous, thickening toward the horizon.
 		float milky = (0.32 + 0.12 * c) * mix(1.0, 1.6, smoothstep(0.4, 0.0, up));
-		float ci = mix(streaks, milky, cirrus_sheet) * amount * clear * smoothstep(0.0, 0.15, up);
+		float ci = mix(streaks, milky, csheet) * amount * clear * smoothstep(0.0, 0.15, up);
 		vec3 lit = overcast_cloud_lit(cloud_col, sun_col, atmosphere_high_light);
 		out_col = mix(out_col, mix(ambient, lit, 0.7), ci);
 		// The 22° halo, from ice crystals: a sharp reddish inner edge, white and diffuse outward.
-		float halo_veil = milky * amount * cirrus_sheet * clear;
+		float halo_veil = milky * amount * csheet * clear;
 		float cos_ang = dot(eye_dir, sun);
 		if (halo_veil > 0.0 && cos_ang > 0.8) {
 			float ang = acos(min(cos_ang, 1.0));
@@ -379,10 +380,11 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 			out_col += sun_col * tint * ring * halo_veil * 0.3 * light_strength * smoothstep(-0.02, 0.05, sun.y);
 		}
 	}
-	if (mid_cloud_amount > 0.0) {
+	if (mid_cloud_amount > 0.0 || cloud_map_laid()) {
 		float h = CLOUD_HEIGHT * mid_cloud_rise;
 		float d = cloud_distance_to(cam, eye_dir, h);
 		float amount = cloud_map_amount(cloud_layer(cam, eye_dir, d) + wind, h, mid_cloud_amount);
+		float msheet = cloud_map_sheet(amount, mid_cloud_amount, mid_cloud_sheet);
 		vec2 mp = cloud_layer_at(cam, eye_dir, d, h) + wind * 1.3;
 		float far = smoothstep(1.5 * h, cloud_horizon_at(cam, h), d);
 		// Where the sheet is: broad patches that join up as there is more of it.
@@ -400,7 +402,8 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		puff = mix(puff, mix(0.5, 0.85, amount), far);
 		// Altostratus: the patches spread smooth and grey, seen through.
 		float smooth_sheet = smoothstep(edge - 0.2, edge + 0.25, patches);
-		float cover = mix(puff * sheet, smooth_sheet * 0.85, mid_cloud_sheet) * clear * smoothstep(0.0, 0.06, up);
+		float cover = mix(puff * sheet, smooth_sheet * 0.85, msheet) * clear * smoothstep(0.0, 0.06, up)
+			* smoothstep(0.0, 0.05, amount);
 		float toward = clamp(dot(eye_dir, sun) * 0.5 + 0.5, 0.0, 1.0);
 		// Thin: lit through, a little grey at a puff's heart, bright at its rim toward the sun.
 		float heart = 1.0 - smoothstep(0.0, size, cell);
@@ -410,12 +413,12 @@ vec4 overcast_higher_cloud(vec3 eye_dir, vec3 cam, vec3 sun, vec3 col, vec3 ambi
 		vec3 c = max(mix(lit, mix(skylit, lit, 0.55), heart * mix(0.7, 0.3, toward)), skylit * mix(1.0, 0.8, heart));
 		c += sun_col * hg_phase(dot(eye_dir, sun), 0.8) / 45.0 * (1.0 - heart) * light_strength;
 		vec3 grey = mix(skylit, lit, 0.45) * (0.92 + 0.16 * patches);
-		c = mix(c, grey, mid_cloud_sheet);
+		c = mix(c, grey, msheet);
 		vec3 through = exp(-far * vec3(0.5, 0.6, 0.8));
 		c = c * through + out_col * (1.0 - through);
 		out_col = mix(out_col, c, cover);
 		// A thin veil leaves the sun's disc to be seen through it.
-		out_cover = cover * mix(1.0, 0.55, mid_cloud_sheet);
+		out_cover = cover * mix(1.0, 0.55, msheet);
 	}
 	return vec4(out_col, out_cover);
 }
@@ -602,7 +605,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		sun_hidden = max(sun_hidden, towers.a);
 	}
 	float amount = overcast_cover;
-	if (clouds && amount > 0.0) {
+	if (clouds && (amount > 0.0 || cloud_map_laid())) {
 		float dist = cloud_distance(cam, eye_dir);
 		vec2 wind = cloud_wind();
 		vec2 layer = cloud_layer(cam, eye_dir, dist);

@@ -96,8 +96,11 @@ switches, and a mode where showers come and go on their own.
 - **`OvercastSatellite`**: where the clouds really are, from NASA's geostationary infrared
   (GIBS, every ten minutes, a few months back). Put one beside an OvercastForecast and turn on
   `enabled`: it lays the frame for the sky's moment, 200 km round the place, as the sky's cover
-  map (`set_cover_map`), coldest tops first. Each layer keeps its own amount; the map moves it about,
-  and rides the wind. The pixels are 2 km: overhead that is one or two, so mostly it places the
+  map (`set_cover_map`). Tops well colder than clear ground are cloud, and how cold says how high:
+  each layer takes the cloud at its height and is clear where the satellite sees clear ground,
+  whatever the forecast says; under a top a layer keeps its own. Cloud only the satellite sees is
+  drawn as a sheet. It reads by the weather's `temperature`, and rides the wind. Fog and low cloud
+  as warm as the ground are lost to it. The pixels are 2 km: overhead that is one or two, so mostly it places the
   banks and the clear gaps toward the horizon. GOES-East, GOES-West and Himawari see the Americas,
   the Pacific and East Asia; Europe, Africa and India are out of their sight. Turning it on sends
   the place to NASA.

@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/alanfischer/overcast-godot/actions/workflows/tests.yml/badge.svg)](https://github.com/alanfischer/overcast-godot/actions/workflows/tests.yml)
 
-Sky, clouds and weather for Godot 4. The weather shows up in the world under the sky too: cloud
-shadows drift across the ground, rain and snow stay out from under roofs, the ground gets wet or
+Sky, clouds and weather for Godot 4.7 and later. The weather shows up in the world under the sky
+too: cloud shadows drift across the ground, rain and snow stay out from under roofs, the ground gets wet or
 snowed over, rain sounds muffled indoors, and lightning lights the open ground but not a torch-lit room. It works on every
 renderer, including Compatibility and Mobile.
 
@@ -311,7 +311,7 @@ their shadows and the lightning grow to match.
 
 ## Tests
 
-`./run_tests.sh` runs the suites headless. CI runs them on Godot 4.4 and 4.7.
+`./run_tests.sh` runs the suites headless. CI runs them on Godot 4.7.
 
 ## License
 

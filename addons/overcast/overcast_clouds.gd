@@ -91,15 +91,29 @@ static func _set_cover_map(owner: int, map: Texture2D, east: Vector2, span: floa
 	_set_global("overcast_cover_map_frame", Vector4(east.x, east.y, span, world_scale))
 	if map == _laid:
 		return
-	# The frame before fades out under this one rather than giving way to it at once.
+	# The frame before fades out under this one rather than giving way to it at once: the two
+	# side by side in one texture, this on the left.
+	var image := _rgba(map)
+	var both := Image.create_empty(image.get_width() * 2, image.get_height(), false, Image.FORMAT_RGBA8)
+	both.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i.ZERO)
 	if _laid:
 		_was_at = _laid_at
-		_set_global("overcast_cover_map_was", _laid)
+		var was := _rgba(_laid)
+		was.resize(image.get_width(), image.get_height())
+		both.blit_rect(was, Rect2i(Vector2i.ZERO, was.get_size()), Vector2i(image.get_width(), 0))
 	_fade = 0.0 if _laid else 1.0
 	_laid = map
 	_laid_at = Vector2(_drift_x, _drift_y)
-	_set_global("overcast_cover_map", map)
+	_set_global("overcast_cover_map", ImageTexture.create_from_image(both))
 	_push_cover_fade()
+
+
+static func _rgba(texture: Texture2D) -> Image:
+	var image := texture.get_image()
+	if image.is_compressed():
+		image.decompress()
+	image.convert(Image.FORMAT_RGBA8)
+	return image
 
 
 static func _clear_cover_maps() -> void:

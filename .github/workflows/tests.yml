@@ -12,13 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
-      # Report both versions: knowing it is one engine and not the library that broke is
-      # the whole point of testing a range.
-      fail-fast: false
       matrix:
-        # The floor project.godot declares in config/features, and the version overcast is
-        # developed against. A consumer picks the engine, so test both ends of the range.
-        godot: ["4.4", "4.7"]
+        # The version overcast requires (config/features in project.godot) and is developed
+        # against. Add a version here to test a range again.
+        godot: ["4.7"]
 
     steps:
       - uses: actions/checkout@v7

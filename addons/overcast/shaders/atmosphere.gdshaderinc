@@ -111,9 +111,14 @@ vec3 atmo_sky(vec3 dir, vec3 sun, float haze) {
 }
 
 // Light from atmo_sky as the eye takes it: `gain` (exposure, raised as the light fails), rolled
-// off so a bright horizon stays coloured, and toward a pale blue the dimmer it is seen.
+// off so a bright horizon stays coloured, and toward a pale blue the dimmer it is seen. A warm
+// light rolls off whole, keeping its hue: by channel, a sunset's glow would burn to pale yellow.
 vec3 atmo_seen(vec3 light, float gain, float dark) {
-	vec3 c = 1.0 - exp(-light * gain);
+	vec3 x = light * gain;
+	vec3 c = 1.0 - exp(-x);
+	float peak = max(max(x.r, x.g), max(x.b, 1e-6));
+	vec3 kept = x * (1.0 - exp(-peak)) / peak;
+	c = mix(c, kept, smoothstep(0.45, 0.85, 1.0 - x.b / max(x.r, 1e-6)));
 	float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
 	return mix(c, luma * vec3(0.6, 0.8, 1.35), dark);
 }

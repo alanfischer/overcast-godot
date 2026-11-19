@@ -621,6 +621,8 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		float sunset = (1.0 - smoothstep(0.0, 0.3, atmosphere_sun.y)) * (1.0 - night_amount) * atmosphere;
 		float along = sun_bearing * far;
 		lit_col *= mix(vec3(1.0), along > 0.0 ? vec3(1.15, 1.05, 0.8) : vec3(0.85, 0.62, 0.74), abs(along) * sunset);
+		// What a low sun leaves in shade is its own light gone deep, rose rather than grey.
+		shadow_col = mix(shadow_col, max(shadow_col, lit_col * vec3(0.6, 0.42, 0.55)), 0.5 * sunset);
 
 		// Each path gives the tail what it uses: the cloud's colour and cover, its body for a storm
 		// deck's mottling, how lit it is, and how much silver lining it still needs.
@@ -665,7 +667,7 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 			float sunward = max(cloud_spread(s1, cloud_shape(s1)) - edge, 0.0)
 				+ max(cloud_spread(s2, cloud_shape(s2)) - edge, 0.0);
 			// A low sun shines in under the layer, so the cloud overhead is not in its way.
-			shade = exp(-(sunward * 2.5 + thick * mix(2.2, 0.5, sunset)));
+			shade = exp(-(sunward * mix(2.5, 1.2, sunset) + thick * mix(2.2, 0.5, sunset)));
 			// Powder: a thin edge has had little chance to scatter light toward us, so with the sun
 			// behind us a cloud's rim reads darker than its body.
 			shade *= mix(1.0 - exp(-thick * 12.0 - 0.15), 1.0, toward);
@@ -734,15 +736,19 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		col = mix(col, air_col + ball * 0.04, face);
 		col += ball * lit * face * mix(0.45, moon_energy, night_amount);
 	}
-	// The sun's disc; past half night light_dir is the moon, drawn above.
+	// The sun's disc; past half night light_dir is the moon, drawn above. A low sun is dim enough
+	// to look at: its own colour, not burnt white by the shoulder.
+	float low_sun = 1.0 - smoothstep(0.0, 0.2, sun.y);
+	float sun_peak = max(max(sun_col.r, sun_col.g), max(sun_col.b, 1e-3));
+	float disc_energy = mix(sun_energy, min(sun_energy, 1.2 / sun_peak), low_sun);
 	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd) * (1.0 - step(0.5, night_amount));
-	col += sun_col * disc * sun_energy * light_strength * sun_through * unclouded;
+	col += sun_col * disc * disc_energy * light_strength * sun_through * unclouded;
 	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * light_strength * sun_through
 		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon
 	// lights little of it.
 	float horizon_band = pow(1.0 - abs(up), 8.0) * pow(sun_side, 3.0);
-	vec3 halo_color = mix(sun_col, vec3(1.0), 0.4);
+	vec3 halo_color = mix(sun_col, vec3(1.0), 0.4 * (1.0 - low_sun));
 	col += halo_color * sun_halo_energy * mix(1.0, 0.25, night_amount) * light_strength * sun_through
 		* (pow(max(sd, 0.0), sun_halo_exp) + 0.35 * horizon_band)
 		// The air's own light already brightens round the sun, and takes most of this one's place.

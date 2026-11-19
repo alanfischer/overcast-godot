@@ -16,10 +16,16 @@ const vec3 ATMO_OZONE = vec3(0.650e-6, 1.881e-6, 0.085e-6);
 const int ATMO_VIEW_STEPS = 48;
 // Light scattered more than once, crudely: an even glow at each point, as strong as the sunlight
 // a few kilometres over it, which stays lit a while after the point itself is in shadow, and blue
-// from having been scattered by the air on its way.
+// from having been scattered by the air on its way. That low sunlight's colour holds only toward
+// the sun: at dusk it has grazed the planet and is red, but the earth's shadow opposite is lit by
+// the whole sky, so away from the sun the glow keeps only its brightness. Once the shadow has
+// risen past it, sunlight high overhead still lights the sky that faintly fills the shadow.
 const float ATMO_MULTI = 0.6;
 const vec3 ATMO_MULTI_TINT = vec3(0.42, 0.64, 1.0);
 const float ATMO_MULTI_UP = 6000.0;
+const float ATMO_MULTI_HIGH = 30e3;
+const float ATMO_MULTI_FILL = 0.1;
+const vec3 ATMO_LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 // Rayleigh, Mie and ozone density at height h, each 1 at its peak.
 vec3 atmo_density(float h) {
@@ -87,6 +93,7 @@ vec3 atmo_sky(vec3 dir, vec3 sun, float haze) {
 	vec3 ray = vec3(0.0);
 	vec3 mie = vec3(0.0);
 	vec3 multi = vec3(0.0);
+	vec3 multi_grey = vec3(0.0);
 	float prev = 0.0;
 	for (int i = 0; i < ATMO_VIEW_STEPS; i++) {
 		// Packed toward the viewer, where the air is thick.
@@ -99,13 +106,17 @@ vec3 atmo_sky(vec3 dir, vec3 sun, float haze) {
 		vec3 step_trans = exp(-atmo_extinction(dens, haze) * dt);
 		vec3 seen = trans * sqrt(step_trans) * dt;
 		vec3 lit = seen * atmo_sunlight(p, sun, haze);
-		vec3 glow = seen * atmo_sunlight(p * (1.0 + ATMO_MULTI_UP / length(p)), sun, haze);
+		vec3 low = atmo_sunlight(p * (1.0 + ATMO_MULTI_UP / length(p)), sun, haze);
+		float high = dot(atmo_sunlight(p * (1.0 + ATMO_MULTI_HIGH / length(p)), sun, haze), ATMO_LUMA);
+		vec3 scatter = seen * (ATMO_RAYLEIGH * dens.x + vec3(ATMO_MIE * haze * dens.y));
 		ray += lit * dens.x;
 		mie += lit * dens.y;
-		multi += glow * (ATMO_RAYLEIGH * dens.x + vec3(ATMO_MIE * haze * dens.y));
+		multi += scatter * low;
+		multi_grey += scatter * max(dot(low, ATMO_LUMA), ATMO_MULTI_FILL * high);
 		trans *= step_trans;
 	}
 	float c = dot(dir, sun);
+	multi = mix(multi_grey, multi, 0.25 * (1.0 + c) * (1.0 + c));
 	return ray * ATMO_RAYLEIGH * atmo_rayleigh_phase(c) + mie * ATMO_MIE * haze * atmo_mie_phase(c)
 		+ multi * ATMO_MULTI_TINT * ATMO_MULTI / (4.0 * PI);
 }
@@ -119,7 +130,7 @@ vec3 atmo_seen(vec3 light, float gain, float dark) {
 	float peak = max(max(x.r, x.g), max(x.b, 1e-6));
 	vec3 kept = x * (1.0 - exp(-peak)) / peak;
 	c = mix(c, kept, smoothstep(0.45, 0.85, 1.0 - x.b / max(x.r, 1e-6)));
-	float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+	float luma = dot(c, ATMO_LUMA);
 	return mix(c, luma * vec3(0.6, 0.8, 1.35), dark);
 }
 #endif

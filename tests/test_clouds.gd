@@ -236,6 +236,19 @@ func test_the_air_scatters_blue_overhead_and_red_at_sunset() -> void:
 	assert_gt(SkyScript._air_sunlight(high, set_sun, 1.0).x, 0.0, "though the air high up is still lit")
 
 
+func test_the_earths_shadow_rises_blue_opposite_the_dusk() -> void:
+	var low := Vector3(0.0, sin(deg_to_rad(1.0)), 0.0)
+	var dusk := Vector3(0.0, sin(deg_to_rad(-1.6)), -cos(deg_to_rad(-1.6)))
+	var toward := SkyScript._air_sky((Vector3(0.0, 0.0, -1.0) + low).normalized(), dusk, 1.0)
+	var away := SkyScript._air_sky((Vector3(0.0, 0.0, 1.0) + low).normalized(), dusk, 1.0)
+	assert_gt(SkyScript._luma(toward), SkyScript._luma(away) * 4.0, "the glow is toward the sun")
+	assert_lt(away.r / away.b, toward.r / toward.b * 0.5, "and the shadow opposite is not redder than it")
+	var deeper := Vector3(0.0, sin(deg_to_rad(-4.0)), -cos(deg_to_rad(-4.0)))
+	var shadow := SkyScript._air_sky((Vector3(0.0, 0.0, 1.0) + low).normalized(), deeper, 1.0)
+	assert_gt(SkyScript._luma(shadow), 0.0, "the shadow is filled by the sky once the low air is dark")
+	assert_gt(shadow.b, shadow.r, "and blue")
+
+
 func test_a_sky_lit_by_the_air_keeps_its_haze_in_step() -> void:
 	var sky := SkyScript.new({"drawing": false, "atmosphere": 1.0, "time_of_day": 12.0})
 	var noon := sky.horizon_now()

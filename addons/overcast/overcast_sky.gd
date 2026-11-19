@@ -834,6 +834,8 @@ const _AIR_MULTI_TINT := Vector3(0.42, 0.64, 1.0)
 ## How far the eye opens up for a failing light.
 const _AIR_ADAPT := 40.0
 const _AIR_MULTI_UP := 6000.0
+const _AIR_MULTI_HIGH := 30e3
+const _AIR_MULTI_FILL := 0.1
 
 
 ## A low sun's light keeps most of its colour but not all its dimming: the eye makes up some of it.
@@ -905,6 +907,7 @@ static func _air_sky(dir: Vector3, sun: Vector3, haze: float) -> Color:
 	var ray := Vector3.ZERO
 	var mie := Vector3.ZERO
 	var multi := Vector3.ZERO
+	var multi_grey := Vector3.ZERO
 	var prev := 0.0
 	for i in _AIR_VIEW_STEPS:
 		var f := (i + 1.0) / _AIR_VIEW_STEPS
@@ -917,12 +920,16 @@ static func _air_sky(dir: Vector3, sun: Vector3, haze: float) -> Color:
 		var half := Vector3(sqrt(step_trans.x), sqrt(step_trans.y), sqrt(step_trans.z))
 		var seen := trans * half * dt
 		var lit := seen * _air_sunlight(p, sun, haze)
-		var glow := seen * _air_sunlight(p * (1.0 + _AIR_MULTI_UP / p.length()), sun, haze)
+		var low := _air_sunlight(p * (1.0 + _AIR_MULTI_UP / p.length()), sun, haze)
+		var high := _luma709(_air_sunlight(p * (1.0 + _AIR_MULTI_HIGH / p.length()), sun, haze))
+		var scatter := seen * (_AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * haze * dens.y))
 		ray += lit * dens.x
 		mie += lit * dens.y
-		multi += glow * (_AIR_RAYLEIGH * dens.x + Vector3.ONE * (_AIR_MIE * haze * dens.y))
+		multi += scatter * low
+		multi_grey += scatter * maxf(_luma709(low), _AIR_MULTI_FILL * high)
 		trans *= step_trans
 	var c := dir.dot(sun)
+	multi = multi_grey.lerp(multi, 0.25 * (1.0 + c) * (1.0 + c))
 	var g := _AIR_MIE_G
 	var rayleigh_phase := 3.0 / (16.0 * PI) * (1.0 + c * c)
 	var mie_phase := 3.0 / (8.0 * PI) * (1.0 - g * g) / (2.0 + g * g) * (1.0 + c * c) \

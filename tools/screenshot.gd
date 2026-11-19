@@ -88,7 +88,7 @@ func _run() -> void:
 		var look := OS.get_environment("LOOK").split_floats(",")
 		views = {"look": [Vector3(0, 1.7, 8), deg_to_rad(look[1]), deg_to_rad(look[0])]}
 	if OS.get_environment("BODY") != "":  # at a planet or moon by name
-		for b in demo.sky._now["bodies"]:
+		for b in demo.sky.bodies():
 			if b["body"].name == OS.get_environment("BODY"):
 				var d: Vector3 = b["dir"]
 				views = {"body": [Vector3(0, 1.7, 8), asin(d.y), atan2(-d.x, -d.z)]}

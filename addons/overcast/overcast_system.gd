@@ -19,7 +19,6 @@ const MOON_DISTANCE := 384400.0
 const OBLIQUITY := 23.4393
 const _GM_SUN := 1.32712440018e11  # km³/s²
 const _GM_EARTH := 398600.4418
-const _EARTH_RADIUS := 6378.14
 
 ## km.
 @export_range(1.0, 1e8, 1.0, "or_greater", "suffix:km") var star_radius := SUN_RADIUS
@@ -32,58 +31,41 @@ const _EARTH_RADIUS := 6378.14
 
 ## The body called `body_name`, a planet or a moon; null if none is.
 func find(body_name: String) -> _Body:
-	for b in _all():
+	var found := _parents()
+	for b in found:
 		if b.name == body_name:
 			return b
 	return null
 
 
-## Every body, planets before their moons.
-func _all() -> Array[_Body]:
-	var out: Array[_Body] = []
+## Every body, planets before their moons, to what it orbits (null for the star).
+func _parents() -> Dictionary:
+	var out := {}
 	for b in bodies:
 		if b:
-			out.append(b)
+			out[b] = null
 			for m in b.moons:
 				if m:
-					out.append(m)
+					out[m] = b
 	return out
 
 
-## Where `body` is `d` days from the epoch: km from the star, in the ecliptic frame.
-func position(body: _Body, d: float) -> Vector3:
-	return _positions(d)[body]
-
-
-func _positions(d: float) -> Dictionary:
-	var at := {}
-	for b in bodies:
-		if b:
-			at[b] = _orbit(b, d, null)
-			for m in b.moons:
-				if m:
-					at[m] = at[b] + _orbit(m, d, b)
-	return at
+## Where `body` is `d` days in: km from the star, ecliptic. `at` keeps what is worked out.
+func _place(body: _Body, d: float, parents: Dictionary, at: Dictionary) -> Vector3:
+	if not at.has(body):
+		var parent: _Body = parents[body]
+		var p := _orbit(body, d, parent)
+		at[body] = p + _place(parent, d, parents, at) if parent else p
+	return at[body]
 
 
 ## Where `body` stands about what it orbits (`parent`, or the star), km, ecliptic.
 func _orbit(body: _Body, d: float, parent: _Body) -> Vector3:
 	if body.corrections == _Body.Corrections.MOON:
-		var sun := _Ephemeris._sun(d)
-		return _Ephemeris._moon(d, sun)["ecl"] * _EARTH_RADIUS
-	var n := deg_to_rad(body.node + body.node_rate * d)
-	var w := deg_to_rad(body.periapsis + body.periapsis_rate * d)
-	var i := deg_to_rad(body.inclination)
-	var e := body.eccentricity
-	var a := body.distance
+		return _Ephemeris.moon(d)
 	var m := fposmod(body.mean_anomaly + 360.0 / _period(body, parent) * d, 360.0)
-	var ea := _Ephemeris._kepler(m, e)
-	var xv := a * (cos(ea) - e)
-	var yv := a * sqrt(1.0 - e * e) * sin(ea)
-	var r := sqrt(xv * xv + yv * yv)
-	var u := atan2(yv, xv) + w
-	var p := r * Vector3(cos(n) * cos(u) - sin(n) * sin(u) * cos(i),
-		sin(n) * cos(u) + cos(n) * sin(u) * cos(i), sin(u) * sin(i))
+	var p := _Ephemeris.ellipse(body.node + body.node_rate * d, body.periapsis + body.periapsis_rate * d,
+		body.inclination, body.distance, body.eccentricity, m)
 	if body.corrections >= _Body.Corrections.JUPITER:
 		p = _perturbed(p, body.corrections, d)
 	return p
@@ -128,46 +110,62 @@ static func _perturbed(p: Vector3, which: _Body.Corrections, d: float) -> Vector
 ## sun, and sun_scale (its size against the sun's from Earth);
 ## moon, phase (0 new, 0.5 full), lit_from (toward the sun from it) and moon_scale (its size against
 ##   Earth's moon's), moon_scale 0 for a world with none;
-## stars: world to J2000 equatorial, the star catalogue's frame;
-## bodies: the rest, each {body, dir, size (angular radius, radians), magnitude, lit_from, pole}.
+## stars: world to J2000 equatorial, the star catalogue's frame. bodies_at has the rest.
 func sky_at(unix: float, latitude: float, longitude: float, north := 0.0) -> Dictionary:
 	var d := _Ephemeris.days(unix)
-	var at := _positions(d)
+	var parents := _parents()
 	var home_body := find(home)
 	if home_body == null:
 		push_error("OvercastSystem has no body called '%s'" % home)
 		return {}
-	var here: Vector3 = at[home_body]
+	var at := {}
+	var here := _place(home_body, d, parents, at)
 	var view := _view(home_body, here, unix, d, latitude, longitude, north)
 	var to_world: Basis = view["to_world"]
 	var eye: Vector3 = here + view["offset"]
 	var out := {"sun": to_world * (-eye).normalized(), "stars": view["stars"],
-		"sun_scale": star_radius / SUN_RADIUS / (here.length() / AU), "bodies": []}
-
+		"sun_scale": star_radius / SUN_RADIUS / (here.length() / AU)}
 	var moon: _Body = home_body.moons[0] if not home_body.moons.is_empty() else null
 	if moon:
-		var toward: Vector3 = at[moon] - eye
-		var from_home: Vector3 = at[moon] - here
+		var there := _place(moon, d, parents, at)
+		var toward := there - eye
+		var from_home := there - here
 		out["moon"] = to_world * toward.normalized()
 		out["phase"] = fposmod(atan2(from_home.y, from_home.x) - atan2(-here.y, -here.x), TAU) / TAU
-		out["lit_from"] = to_world * (-at[moon] as Vector3).normalized()
+		out["lit_from"] = to_world * (-there).normalized()
 		out["moon_scale"] = moon.radius / MOON_RADIUS / (toward.length() / MOON_DISTANCE)
 	else:
-		out["moon"] = out["sun"]
-		out["phase"] = 0.0
-		out["lit_from"] = out["sun"]
-		out["moon_scale"] = 0.0
+		out.merge({"moon": out["sun"], "phase": 0.0, "lit_from": out["sun"], "moon_scale": 0.0})
+	return out
 
-	for b in _all():
+
+## Every body but the home world and its first moon, as seen from the place at `unix`, each
+## {body, dir, size (angular radius, radians), magnitude, lit_from, pole}: the vectors unit, in
+## the star catalogue's frame (J2000 equatorial), where they keep still while the sky turns.
+func bodies_at(unix: float, latitude: float, longitude: float) -> Array:
+	var d := _Ephemeris.days(unix)
+	var parents := _parents()
+	var home_body := find(home)
+	if home_body == null:
+		return []
+	var at := {}
+	var here := _place(home_body, d, parents, at)
+	var view := _view(home_body, here, unix, d, latitude, longitude, 0.0)
+	var to_stars: Basis = view["stars"] * view["to_world"]
+	var eye: Vector3 = here + view["offset"]
+	var moon: _Body = home_body.moons[0] if not home_body.moons.is_empty() else null
+	var out := []
+	for b in parents:
 		if b == home_body or b == moon:
 			continue
-		var toward: Vector3 = at[b] - eye
+		var there := _place(b, d, parents, at)
+		var toward := there - eye
 		var dist := toward.length()
-		var lit := (-at[b] as Vector3).normalized()
-		out["bodies"].append({"body": b, "dir": to_world * (toward / dist),
+		var lit := (-there).normalized()
+		out.append({"body": b, "dir": to_stars * (toward / dist),
 			"size": asin(minf(b.radius / dist, 1.0)),
-			"magnitude": magnitude(b, (at[b] as Vector3).length(), dist, lit.angle_to(-toward)),
-			"lit_from": to_world * lit, "pole": to_world * b.pole()})
+			"magnitude": magnitude(b, there.length(), dist, lit.angle_to(-toward)),
+			"lit_from": to_stars * lit, "pole": to_stars * b.pole()})
 	return out
 
 
@@ -178,11 +176,11 @@ func _view(home_body: _Body, here: Vector3, unix: float, d: float, latitude: flo
 	if home_body.corrections == _Body.Corrections.EARTH:
 		# Earth turns by sidereal time about the equator of date, which precession carries.
 		var lst := _Ephemeris.sidereal(unix, longitude)
-		var to_eq := Basis(Vector3.RIGHT, deg_to_rad(23.4393 - 3.563e-7 * d))
-		var eq_to_world := _Ephemeris._to_world(lst, latitude, north)
+		var to_eq := Basis(Vector3.RIGHT, deg_to_rad(_Ephemeris.obliquity(d)))
+		var eq_to_world := _Ephemeris.to_world(lst, latitude, north)
 		return {"to_world": eq_to_world * to_eq,
 			"stars": (eq_to_world * _Ephemeris.precession(d)).transposed(),
-			"offset": to_eq.transposed() * _Ephemeris.observer(lst, latitude) * _EARTH_RADIUS}
+			"offset": to_eq.transposed() * _Ephemeris.observer(lst, latitude) * _Ephemeris.EARTH_RADIUS}
 	# Its equator's frame in the ecliptic: x where the equator rises through the ecliptic.
 	var z := home_body.pole()
 	var x := Vector3(0.0, 0.0, 1.0).cross(z)
@@ -192,14 +190,10 @@ func _view(home_body: _Body, here: Vector3, unix: float, d: float, latitude: flo
 	var sun := to_eq * (-here).normalized()
 	var turned := fposmod(d * 24.0 / home_body.day, 1.0) * 360.0
 	var lst := rad_to_deg(atan2(sun.y, sun.x)) + 180.0 + turned + longitude
-	var eq_to_world := _Ephemeris._to_world(lst, latitude, north)
-	var to_world := eq_to_world * to_eq
-	var lat := deg_to_rad(latitude)
-	var t := deg_to_rad(lst)
-	var up := Vector3(cos(lat) * cos(t), cos(lat) * sin(t), sin(lat))
+	var to_world := _Ephemeris.to_world(lst, latitude, north) * to_eq
 	return {"to_world": to_world,
 		"stars": (to_world * Basis(Vector3.RIGHT, -deg_to_rad(OBLIQUITY))).transposed(),
-		"offset": to_eq.transposed() * up * home_body.radius}
+		"offset": to_eq.transposed() * _Ephemeris.radec(lst, latitude) * home_body.radius}
 
 
 ## The body's apparent magnitude: `from_star` and `from_eye` km off, lit at `phase_angle`
@@ -208,9 +202,11 @@ func _view(home_body: _Body, here: Vector3, unix: float, d: float, latitude: flo
 static func magnitude(body: _Body, from_star: float, from_eye: float, phase_angle: float) -> float:
 	var h := 5.0 * log(1329.0 / maxf(2.0 * body.radius * sqrt(maxf(body.albedo, 1e-4)), 1e-6)) / log(10.0)
 	var a := clampf(phase_angle, 0.0, PI)
-	# A rough rock dims steeply to a crescent: Mercury's own law (Schlyter), scaled to the body's.
-	var deg := rad_to_deg(a)
-	var phase := body.phase_dimming * (deg + 2.2e-13 / 0.027 * pow(deg, 6.0))
-	if body.phase_dimming <= 0.0:
+	var phase: float
+	if body.phase_dimming > 0.0:
+		# A rough rock dims steeply to a crescent: Mercury's own law (Schlyter), scaled to the body's.
+		var deg := rad_to_deg(a)
+		phase = body.phase_dimming * (deg + 2.2e-13 / 0.027 * pow(deg, 6.0))
+	else:
 		phase = -2.5 * log(maxf((sin(a) + (PI - a) * cos(a)) / PI, 1e-6)) / log(10.0)
 	return h + 5.0 * log(from_star / AU * from_eye / AU) / log(10.0) + phase

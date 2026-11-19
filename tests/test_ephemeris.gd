@@ -3,20 +3,12 @@ extends "res://tests/suite.gd"
 const Ephemeris = preload("res://addons/overcast/overcast_ephemeris.gd")
 
 
-## Altitude and azimuth (degrees, round from north through east) of a world direction, north -Z.
-func _altaz(v: Vector3) -> Vector2:
-	return Vector2(rad_to_deg(asin(v.y)), fposmod(rad_to_deg(atan2(v.x, -v.z)), 360.0))
-
-
-func _toward(alt: float, az: float) -> Vector3:
-	var a := deg_to_rad(alt)
-	var z := deg_to_rad(az)
-	return Vector3(cos(a) * sin(z), sin(a), -cos(a) * cos(z))
+var _solar: Resource = load("res://addons/overcast/solar_system.tres")
 
 
 ## Reference positions from PyEphem (VSOP87 and ELP, refraction off), to a tenth of a degree.
 func _check(unix: float, lat: float, lon: float, sun: Vector2, moon: Vector2, phase: float, what: String) -> void:
-	var sky := Ephemeris.sky_at(unix, lat, lon)
+	var sky: Dictionary = _solar.sky_at(unix, lat, lon)
 	var sun_off := rad_to_deg(sky["sun"].angle_to(_toward(sun.x, sun.y)))
 	var moon_off := rad_to_deg(sky["moon"].angle_to(_toward(moon.x, moon.y)))
 	assert_lt(sun_off, 0.05, what + ": the sun")
@@ -34,8 +26,8 @@ func test_the_sun_and_moon_stand_where_they_do() -> void:
 
 
 func test_north_turns_the_sky() -> void:
-	var sky := Ephemeris.sky_at(1782043200, 51.4769, 0.0)
-	var turned := Ephemeris.sky_at(1782043200, 51.4769, 0.0, 90.0)
+	var sky: Dictionary = _solar.sky_at(1782043200, 51.4769, 0.0)
+	var turned: Dictionary = _solar.sky_at(1782043200, 51.4769, 0.0, 90.0)
 	assert_almost_eq(_altaz(turned["sun"]).x, _altaz(sky["sun"]).x, 1e-6, "as high as before")
 	assert_vec3_almost_eq(turned["sun"], sky["sun"].rotated(Vector3.UP, -PI * 0.5), 1e-6, "turned clockwise seen from above")
 
@@ -43,7 +35,7 @@ func test_north_turns_the_sky() -> void:
 func test_the_stars_turn_about_the_pole() -> void:
 	for hours in [0.0, 6.0, 13.5]:
 		var unix: float = 1797811200 + hours * 3600.0
-		var sky := Ephemeris.sky_at(unix, 51.4769, 0.0)
+		var sky: Dictionary = _solar.sky_at(unix, 51.4769, 0.0)
 		var pole := _toward(51.4769, 0.0)
 		# The stars are J2000's: the pole of date, precessed back, stands at the latitude.
 		var of_date: Basis = Ephemeris.precession(Ephemeris.days(unix)) * sky["stars"]

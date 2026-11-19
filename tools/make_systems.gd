@@ -11,15 +11,14 @@ extends SceneTree
 
 const Body = preload("res://addons/overcast/overcast_body.gd")
 const System = preload("res://addons/overcast/overcast_system.gd")
-const AU := 1.495978707e8
 
 
 func _initialize() -> void:
 	var s: Resource = System.new()
 	s.home = "Earth"
-	var moon := _body("Moon", 1737.4, 0.0123, 0.12, Color(0.82, 0.86, 1.0), 708.7, 269.99, 66.54)
+	var moon := _body("Moon", System.MOON_RADIUS, 0.0123, 0.12, Color(0.82, 0.86, 1.0), 708.7, 269.99, 66.54)
 	moon.corrections = Body.Corrections.MOON
-	moon.distance = 384400.0
+	moon.distance = System.MOON_DISTANCE
 	moon.period = 27.321582
 	var earth := _planet("Earth", [0.0, 0.0, 0.0, 102.9404, 4.70935e-5, 1.0, 0.016709, 356.0470, 0.9856002585],
 		6371.0, 1.0, 0.434, Color(0.65, 0.78, 1.0), 24.0, 0.0, 90.0)
@@ -65,7 +64,7 @@ func _initialize() -> void:
 func _giant_moon() -> Resource:
 	var giant: Resource = Body.new()
 	giant.name = "Giant"
-	giant.distance = 5.2 * AU
+	giant.distance = 5.2 * System.AU
 	giant.mean_anomaly = 40.0
 	giant.radius = 65000.0
 	giant.mass = 300.0
@@ -115,7 +114,7 @@ func _planet(n: String, e: Array, radius: float, mass: float, albedo: float, col
 	b.inclination = e[2]
 	b.periapsis = e[3]
 	b.periapsis_rate = e[4]
-	b.distance = e[5] * AU
+	b.distance = e[5] * System.AU
 	b.eccentricity = e[6]
 	b.mean_anomaly = e[7]
 	b.period = 360.0 / e[8]
@@ -133,7 +132,7 @@ func _body(n: String, radius: float, mass: float, albedo: float, color: Color, d
 	b.day = day
 	# The pole from J2000 equatorial to the ecliptic.
 	var eq := OvercastEphemeris.radec(pole_ra, pole_dec)
-	var ecl := Basis(Vector3.RIGHT, -deg_to_rad(23.4393)) * eq
+	var ecl := Basis(Vector3.RIGHT, -deg_to_rad(System.OBLIQUITY)) * eq
 	b.axial_tilt = rad_to_deg(acos(clampf(ecl.z, -1.0, 1.0)))
 	b.tilt_toward = fposmod(rad_to_deg(atan2(ecl.y, ecl.x)), 360.0)
 	return b

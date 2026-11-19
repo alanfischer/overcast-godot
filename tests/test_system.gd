@@ -9,14 +9,8 @@ const SOLAR = "res://addons/overcast/solar_system.tres"
 const PLANETS := ["Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
 
 
-func _toward(alt: float, az: float) -> Vector3:
-	var a := deg_to_rad(alt)
-	var z := deg_to_rad(az)
-	return Vector3(cos(a) * sin(z), sin(a), -cos(a) * cos(z))
-
-
-func _body(sky: Dictionary, n: String) -> Dictionary:
-	for b in sky["bodies"]:
+func _body(bodies: Array, n: String) -> Dictionary:
+	for b in bodies:
 		if b["body"].name == n:
 			return b
 	return {}
@@ -24,10 +18,12 @@ func _body(sky: Dictionary, n: String) -> Dictionary:
 
 ## JPL Horizons, airless apparent azimuth and elevation, and magnitude, per planet in PLANETS order.
 func _check(unix: float, lat: float, lon: float, want: Array, what: String) -> void:
-	var sky: Dictionary = load(SOLAR).sky_at(unix, lat, lon)
+	var system: Resource = load(SOLAR)
+	var to_world: Basis = (system.sky_at(unix, lat, lon)["stars"] as Basis).transposed()
+	var bodies: Array = system.bodies_at(unix, lat, lon)
 	for i in PLANETS.size():
-		var b := _body(sky, PLANETS[i])
-		var off := rad_to_deg(b["dir"].angle_to(_toward(want[i][1], want[i][0])))
+		var b := _body(bodies, PLANETS[i])
+		var off := rad_to_deg((to_world * b["dir"]).angle_to(_toward(want[i][1], want[i][0])))
 		assert_lt(off, 0.05, "%s: %s within 3'" % [what, PLANETS[i]])
 		assert_almost_eq(b["magnitude"], want[i][2], 0.6, "%s: %s about as bright" % [what, PLANETS[i]])
 
@@ -47,17 +43,11 @@ func test_the_planets_stand_where_they_do() -> void:
 		[202.853204, 69.474319, 5.451], [284.735713, -1.286185, 7.789]], "New York, 2040")
 
 
-func test_from_earth_it_is_the_sky_the_ephemeris_gives() -> void:
-	var system: Resource = load(SOLAR)
+func test_from_earth_the_sun_and_moon_are_as_big_as_ever() -> void:
 	for unix in [1782043200.0, 1797897600.0, 2214183600.0]:
-		var sky: Dictionary = system.sky_at(unix, 51.4769, 0.0)
-		var plain := Ephemeris.sky_at(unix, 51.4769, 0.0)
-		assert_lt(rad_to_deg(sky["sun"].angle_to(plain["sun"])), 0.01, "the sun")
-		assert_lt(rad_to_deg(sky["moon"].angle_to(plain["moon"])), 0.01, "the moon")
-		assert_almost_eq(sky["phase"], plain["phase"], 1e-4, "its phase")
-		assert_true((sky["stars"] as Basis).is_equal_approx(plain["stars"]), "the stars")
-		assert_almost_eq(sky["sun_scale"], 1.0, 0.02, "the sun as big as ever, give or take the year")
-		assert_almost_eq(sky["moon_scale"], 1.0, 0.08, "the moon too, give or take its month")
+		var sky: Dictionary = load(SOLAR).sky_at(unix, 51.4769, 0.0)
+		assert_almost_eq(sky["sun_scale"], 1.0, 0.02, "the sun, give or take the year")
+		assert_almost_eq(sky["moon_scale"], 1.0, 0.08, "the moon, give or take its month")
 
 
 ## A world of one's own: a star, a home planet with a long day and two moons, and a giant near it.
@@ -107,7 +97,7 @@ func test_a_world_of_ones_own_has_its_moons_and_neighbours() -> void:
 	var near: Resource = s.find("Near")
 	assert_gt(sky["moon_scale"], 0.5, "its first moon is the sky's moon")
 	var names := []
-	for b in sky["bodies"]:
+	for b in s.bodies_at(0.0, 30.0, 0.0):
 		names.append(b["body"].name)
 	assert_true("Far" in names and "Giant" in names, "the rest are drawn")
 	assert_false("Home" in names or "Near" in names, "not the world underfoot nor the sky's moon")
@@ -141,9 +131,10 @@ func test_a_sky_draws_its_system() -> void:
 	var sky = SkyScript.new()
 	sky.placed = true
 	var names := []
-	for b in sky._now["bodies"]:
+	for b in sky.bodies():
 		names.append(b["body"].name)
-	assert_true("Venus" in names and "Saturn" in names and "Phobos" in names, "the solar system by default")
+	assert_true("Venus" in names and "Saturn" in names, "the solar system by default")
+	assert_false("Phobos" in names, "less what could never show")
 	assert_false("Earth" in names or "Moon" in names, "but not the world underfoot or the moon")
 	sky.system = _made()
 	assert_gt(sky._now["moon_scale"], 0.0, "a world of one's own, with its moon")

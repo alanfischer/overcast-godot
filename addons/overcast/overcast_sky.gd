@@ -134,7 +134,10 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 ## and moon are the sky's.
 @export var system: _System:
 	set(v):
+		if v and v.find(v.home) == null:
+			push_error("OvercastSky: the system has no body called '%s'; drawing the solar system" % v.home)
 		system = v
+		_bodies_for = []
 		_moved()
 @export_group("Scene light")
 ## The light this sky puts on a scene (scene_light) at the height of dusk and at full night.
@@ -297,8 +300,12 @@ var _cover_map: Texture2D
 var _cover_span := 1.0
 var _stars_bound := false
 ## The planets and moons for the shader, a row of texels each (_sync_bodies).
-var _body_image: Image
 var _body_texture: ImageTexture
+## What the planets were last worked out for (_sync_bodies), them, and an unplaced sky's sun and
+## moon sizes then.
+var _bodies_for := []
+var _bodies: Array = []
+var _unplaced_scales := {}
 var _storm := 0.0
 var _snowy := 0.0
 var _mist := 0.0
@@ -441,9 +448,9 @@ static func _dusk_of(height: float) -> float:
 ## sun_height and moon_height are shares of the noon height night, dusk and moonlight go by.
 func _sky_now() -> Dictionary:
 	var noon: Vector3 = (param(&"sun_dir") as Vector3).normalized()
-	var sys := _system()
+	_sync_bodies()
 	if placed:
-		var at := sys.sky_at(unix_time, latitude, longitude, north)
+		var at := _system().sky_at(unix_time, latitude, longitude, north)
 		at["moves"] = true
 		at["sun_height"] = at["sun"].y / _NOON_HEIGHT
 		at["moon_height"] = at["moon"].y / _NOON_HEIGHT
@@ -463,25 +470,14 @@ func _sky_now() -> Dictionary:
 		now = {"sun": noon, "moon": noon, "lit_from": _lit_from(noon, noon, moon_phase),
 			"phase": moon_phase, "moves": false, "sun_height": _elevation(hours), "moon_height": 1.0,
 			"stars": Basis.IDENTITY}
-	# Unplaced, the planets keep their places among the stars on the date, and turn with them.
-	var at := sys.sky_at(unix_time, 0.0, 0.0)
-	var to_world: Basis = (now["stars"] as Basis).transposed() * _galaxy_turn * at["stars"]
-	for b in at["bodies"]:
-		for key in ["dir", "lit_from", "pole"]:
-			b[key] = to_world * b[key]
-	now["bodies"] = at["bodies"]
-	var home := sys.find(sys.home)
-	var here: float = home.distance / _System.AU if home else 1.0
-	now["sun_scale"] = sys.star_radius / _System.SUN_RADIUS / here
-	var moon_body: Resource = home.moons[0] if home and not home.moons.is_empty() else null
-	now["moon_scale"] = moon_body.radius / _System.MOON_RADIUS / (moon_body.distance / _System.MOON_DISTANCE) \
-		if moon_body else 0.0
+	# Unplaced, the sun and moon are as big as they are on the date.
+	now.merge(_unplaced_scales)
 	return now
 
 
 ## The system the sky is drawn from: its own, or the solar system.
 func _system() -> _System:
-	if system:
+	if system and system.find(system.home):
 		return system
 	if _solar == null:
 		_solar = load(_SOLAR_SYSTEM)
@@ -624,7 +620,8 @@ func _sync_light() -> void:
 	set_shader_parameter("moon_lit_from", _now["lit_from"])
 	set_shader_parameter("moonlight", _moonlight())
 	set_shader_parameter("star_basis", _now["stars"])
-	_sync_bodies()
+	RenderingServer.material_set_param(get_rid(), &"sun_scale", _now["sun_scale"])
+	RenderingServer.material_set_param(get_rid(), &"moon_scale", _now["moon_scale"])
 	# The catalogue only once there are stars to draw, and not at all where nothing is drawn.
 	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
 	if not _stars_bound and (night > 0.0 or _float_param(&"star_amount") > 0.0) \
@@ -635,47 +632,81 @@ func _sync_light() -> void:
 	_sync_layer()
 
 
-## The sun's and moon's sizes, and the planets and moons, to the shader: straight on the
-## RenderingServer, never saved with the sky. A row of six texels a body, nearest and brightest
-## first: toward it and its angular radius; its colour and magnitude; toward its sun and its bands;
-## its pole and its rings' outer edge, and their inner, in its radii; their colour and opacity.
+## The planets and moons, where they stand now, world space: each {body, dir, size (angular
+## radius, radians), magnitude, lit_from, pole}, the nearest and brightest first.
+func bodies() -> Array:
+	var to_world := (_now["stars"] as Basis).transposed()
+	return _bodies.map(func(b: Dictionary) -> Dictionary:
+		var w := b.duplicate()
+		for key in ["dir", "lit_from", "pole"]:
+			w[key] = to_world * b[key]
+		return w)
+
+
+## Works out the planets and moons when the system, the place, or the date (placed, ten seconds of
+## the sky's time) has moved on: they stand among the stars, so in between the sky's turn carries
+## them. For the shader a row of six texels a body, straight on the RenderingServer, never saved:
+## toward it in the stars' frame and how far its drawing reaches; its colour and magnitude; toward
+## its sun and its bands; its pole and its rings' outer edge, and their inner edge and its angular
+## radius; their colour and opacity.
 func _sync_bodies() -> void:
-	var rs := RenderingServer
-	rs.material_set_param(get_rid(), &"sun_scale", _now["sun_scale"])
-	rs.material_set_param(get_rid(), &"moon_scale", _now["moon_scale"])
-	var shown: Array = _now["bodies"].duplicate()
-	# Scaled as the moon is drawn, so a moon as big as Earth's looks it.
+	var sys := _system()
+	var unix := unix_time
+	var key := [sys, placed, floorf(unix / 10.0) if placed else date, latitude, longitude,
+		_float_param(&"moon_size")]
+	if key == _bodies_for:
+		return
+	_bodies_for = key
+	if not placed:
+		var noon := Time.get_unix_time_from_datetime_string(date) + 43200.0
+		var at := sys.sky_at(noon, 0.0, 0.0)
+		_unplaced_scales = {"sun_scale": at.get("sun_scale", 1.0), "moon_scale": at.get("moon_scale", 1.0)}
+		unix = noon
+	# Drawn as the moon is, so a moon as big as Earth's looks it; what can never show is dropped.
 	var scale := _float_param(&"moon_size") / (_System.MOON_RADIUS / _System.MOON_DISTANCE)
-	shown.sort_custom(func(a, b): return _prominence(a, scale) > _prominence(b, scale))
-	shown.resize(mini(shown.size(), MAX_BODIES))
-	if _body_image == null:
-		_body_image = Image.create_empty(6, MAX_BODIES, false, Image.FORMAT_RGBAF)
-	for i in shown.size():
-		var b: Dictionary = shown[i]
+	_bodies = sys.bodies_at(unix, latitude if placed else 0.0, longitude if placed else 0.0).filter(
+		func(b: Dictionary) -> bool: return b["magnitude"] < 7.0 or b["size"] * scale > 2e-5)
+	for b in _bodies:
+		for k in ["dir", "lit_from", "pole"]:
+			b[k] = _galaxy_turn * b[k]
+	if _bodies.size() > MAX_BODIES:
+		# Discs before points, then the brighter first.
+		_bodies.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return (100.0 if a["size"] * scale > 0.001 else 0.0) - a["magnitude"] \
+				> (100.0 if b["size"] * scale > 0.001 else 0.0) - b["magnitude"])
+		_bodies.resize(MAX_BODIES)
+	if DisplayServer.get_name() == "headless":
+		return
+	var data := PackedFloat32Array()
+	data.resize(6 * 4 * MAX_BODIES)
+	for i in _bodies.size():
+		var b: Dictionary = _bodies[i]
 		var body: Resource = b["body"]
-		var dir: Vector3 = b["dir"]
-		var lit: Vector3 = b["lit_from"]
-		var pole: Vector3 = b["pole"]
+		var r: float = b["size"] * scale
+		var outer: float = body.rings_outer / body.radius
 		var c: Color = body.color
 		var ring: Color = body.rings_color
-		var outer: float = body.rings_outer / body.radius if body.rings_outer > 0.0 else 0.0
-		_body_image.set_pixel(0, i, Color(dir.x, dir.y, dir.z, b["size"] * scale))
-		_body_image.set_pixel(1, i, Color(c.r, c.g, c.b, b["magnitude"]))
-		_body_image.set_pixel(2, i, Color(lit.x, lit.y, lit.z, body.bands))
-		_body_image.set_pixel(3, i, Color(pole.x, pole.y, pole.z, outer))
-		_body_image.set_pixel(4, i, Color(body.rings_inner / body.radius, 0.0, 0.0, 0.0))
-		_body_image.set_pixel(5, i, ring)
+		var row := [b["dir"], r * maxf(1.1, outer * 1.05), c.r, c.g, c.b, b["magnitude"],
+			b["lit_from"], body.bands, b["pole"], outer,
+			body.rings_inner / body.radius, r, 0.0, 0.0, ring.r, ring.g, ring.b, ring.a]
+		var o := i * 24
+		for v in row:
+			if v is Vector3:
+				data[o] = v.x
+				data[o + 1] = v.y
+				data[o + 2] = v.z
+				o += 3
+			else:
+				data[o] = v
+				o += 1
+	var image := Image.create_from_data(6, MAX_BODIES, false, Image.FORMAT_RGBAF, data.to_byte_array())
+	var rs := RenderingServer
 	if _body_texture == null:
-		_body_texture = ImageTexture.create_from_image(_body_image)
+		_body_texture = ImageTexture.create_from_image(image)
+		rs.material_set_param(get_rid(), &"body_data", _body_texture.get_rid())
 	else:
-		_body_texture.update(_body_image)
-	rs.material_set_param(get_rid(), &"body_data", _body_texture.get_rid())
-	rs.material_set_param(get_rid(), &"body_count", shown.size())
-
-
-## Discs before points, then the brighter first.
-static func _prominence(b: Dictionary, scale: float) -> float:
-	return (100.0 if b["size"] * scale > 0.001 else 0.0) - b["magnitude"]
+		_body_texture.update(image)
+	rs.material_set_param(get_rid(), &"body_count", _bodies.size())
 
 
 ## How far the sky is the air's light: none from a sky shader without the uniform.

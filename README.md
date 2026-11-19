@@ -69,7 +69,7 @@ switches, and a mode where showers come and go on their own.
   `unix_time`). The moon's phase is the date's, the stars are the real ones (the Yale Bright Star
   Catalogue, to about magnitude 6.5, the brightest first out at dusk) turning about the real pole
   with the Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
-  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
+  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastSystem.sky_at`
   gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
 - **Planets, and worlds of your own**: the sky's `system` is an `OvercastSystem`, a star and the
   `OvercastBody` planets and moons round it, and `home`, the world it is seen from. The default,

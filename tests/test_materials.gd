@@ -56,6 +56,42 @@ func test_every_supported_feature_compiles_together() -> void:
 	assert_true("filter_nearest" in to.shader.code, "samples as the material did")
 
 
+func test_a_detail_layer_converts() -> void:
+	var tex := PlaceholderTexture2D.new()
+	var src := StandardMaterial3D.new()
+	src.detail_enabled = true
+	src.detail_albedo = tex
+	src.detail_mask = tex
+	src.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	src.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+	src.uv2_scale = Vector3(64, 64, 1)
+	var to := Materials.convert_material(src) as ShaderMaterial
+	assert_ne(to, null, "a ShaderMaterial")
+	var names := _uniform_names(to.shader)
+	for name in ["texture_detail_albedo", "texture_detail_normal", "texture_detail_mask", "uv2_scale"]:
+		assert_true(names.has(name), "declares %s" % name)
+	assert_true("#define OV_DETAIL_BLEND 3\n" in to.shader.code, "multiplies")
+	assert_eq(to.get_shader_parameter("texture_detail_albedo"), tex)
+	assert_eq(to.get_shader_parameter("uv2_scale"), Vector3(64, 64, 1))
+	src.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
+	var on_uv1 := Materials.convert_material(src) as ShaderMaterial
+	assert_false(_uniform_names(on_uv1.shader).has("uv2_scale"), "on UV1, no UV2 transform")
+
+
+func test_a_detail_layer_it_cannot_draw_is_left_alone() -> void:
+	var src := StandardMaterial3D.new()
+	src.detail_enabled = true
+	src.detail_blend_mode = BaseMaterial3D.BLEND_MODE_PREMULT_ALPHA
+	assert_eq(Materials.unsupported(src), "detail_blend_mode")
+	var triplanar := StandardMaterial3D.new()
+	triplanar.detail_enabled = true
+	triplanar.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+	triplanar.uv2_triplanar = true
+	assert_eq(Materials.unsupported(triplanar), "uv2_triplanar")
+	triplanar.detail_enabled = false
+	assert_eq(Materials.unsupported(triplanar), "", "nothing on UV2 draws: converts")
+
+
 func test_render_modes_follow_the_material() -> void:
 	var src := StandardMaterial3D.new()
 	src.cull_mode = BaseMaterial3D.CULL_DISABLED

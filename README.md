@@ -134,7 +134,7 @@ switches, and a mode where showers come and go on their own.
   way to add code to a StandardMaterial3D's shader, so the converted shader redoes Godot's
   lighting: on Compatibility it matches pixel for pixel, on Forward+ and Mobile to within a few
   levels on rough metals. It covers albedo, metallic, roughness, specular, normal, emission and
-  occlusion maps, ORM textures, vertex colour, transparency, cull and blend modes. A material
+  occlusion maps, detail layers, ORM textures, vertex colour, transparency, cull and blend modes. A material
   using anything else (rim, clearcoat, triplanar, billboards, unshaded…) is left as it is.
   `watch(root)` does the same, then converts what is added under `root` later, at the end of
   the frame it was added in, after its `_ready`. Code that edits a material after that edits

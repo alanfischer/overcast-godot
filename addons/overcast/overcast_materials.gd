@@ -16,7 +16,7 @@ const _CHANNELS := [Vector4(1, 0, 0, 0), Vector4(0, 1, 0, 0), Vector4(0, 0, 1, 0
 ## Flags the shader does not draw: a material with any of them set is not converted.
 const _UNSUPPORTED: Array[StringName] = [&"rim_enabled", &"clearcoat_enabled", &"anisotropy_enabled",
 	&"heightmap_enabled", &"subsurf_scatter_enabled", &"subsurf_scatter_transmittance_enabled",
-	&"backlight_enabled", &"refraction_enabled", &"detail_enabled", &"bent_normal_enabled",
+	&"backlight_enabled", &"refraction_enabled", &"bent_normal_enabled",
 	&"uv1_triplanar", &"emission_on_uv2", &"ao_on_uv2", &"albedo_texture_msdf", &"use_point_size",
 	&"fixed_size", &"proximity_fade_enabled", &"shadow_to_opacity", &"use_particle_trails",
 	&"use_z_clip_scale", &"use_fov_override", &"grow"]
@@ -29,6 +29,8 @@ const _ALLOWED := {
 	&"distance_fade_mode": [BaseMaterial3D.DISTANCE_FADE_DISABLED],
 	&"alpha_antialiasing_mode": [BaseMaterial3D.ALPHA_ANTIALIASING_OFF],
 	&"blend_mode": [BaseMaterial3D.BLEND_MODE_MIX, BaseMaterial3D.BLEND_MODE_ADD,
+		BaseMaterial3D.BLEND_MODE_SUB, BaseMaterial3D.BLEND_MODE_MUL],
+	&"detail_blend_mode": [BaseMaterial3D.BLEND_MODE_MIX, BaseMaterial3D.BLEND_MODE_ADD,
 		BaseMaterial3D.BLEND_MODE_SUB, BaseMaterial3D.BLEND_MODE_MUL],
 }
 
@@ -154,7 +156,13 @@ static func unsupported(mat: BaseMaterial3D) -> String:
 	for prop in _ALLOWED:
 		if mat.get(prop) not in _ALLOWED[prop]:
 			return prop
+	if _detail_on_uv2(mat) and mat.uv2_triplanar:
+		return "uv2_triplanar"
 	return ""
+
+
+static func _detail_on_uv2(mat: BaseMaterial3D) -> bool:
+	return mat.detail_enabled and mat.detail_uv_layer == BaseMaterial3D.DETAIL_UV_2
 
 
 static func _shader(mat: BaseMaterial3D, params: Dictionary) -> Shader:
@@ -192,6 +200,8 @@ static func _code(mat: BaseMaterial3D, params: Dictionary) -> String:
 		"OV_EMISSION_MULTIPLY": mat.emission_enabled
 			and mat.emission_operator == BaseMaterial3D.EMISSION_OP_MULTIPLY,
 		"OV_AO": mat.ao_enabled,
+		"OV_DETAIL": mat.detail_enabled,
+		"OV_DETAIL_UV2": _detail_on_uv2(mat),
 		"OV_VERTEX_COLOR": mat.vertex_color_use_as_albedo,
 		"OV_VERTEX_COLOR_SRGB": mat.vertex_color_use_as_albedo and mat.vertex_color_is_srgb,
 		"OV_ALPHA": mat.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED,
@@ -206,6 +216,8 @@ static func _code(mat: BaseMaterial3D, params: Dictionary) -> String:
 	for flag in flags:
 		if flags[flag]:
 			code += "#define %s\n" % flag
+	if mat.detail_enabled:
+		code += "#define OV_DETAIL_BLEND %d\n" % mat.detail_blend_mode
 	return code + '#include "%s"\n' % _INCLUDE
 
 
@@ -234,6 +246,11 @@ static func _params(mat: BaseMaterial3D) -> Dictionary:
 		"alpha_hash_scale": mat.alpha_hash_scale,
 		"uv1_scale": mat.uv1_scale,
 		"uv1_offset": mat.uv1_offset,
+		"texture_detail_albedo": mat.detail_albedo,
+		"texture_detail_normal": mat.detail_normal,
+		"texture_detail_mask": mat.detail_mask,
+		"uv2_scale": mat.uv2_scale,
+		"uv2_offset": mat.uv2_offset,
 	}
 	if mat is ORMMaterial3D:
 		var orm: Texture2D = mat.get("orm_texture")

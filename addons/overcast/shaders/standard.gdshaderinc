@@ -45,6 +45,16 @@ uniform float alpha_hash_scale = 1.0;
 #endif
 uniform vec3 uv1_scale = vec3(1.0);
 uniform vec3 uv1_offset = vec3(0.0);
+#ifdef OV_DETAIL
+// OV_DETAIL_BLEND: BaseMaterial3D's blend mode, mix, add, sub or mul.
+uniform sampler2D texture_detail_albedo : source_color, OV_FILTER, OV_REPEAT;
+uniform sampler2D texture_detail_normal : hint_normal, OV_FILTER, OV_REPEAT;
+uniform sampler2D texture_detail_mask : hint_default_white, OV_FILTER, OV_REPEAT;
+#endif
+#ifdef OV_DETAIL_UV2
+uniform vec3 uv2_scale = vec3(1.0);
+uniform vec3 uv2_offset = vec3(0.0);
+#endif
 
 varying vec3 ov_world_pos;
 // The snow, and how many glint cells a pixel spans, for light()'s glints.
@@ -54,6 +64,9 @@ varying float ov_specular;
 
 void vertex() {
 	UV = UV * uv1_scale.xy + uv1_offset.xy;
+#ifdef OV_DETAIL_UV2
+	UV2 = UV2 * uv2_scale.xy + uv2_offset.xy;
+#endif
 #ifdef OV_VERTEX_COLOR_SRGB
 	if (!OUTPUT_IS_SRGB) {
 		COLOR.rgb = mix(pow((COLOR.rgb + vec3(0.055)) * (1.0 / (1.0 + 0.055)), vec3(2.4)),
@@ -72,6 +85,25 @@ void fragment() {
 	albedo_tex *= COLOR;
 #endif
 	vec3 alb = albedo.rgb * albedo_tex.rgb;
+#ifdef OV_DETAIL
+#ifdef OV_DETAIL_UV2
+	vec2 detail_uv = UV2;
+#else
+	vec2 detail_uv = UV;
+#endif
+	vec4 detail_tex = texture(texture_detail_albedo, detail_uv);
+	float detail_mask = texture(texture_detail_mask, UV).r;
+#if OV_DETAIL_BLEND == 1
+	vec3 detail = mix(alb, alb + detail_tex.rgb, detail_tex.a);
+#elif OV_DETAIL_BLEND == 2
+	vec3 detail = mix(alb, alb - detail_tex.rgb, detail_tex.a);
+#elif OV_DETAIL_BLEND == 3
+	vec3 detail = mix(alb, alb * detail_tex.rgb, detail_tex.a);
+#else
+	vec3 detail = mix(alb, detail_tex.rgb, detail_tex.a);
+#endif
+	alb = mix(alb, detail, detail_mask);
+#endif
 	float metal = metallic;
 #ifdef OV_METALLIC_TEXTURE
 	metal *= dot(texture(texture_metallic, UV), metallic_texture_channel);
@@ -93,9 +125,20 @@ void fragment() {
 	ROUGHNESS = rough;
 	SPECULAR = spec;
 	ov_specular = spec;
+#if defined(OV_NORMAL) || defined(OV_DETAIL)
 #ifdef OV_NORMAL
 	NORMAL_MAP = texture(texture_normal, UV).rgb;
-	NORMAL_MAP_DEPTH = normal_scale * (1.0 - snow);  // snow smooths over the bumps
+	float bump = normal_scale;
+#else
+	NORMAL_MAP = vec3(0.5, 0.5, 1.0);
+	float bump = 1.0;
+#endif
+#ifdef OV_DETAIL
+	// Godot writes it even with no detail normal set, which shifts the light a level here and there.
+	vec3 detail_normal = mix(NORMAL_MAP, texture(texture_detail_normal, detail_uv).rgb, detail_tex.a);
+	NORMAL_MAP = mix(NORMAL_MAP, detail_normal, detail_mask);
+#endif
+	NORMAL_MAP_DEPTH = bump * (1.0 - snow);  // snow smooths over the bumps
 #endif
 #ifdef OV_EMISSION
 	vec3 emission_tex = texture(texture_emission, UV).rgb;

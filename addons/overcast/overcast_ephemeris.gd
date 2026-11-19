@@ -1,13 +1,16 @@
 class_name OvercastEphemeris
 extends Object
-## Where the sun and moon stand and how the stars are turned, at a Unix time (seconds, UTC) from a
-## latitude and longitude (degrees, north and east positive). Paul Schlyter's method: about an
-## arcminute for the sun, a few for the moon, the moon's parallax included; no refraction.
+## The arithmetic of the sky, after Paul Schlyter: orbits from their elements, the moon's
+## disturbances, sidereal time, precession, and the turn from the sky's frames to the world's. Unix
+## times are seconds UTC; latitude and longitude degrees, north and east positive. About an
+## arcminute for the sun, a few for the moon; no refraction. OvercastSystem puts it together.
 ##
 ## The world is Godot's: up +Y, north -Z turned clockwise seen from above by `north` degrees.
 
 ## The galaxy's north pole, right ascension and declination in degrees.
 const GALACTIC_POLE := Vector2(192.86, 27.13)
+## Earth's equatorial radius, km: Schlyter's unit for the moon's distance.
+const EARTH_RADIUS := 6378.14
 
 
 ## Days from 2000 Jan 0.0 UT, as Schlyter counts them.
@@ -15,23 +18,9 @@ static func days(unix: float) -> float:
 	return unix / 86400.0 - 10956.0
 
 
-## The sun and moon, world space, and the stars' turn, at `unix` from the place given.
-## sun and moon: unit, toward them. phase: the moon's, 0 new, 0.5 full, waxing between.
-## stars: takes a world direction to one fixed among the stars (equatorial of J2000, +Z the
-## celestial pole then), as catalogues give them.
-static func sky_at(unix: float, latitude: float, longitude: float, north := 0.0) -> Dictionary:
-	var d := days(unix)
-	var sun := _sun(d)
-	var moon := _moon(d, sun)
-	var lst := sidereal(unix, longitude)
-	var to_world := _to_world(lst, latitude, north)
-	var near_moon: Vector3 = moon["at"] - observer(lst, latitude)
-	return {
-		"sun": to_world * _equatorial(sun["lon"], 0.0, d),
-		"moon": to_world * near_moon.normalized(),
-		"phase": fposmod(moon["lon"] - sun["lon"], 360.0) / 360.0,
-		"stars": precession(d).transposed() * to_world.transposed(),
-	}
+## The tilt of Earth's equator to the ecliptic `d` days in, degrees.
+static func obliquity(d: float) -> float:
+	return 23.4393 - 3.563e-7 * d
 
 
 ## J2000 equatorial to the equator and equinox of `d` days in (IAU 1976): the frame the sun and
@@ -48,7 +37,9 @@ static func precession(d: float) -> Basis:
 ## Local sidereal time, degrees: the right ascension standing on the meridian.
 static func sidereal(unix: float, longitude: float) -> float:
 	var ut := fposmod(unix / 3600.0, 24.0)
-	return fposmod(_sun(days(unix))["l"] + 180.0 + ut * 15.0 + longitude, 360.0)
+	var d := days(unix)
+	var sun_mean := 356.0470 + 0.9856002585 * d + 282.9404 + 4.70935e-5 * d
+	return fposmod(sun_mean + 180.0 + ut * 15.0 + longitude, 360.0)
 
 
 ## The observer's place, equatorial, in Earth radii from its centre.
@@ -56,12 +47,11 @@ static func observer(lst: float, latitude: float) -> Vector3:
 	var lat := deg_to_rad(latitude)
 	var geocentric := lat - deg_to_rad(0.1924) * sin(2.0 * lat)
 	var rho := 0.99833 + 0.00167 * cos(2.0 * lat)
-	var t := deg_to_rad(lst)
-	return rho * Vector3(cos(geocentric) * cos(t), cos(geocentric) * sin(t), sin(geocentric))
+	return rho * radec(lst, rad_to_deg(geocentric))
 
 
 ## Equatorial to world, under the sky at local sidereal time `lst` (degrees).
-static func _to_world(lst: float, latitude: float, north: float) -> Basis:
+static func to_world(lst: float, latitude: float, north: float) -> Basis:
 	var t := deg_to_rad(lst)
 	var p := deg_to_rad(latitude)
 	# Columns: where the equatorial axes land in east, north, up.
@@ -78,49 +68,35 @@ static func bearing(degrees: float, north := 0.0) -> Vector3:
 	return Vector3.FORWARD.rotated(Vector3.UP, -deg_to_rad(north + degrees))
 
 
-## Ecliptic longitude and latitude (degrees) to a unit equatorial vector, d days in.
-static func _equatorial(lon: float, lat: float, d: float) -> Vector3:
-	var ecl := deg_to_rad(23.4393 - 3.563e-7 * d)
-	var v := radec(lon, lat)
-	return Vector3(v.x, v.y * cos(ecl) - v.z * sin(ecl), v.y * sin(ecl) + v.z * cos(ecl))
-
-
-## The sun's ecliptic longitude (lon), mean anomaly (m) and mean longitude (l), degrees.
-static func _sun(d: float) -> Dictionary:
-	var w := 282.9404 + 4.70935e-5 * d
-	var e := 0.016709 - 1.151e-9 * d
-	var m := fposmod(356.0470 + 0.9856002585 * d, 360.0)
-	var ea := _kepler(m, e)
-	var v := rad_to_deg(atan2(sqrt(1.0 - e * e) * sin(ea), cos(ea) - e))
-	return {"lon": fposmod(v + w, 360.0), "m": m, "l": fposmod(m + w, 360.0)}
-
-
-## The moon: ecliptic longitude (lon, degrees) and its place equatorial in Earth radii (at).
-static func _moon(d: float, sun: Dictionary) -> Dictionary:
-	var n := 125.1228 - 0.0529538083 * d
-	var i := 5.1454
-	var w := 318.0634 + 0.1643573223 * d
-	var a := 60.2666
-	var e := 0.054900
-	var m := fposmod(115.3654 + 13.0649929509 * d, 360.0)
+## A place on an ellipse about its focus, in the frame its angles are measured in: `node`,
+## `periapsis` (from the node), `inclination` and mean anomaly `m` in degrees, `a` the semi-major
+## axis in any unit, which the place comes back in.
+static func ellipse(node: float, periapsis: float, inclination: float, a: float, e: float, m: float) -> Vector3:
 	var ea := _kepler(m, e)
 	var xv := a * (cos(ea) - e)
 	var yv := a * sqrt(1.0 - e * e) * sin(ea)
-	var r := sqrt(xv * xv + yv * yv)
-	var vw := atan2(yv, xv) + deg_to_rad(w)
-	var nr := deg_to_rad(n)
-	var ir := deg_to_rad(i)
-	var xh := cos(nr) * cos(vw) - sin(nr) * sin(vw) * cos(ir)
-	var yh := sin(nr) * cos(vw) + cos(nr) * sin(vw) * cos(ir)
-	var zh := sin(vw) * sin(ir)
-	var lon := rad_to_deg(atan2(yh, xh))
-	var lat := rad_to_deg(atan2(zh, sqrt(xh * xh + yh * yh)))
-	# The largest perturbations, by the sun's pull.
-	var ms := deg_to_rad(sun["m"])
+	var u := atan2(yv, xv) + deg_to_rad(periapsis)
+	var n := deg_to_rad(node)
+	var i := deg_to_rad(inclination)
+	return sqrt(xv * xv + yv * yv) * Vector3(cos(n) * cos(u) - sin(n) * sin(u) * cos(i),
+		sin(n) * cos(u) + cos(n) * sin(u) * cos(i), sin(u) * sin(i))
+
+
+## The moon about Earth `d` days in: ecliptic of date, km, its largest disturbances by the sun
+## included.
+static func moon(d: float) -> Vector3:
+	var n := 125.1228 - 0.0529538083 * d
+	var w := 318.0634 + 0.1643573223 * d
+	var m := fposmod(115.3654 + 13.0649929509 * d, 360.0)
+	var p := ellipse(n, w, 5.1454, 60.2666, 0.054900, m)
+	var r := p.length()
+	var lon := rad_to_deg(atan2(p.y, p.x))
+	var lat := rad_to_deg(asin(p.z / r))
+	var ms := deg_to_rad(356.0470 + 0.9856002585 * d)
 	var mm := deg_to_rad(m)
 	var lm := deg_to_rad(m + w + n)
-	var dd := lm - deg_to_rad(sun["l"])
-	var f := lm - nr
+	var dd := lm - deg_to_rad(356.0470 + 0.9856002585 * d + 282.9404 + 4.70935e-5 * d)
+	var f := lm - deg_to_rad(n)
 	lon += -1.274 * sin(mm - 2 * dd) + 0.658 * sin(2 * dd) - 0.186 * sin(ms) \
 		- 0.059 * sin(2 * mm - 2 * dd) - 0.057 * sin(mm - 2 * dd + ms) + 0.053 * sin(mm + 2 * dd) \
 		+ 0.046 * sin(2 * dd - ms) + 0.041 * sin(mm - ms) - 0.035 * sin(dd) - 0.031 * sin(mm + ms) \
@@ -128,7 +104,7 @@ static func _moon(d: float, sun: Dictionary) -> Dictionary:
 	lat += -0.173 * sin(f - 2 * dd) - 0.055 * sin(mm - f - 2 * dd) - 0.046 * sin(mm + f - 2 * dd) \
 		+ 0.033 * sin(f + 2 * dd) + 0.017 * sin(2 * mm + f)
 	r += -0.58 * cos(mm - 2 * dd) - 0.46 * cos(2 * dd)
-	return {"lon": fposmod(lon, 360.0), "at": _equatorial(lon, lat, d) * r}
+	return radec(lon, lat) * r * EARTH_RADIUS
 
 
 ## The eccentric anomaly (radians) for mean anomaly `m` (degrees).
@@ -140,7 +116,7 @@ static func _kepler(m: float, e: float) -> float:
 	return ea
 
 
-## Unit, equatorial: toward right ascension and declination given in degrees.
+## Unit: toward longitude (or right ascension) and latitude (or declination) given in degrees.
 static func radec(ra: float, dec: float) -> Vector3:
 	var a := deg_to_rad(ra)
 	var b := deg_to_rad(dec)

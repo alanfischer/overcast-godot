@@ -69,8 +69,19 @@ switches, and a mode where showers come and go on their own.
   `unix_time`). The moon's phase is the date's, the stars are the real ones (the Yale Bright Star
   Catalogue, to about magnitude 6.5, the brightest first out at dusk) turning about the real pole
   with the Milky Way where it lies, and night and dusk go by how high the sun really is, so a polar summer
-  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastEphemeris`
+  has no night. `north` says which way the world's north lies (-Z unturned). `OvercastSystem.sky_at`
   gives the positions by themselves. See [docs/ROADMAP.md](docs/ROADMAP.md) for where this goes.
+- **Planets, and worlds of your own**: the sky's `system` is an `OvercastSystem`, a star and the
+  `OvercastBody` planets and moons round it, and `home`, the world it is seen from. The default,
+  `solar_system.tres`, is the real one from Earth: Mercury to Neptune where they are (within a few
+  arcminutes of JPL's), as bright as they are, steady points that zoom into banded discs and
+  Saturn's rings; placed or not, they keep their places among the stars. Give it your own, or add
+  to a copy: any body can be home, with its own `day`, `axial_tilt` (seasons) and moons, the first
+  of them the sky's moon, sized by how near it is; others are drawn as lit discs with phases,
+  bands and rings, and one in front of the sun eclipses it. Orbits are a resource's elements (a
+  period, or one from the mass gone round). `demo/giant_moon.tres` is a moon of a ringed giant
+  that keeps one face to it, so the giant hangs in its sky (`SYSTEM=res://demo/giant_moon.tres
+  PLACE=20,150 BODY=Giant` in `tools/screenshot.gd`); `tools/make_systems.gd` writes both.
 - **Three layers of cloud**: the low layer (`cloud_amount`, `cloud_height`), a middle one
   (`mid_cloud_amount`, `mid_cloud_height`) and cirrus (`cirrus_amount`, `cirrus_height`), each on
   its own shell at its own real height, and each lit by the air at that height: after sunset the

@@ -8,6 +8,7 @@ extends SceneTree
 ## kinds; LOOK=yaw,pitch in degrees for one view, FOV=20 to narrow any. FORECAST=1 takes the real
 ## weather at PLACE from Open-Meteo, at DATE and TIME or now. VIS=300 for fog that thick (m).
 ## SATELLITE=1 lays NASA's infrared round PLACE at DATE and TIME as the cover map.
+## SYSTEM=res://….tres for another planetary system; BODY=Venus looks at a planet or moon.
 ## COVERMAP=png lays a cover map (OvercastSky.set_cover_map, north up) SPAN metres across (200 km).
 ##   godot --path . -s res://tools/screenshot.gd
 
@@ -31,6 +32,8 @@ func _run() -> void:
 			["TOWERING", "cloud_towering"], ["MOON", "moon_phase"]]:
 		if OS.get_environment(knob[0]) != "":
 			demo.sky.set(knob[1], float(OS.get_environment(knob[0])))
+	if OS.get_environment("SYSTEM") != "":
+		demo.sky.system = load(OS.get_environment("SYSTEM"))
 	if OS.get_environment("PLACE") != "":
 		var place := OS.get_environment("PLACE").split_floats(",")
 		demo.sky.latitude = place[0]
@@ -84,6 +87,11 @@ func _run() -> void:
 	if OS.get_environment("LOOK") != "":  # yaw and pitch in degrees (yaw 0 north, 90 west)
 		var look := OS.get_environment("LOOK").split_floats(",")
 		views = {"look": [Vector3(0, 1.7, 8), deg_to_rad(look[1]), deg_to_rad(look[0])]}
+	if OS.get_environment("BODY") != "":  # at a planet or moon by name
+		for b in demo.sky.bodies():
+			if b["body"].name == OS.get_environment("BODY"):
+				var d: Vector3 = b["dir"]
+				views = {"body": [Vector3(0, 1.7, 8), asin(d.y), atan2(-d.x, -d.z)]}
 	if OS.get_environment("POLE") == "1":  # the pole the stars turn about, due north or south
 		var lat: float = deg_to_rad(demo.sky.latitude)
 		views = {"pole": [Vector3(0, 1.7, 8), absf(lat), 0.0 if lat >= 0.0 else PI]}

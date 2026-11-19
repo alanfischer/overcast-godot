@@ -162,3 +162,15 @@ func _run_method(method_name: String) -> void:
 ## running one), so `self.root` is null — reach the real root via the main loop.
 func _root() -> Node:
 	return (Engine.get_main_loop() as SceneTree).root
+
+
+## A world direction toward altitude and azimuth (degrees, round from north through east), north -Z.
+func _toward(alt: float, az: float) -> Vector3:
+	var a := deg_to_rad(alt)
+	var z := deg_to_rad(az)
+	return Vector3(cos(a) * sin(z), sin(a), -cos(a) * cos(z))
+
+
+## Altitude and azimuth (degrees) of a world direction, as _toward takes them.
+func _altaz(v: Vector3) -> Vector2:
+	return Vector2(rad_to_deg(asin(v.y)), fposmod(rad_to_deg(atan2(v.x, -v.z)), 360.0))

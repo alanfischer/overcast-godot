@@ -65,3 +65,18 @@ to a third party only when they agree).
   runs on for a hundred km, so the map is looked up by elevation and bearing. Not yet: Europe,
   Africa and India (no Meteosat in GIBS); the daytime visible band; a night inversion makes
   tops read low. A new frame fades in over the last for a minute.
+
+## 5. Planets, and other worlds (done)
+
+- `OvercastSystem` and `OvercastBody`: a star, planets and moons as resources, orbits by their
+  elements, and `home`, the world the sky is seen from. `solar_system.tres` is the real one,
+  Schlyter's elements with Jupiter's, Saturn's and Uranus' perturbations, checked against JPL
+  Horizons to 3'; magnitudes by size, albedo and phase.
+- Seen from Earth: the planets as steady points by magnitude, discs when zoomed in, Saturn's rings.
+- Any body as home: its day (solar), axial tilt and pole turn the sky, its first moon is the sky's
+  moon, sized by distance (none for a moonless world), the sun sized by the star and the distance.
+  A moon whose day is its orbit keeps its planet hanging in its sky.
+- Not yet: the air of other worlds (Mars' butterscotch sky and blue sunsets), the light of a
+  bright neighbour on the ground, shadows on rings and of rings, surface maps, a moon of a moon,
+  and unplaced skies keep planets among the stars rather than near the sun.
+

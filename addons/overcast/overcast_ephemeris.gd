@@ -95,7 +95,8 @@ static func _sun(d: float) -> Dictionary:
 	return {"lon": fposmod(v + w, 360.0), "m": m, "l": fposmod(m + w, 360.0)}
 
 
-## The moon: ecliptic longitude (lon, degrees) and its place equatorial in Earth radii (at).
+## The moon: ecliptic longitude (lon, degrees) and its place in Earth radii, equatorial (at) and
+## ecliptic (ecl).
 static func _moon(d: float, sun: Dictionary) -> Dictionary:
 	var n := 125.1228 - 0.0529538083 * d
 	var i := 5.1454
@@ -128,7 +129,7 @@ static func _moon(d: float, sun: Dictionary) -> Dictionary:
 	lat += -0.173 * sin(f - 2 * dd) - 0.055 * sin(mm - f - 2 * dd) - 0.046 * sin(mm + f - 2 * dd) \
 		+ 0.033 * sin(f + 2 * dd) + 0.017 * sin(2 * mm + f)
 	r += -0.58 * cos(mm - 2 * dd) - 0.46 * cos(2 * dd)
-	return {"lon": fposmod(lon, 360.0), "at": _equatorial(lon, lat, d) * r}
+	return {"lon": fposmod(lon, 360.0), "at": _equatorial(lon, lat, d) * r, "ecl": radec(lon, lat) * r}
 
 
 ## The eccentric anomaly (radians) for mean anomaly `m` (degrees).

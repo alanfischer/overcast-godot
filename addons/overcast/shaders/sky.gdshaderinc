@@ -75,6 +75,12 @@ uniform vec3 moon_dir = vec3(0.0, -1.0, 0.0);
 uniform vec3 moon_lit_from = vec3(0.0, 1.0, 0.0);
 uniform float moonlight = 1.0;
 uniform float night_stars : hint_range(0.0, 1.0) = 0.7;
+// The sun's and moon's sizes against sun_size and moon_size, by how near they are (0: no moon), and
+// the planets and moons (OvercastSky._sync_bodies lays them out).
+uniform float sun_scale = 1.0;
+uniform float moon_scale = 1.0;
+uniform sampler2D body_data : filter_nearest, repeat_disable;
+uniform int body_count = 0;
 
 // Rain: 0 is the sky as configured, 1 a full storm — the deck closes over, its clouds go dark and
 // heavy, the sky behind them greys, and sun, moon and stars are lost. Everything is relative to
@@ -333,6 +339,95 @@ vec3 overcast_stars(vec3 eye_dir, float amount, float sky_lum) {
 	return col + lit * seen;
 }
 
+// The planets and moons over `col`, before the clouds: points as bright as their magnitude where
+// smaller than a pixel, lit discs, banded and ringed, where bigger. `air_col` is the sky without
+// its stars, what a disc's night side shows; `amount` and `sky_lum` as overcast_stars takes them.
+// `covered`: how much a disc or ring stands in front of what is behind, the sun's disc included.
+vec3 overcast_bodies(vec3 eye_dir, vec3 col, vec3 air_col, float amount, float sky_lum, out float covered) {
+	float up = eye_dir.y;
+	covered = 0.0;
+	if (body_count == 0 || up < -0.02) {
+		return col;
+	}
+	float px = max(length(fwidth(eye_dir)), 1e-5);
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	float drowned = smoothstep(0.12, 0.45, sky_lum);
+#else
+	float drowned = smoothstep(0.013, 0.17, sky_lum);
+#endif
+	float limit = mix(1.0, 6.6, min(amount * 1.2, 1.0)) - drowned * 5.0;
+	float low = 1.0 - smoothstep(0.0, 0.35, up);
+	float seen = smoothstep(-0.005, 0.01, up) * mix(1.0, 0.35, low);
+	for (int i = 0; i < body_count; i++) {
+		vec4 at = texelFetch(body_data, ivec2(0, i), 0);
+		vec4 pole = texelFetch(body_data, ivec2(3, i), 0);
+		float r = at.w;
+		float reach = max(r * max(1.1, pole.w * 1.05), px * 3.0);
+		if (dot(eye_dir, at.xyz) < cos(reach)) {
+			continue;
+		}
+		vec4 look = texelFetch(body_data, ivec2(1, i), 0);
+		vec4 lit_from = texelFetch(body_data, ivec2(2, i), 0);
+		// Smaller than a pixel: a point, as a star, but steady.
+		float disc_share = smoothstep(px * 0.6, px * 1.6, r);
+		if (disc_share < 1.0 && look.a < limit) {
+			float d = length(eye_dir - at.xyz);
+			float rr = max(mix(0.0007, 0.0036, smoothstep(4.0, -4.5, look.a)), px * 0.9);
+			float bright = pow(10.0, -0.3 * (look.a - 1.5)) * smoothstep(limit, limit - 0.8, look.a);
+			// A core held under white, so Mars stays red, in a glare as wide as it is bright.
+			vec3 core = look.rgb * min(bright * 2.5, 1.3) * smoothstep(rr, rr * 0.3, d);
+			vec3 glare = look.rgb * min(bright, 20.0) * 0.012 * exp(-d / (rr * 2.0));
+			col += (core + glare) * seen * (1.0 - disc_share);
+		}
+		if (disc_share <= 0.0) {
+			continue;
+		}
+		// Bigger: a ball lit from its sun, x and y across its face in its radii.
+		vec3 mx = normalize(cross(at.xyz, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+		vec3 my = cross(mx, at.xyz);
+		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, my)) / sin(r);
+		float qr = length(q);
+		float edge = max(px / r, 0.02);
+		float face = (1.0 - smoothstep(1.0 - edge, 1.0, qr)) * disc_share * seen;
+		vec3 normal = q.x * mx + q.y * my - at.xyz * sqrt(max(1.0 - qr * qr, 0.0));
+		float lit = smoothstep(-0.03, 0.12, dot(normal, lit_from.xyz));
+		float lat = dot(normal, pole.xyz);
+		float stripes = 0.5 + 0.5 * sin(lat * 19.0 + overcast_vnoise(vec2(lat * 7.0, 1.3)) * 3.0);
+		vec3 surface = look.rgb * (1.0 - lit_from.a * 0.4 * stripes);
+		vec3 day = surface * lit * 0.5 * mix(0.45, moon_energy, night_amount);
+		// Rings: where the line of sight crosses the equator's plane, between their edges.
+		float ring = 0.0;
+		bool ring_behind = false;
+		vec3 ring_col = vec3(0.0);
+		if (pole.w > 0.0) {
+			vec4 inner = texelFetch(body_data, ivec2(4, i), 0);
+			vec4 rings = texelFetch(body_data, ivec2(5, i), 0);
+			float facing = dot(at.xyz, pole.xyz);
+			float t = -(q.x * dot(mx, pole.xyz) + q.y * dot(my, pole.xyz)) / (abs(facing) > 1e-3 ? facing : 1e-3);
+			float rho = length(q.x * mx + q.y * my + t * at.xyz);
+			float ring_edge = max(px / r, 0.01);
+			ring = smoothstep(inner.r - ring_edge, inner.r, rho) * (1.0 - smoothstep(pole.w - ring_edge, pole.w, rho))
+				* rings.a * (0.7 + 0.3 * overcast_vnoise(vec2(rho * 14.0, 0.5))) * smoothstep(0.0, 0.03, abs(facing))
+				* disc_share * seen;
+			ring_behind = t > 0.0;
+			// Lit on the face the sun is on; seen from the other, only what comes through.
+			float sunny = step(0.0, dot(lit_from.xyz, pole.xyz) * -facing);
+			ring_col = rings.rgb * mix(0.3, 1.0, sunny) * mix(0.45, moon_energy, night_amount);
+		}
+		// The rings and the night side hold back what is behind; the sky's own air is in front.
+		if (ring_behind) {
+			col = mix(col, air_col, ring * (1.0 - face)) + ring_col * ring * (1.0 - face);
+		}
+		col = mix(col, air_col + surface * 0.03, face);
+		col += day * face;
+		if (!ring_behind) {
+			col = mix(col, air_col, ring) + ring_col * ring;
+		}
+		covered = max(covered, max(face, ring));
+	}
+	return col;
+}
+
 // The grey a cloud out of the sun takes: lit by the sky, so the sky's colour rather than a grey.
 vec3 overcast_skylit(vec3 ambient) {
 	return mix(vec3(dot(ambient, OVERCAST_LUMA)), ambient, 0.6);
@@ -587,6 +682,11 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	if (stars > 0.0 && storm < 1.0) {
 		col += overcast_stars(eye_dir, stars, sky_lum) * (1.0 - storm);
 	}
+	float body_cover = 0.0;
+	if (storm < 1.0) {
+		col = mix(col, overcast_bodies(eye_dir, col, air_col, stars, sky_lum, body_cover), 1.0 - storm);
+		body_cover *= 1.0 - storm;
+	}
 
 	storm_cover = 0.0;
 	storm_body = 0.0;
@@ -723,10 +823,11 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	float unclouded = 1.0 - smoothstep(0.15, 0.75, sun_hidden);
 	// The moon: a ball lit from one side, mottled with darker seas. Its dark side is the sky's
 	// colour with the stars put out: just seen by night, lost by day.
-	if (dot(eye_dir, moon_dir) > cos(moon_size * 1.1)) {
+	float moon_r = moon_size * moon_scale;
+	if (moon_scale > 0.0 && dot(eye_dir, moon_dir) > cos(moon_r * 1.1)) {
 		vec3 mx = normalize(cross(moon_dir, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
 		vec3 my = cross(mx, moon_dir);
-		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, my)) / sin(moon_size);
+		vec2 q = vec2(dot(eye_dir, mx), dot(eye_dir, my)) / sin(moon_r);
 		float r = length(q);
 		float face = (1.0 - smoothstep(0.92, 1.0, r)) * sun_through * unclouded;
 		vec3 normal = q.x * mx + q.y * my - moon_dir * sqrt(max(1.0 - r * r, 0.0));
@@ -741,8 +842,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 	float low_sun = 1.0 - smoothstep(0.0, 0.2, sun.y);
 	float sun_peak = max(max(sun_col.r, sun_col.g), max(sun_col.b, 1e-3));
 	float disc_energy = mix(sun_energy, min(sun_energy, 1.2 / sun_peak), low_sun);
-	float disc = smoothstep(cos(sun_size * 1.4), cos(sun_size), sd) * (1.0 - step(0.5, night_amount));
-	col += sun_col * disc * disc_energy * light_strength * sun_through * unclouded;
+	float sun_r = sun_size * sun_scale;
+	float disc = smoothstep(cos(sun_r * 1.4), cos(sun_r), sd) * (1.0 - step(0.5, night_amount));
+	// A planet or moon in front of it eclipses it.
+	col += sun_col * disc * disc_energy * light_strength * sun_through * unclouded * (1.0 - body_cover);
 	col += sun_col * pow(max(sd, 0.0), sun_glow_exp) * sun_glow_energy * light_strength * sun_through
 		* (1.0 - 0.6 * sun_hidden);
 	// The halo is the air between us and the cloud, so it sits over cloud and sky alike. A moon

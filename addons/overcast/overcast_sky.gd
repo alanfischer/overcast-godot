@@ -12,6 +12,10 @@ extends ShaderMaterial
 
 const _Clouds = preload("res://addons/overcast/overcast_clouds.gd")
 const _Ephemeris = preload("res://addons/overcast/overcast_ephemeris.gd")
+const _System = preload("res://addons/overcast/overcast_system.gd")
+const _SOLAR_SYSTEM := "res://addons/overcast/solar_system.tres"
+## The most planets and moons drawn at once: the nearest and brightest.
+const MAX_BODIES := 16
 const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const _LutShader = preload("res://addons/overcast/shaders/atmosphere_lut.gdshader")
 ## The air's light, drawn into a texture this size whenever the sun or the air changes.
@@ -124,6 +128,13 @@ const _STAR_POLE := Vector3(0.48, 0.36, 0.8)
 @export_range(-180.0, 180.0, 0.1, "suffix:°") var north := 0.0:
 	set(v):
 		north = v
+		_moved()
+## The star, planets and moons, and which world the sky is seen from: the solar system from Earth
+## when none is given. Its planets are drawn placed or not; placed, its home world's day, seasons
+## and moon are the sky's.
+@export var system: _System:
+	set(v):
+		system = v
 		_moved()
 @export_group("Scene light")
 ## The light this sky puts on a scene (scene_light) at the height of dusk and at full night.
@@ -285,6 +296,9 @@ var _told_wind := Vector3.INF
 var _cover_map: Texture2D
 var _cover_span := 1.0
 var _stars_bound := false
+## The planets and moons for the shader, a row of texels each (_sync_bodies).
+var _body_image: Image
+var _body_texture: ImageTexture
 var _storm := 0.0
 var _snowy := 0.0
 var _mist := 0.0
@@ -304,6 +318,7 @@ static var _air_noon_zenith := {}
 ## The noon sun on the ground, by haze: what the air's light on the scene is measured against.
 static var _air_noon_light := {}
 static var _catalogue: Texture2D
+static var _solar: _System
 ## Turns the galaxy's real pole to where the sky shader draws the Milky Way.
 static var _galaxy_turn := Basis(Quaternion(
 	_Ephemeris.radec(_Ephemeris.GALACTIC_POLE.x, _Ephemeris.GALACTIC_POLE.y), _STAR_POLE.normalized()))
@@ -426,23 +441,51 @@ static func _dusk_of(height: float) -> float:
 ## sun_height and moon_height are shares of the noon height night, dusk and moonlight go by.
 func _sky_now() -> Dictionary:
 	var noon: Vector3 = (param(&"sun_dir") as Vector3).normalized()
+	var sys := _system()
 	if placed:
-		var at := _Ephemeris.sky_at(unix_time, latitude, longitude, north)
-		return {"sun": at["sun"], "moon": at["moon"], "lit_from": at["sun"], "phase": at["phase"],
-			"moves": true, "sun_height": at["sun"].y / _NOON_HEIGHT,
-			"moon_height": at["moon"].y / _NOON_HEIGHT, "stars": _galaxy_turn * at["stars"]}
+		var at := sys.sky_at(unix_time, latitude, longitude, north)
+		at["moves"] = true
+		at["sun_height"] = at["sun"].y / _NOON_HEIGHT
+		at["moon_height"] = at["moon"].y / _NOON_HEIGHT
+		at["stars"] = _galaxy_turn * at["stars"]
+		return at
 	var hours := time_of_day
+	var now: Dictionary
 	if sun_follows_time:
 		var sun := sun_at(noon, hours)
 		var moon := moon_at(noon, hours, moon_phase)
 		# The stars turn with the sun: back to where they stood at noon.
-		return {"sun": sun, "moon": moon, "lit_from": _lit_from(moon, sun, moon_phase),
+		now = {"sun": sun, "moon": moon, "lit_from": _lit_from(moon, sun, moon_phase),
 			"phase": moon_phase, "moves": true, "sun_height": _elevation(hours),
 			"moon_height": _elevation(hours - 24.0 * moon_phase),
 			"stars": Basis(_arc_axis(noon), -_arc_turn(hours))}
-	return {"sun": noon, "moon": noon, "lit_from": _lit_from(noon, noon, moon_phase),
-		"phase": moon_phase, "moves": false, "sun_height": _elevation(hours), "moon_height": 1.0,
-		"stars": Basis.IDENTITY}
+	else:
+		now = {"sun": noon, "moon": noon, "lit_from": _lit_from(noon, noon, moon_phase),
+			"phase": moon_phase, "moves": false, "sun_height": _elevation(hours), "moon_height": 1.0,
+			"stars": Basis.IDENTITY}
+	# Unplaced, the planets keep their places among the stars on the date, and turn with them.
+	var at := sys.sky_at(unix_time, 0.0, 0.0)
+	var to_world: Basis = (now["stars"] as Basis).transposed() * _galaxy_turn * at["stars"]
+	for b in at["bodies"]:
+		for key in ["dir", "lit_from", "pole"]:
+			b[key] = to_world * b[key]
+	now["bodies"] = at["bodies"]
+	var home := sys.find(sys.home)
+	var here: float = home.distance / _System.AU if home else 1.0
+	now["sun_scale"] = sys.star_radius / _System.SUN_RADIUS / here
+	var moon_body: Resource = home.moons[0] if home and not home.moons.is_empty() else null
+	now["moon_scale"] = moon_body.radius / _System.MOON_RADIUS / (moon_body.distance / _System.MOON_DISTANCE) \
+		if moon_body else 0.0
+	return now
+
+
+## The system the sky is drawn from: its own, or the solar system.
+func _system() -> _System:
+	if system:
+		return system
+	if _solar == null:
+		_solar = load(_SOLAR_SYSTEM)
+	return _solar
 
 
 ## The time, date, place or way of keeping time has changed: the sun and moon go with it.
@@ -526,7 +569,7 @@ static func _moonlight_of(phase: float, height: float) -> float:
 
 
 func _moonlight() -> float:
-	return _moonlight_of(_now["phase"], _now["moon_height"])
+	return _moonlight_of(_now["phase"], _now["moon_height"]) if _now["moon_scale"] > 0.0 else 0.0
 
 
 ## Where the moon is in its month now: moon_phase, or the date's when placed.
@@ -581,6 +624,7 @@ func _sync_light() -> void:
 	set_shader_parameter("moon_lit_from", _now["lit_from"])
 	set_shader_parameter("moonlight", _moonlight())
 	set_shader_parameter("star_basis", _now["stars"])
+	_sync_bodies()
 	# The catalogue only once there are stars to draw, and not at all where nothing is drawn.
 	# Straight on the RenderingServer, as the weather's are: never saved with the sky.
 	if not _stars_bound and (night > 0.0 or _float_param(&"star_amount") > 0.0) \
@@ -589,6 +633,49 @@ func _sync_light() -> void:
 		RenderingServer.material_set_param(get_rid(), &"star_catalogue", _star_catalogue().get_rid())
 	_sync_air()
 	_sync_layer()
+
+
+## The sun's and moon's sizes, and the planets and moons, to the shader: straight on the
+## RenderingServer, never saved with the sky. A row of six texels a body, nearest and brightest
+## first: toward it and its angular radius; its colour and magnitude; toward its sun and its bands;
+## its pole and its rings' outer edge, and their inner, in its radii; their colour and opacity.
+func _sync_bodies() -> void:
+	var rs := RenderingServer
+	rs.material_set_param(get_rid(), &"sun_scale", _now["sun_scale"])
+	rs.material_set_param(get_rid(), &"moon_scale", _now["moon_scale"])
+	var shown: Array = _now["bodies"].duplicate()
+	# Scaled as the moon is drawn, so a moon as big as Earth's looks it.
+	var scale := _float_param(&"moon_size") / (_System.MOON_RADIUS / _System.MOON_DISTANCE)
+	shown.sort_custom(func(a, b): return _prominence(a, scale) > _prominence(b, scale))
+	shown.resize(mini(shown.size(), MAX_BODIES))
+	if _body_image == null:
+		_body_image = Image.create_empty(6, MAX_BODIES, false, Image.FORMAT_RGBAF)
+	for i in shown.size():
+		var b: Dictionary = shown[i]
+		var body: Resource = b["body"]
+		var dir: Vector3 = b["dir"]
+		var lit: Vector3 = b["lit_from"]
+		var pole: Vector3 = b["pole"]
+		var c: Color = body.color
+		var ring: Color = body.rings_color
+		var outer: float = body.rings_outer / body.radius if body.rings_outer > 0.0 else 0.0
+		_body_image.set_pixel(0, i, Color(dir.x, dir.y, dir.z, b["size"] * scale))
+		_body_image.set_pixel(1, i, Color(c.r, c.g, c.b, b["magnitude"]))
+		_body_image.set_pixel(2, i, Color(lit.x, lit.y, lit.z, body.bands))
+		_body_image.set_pixel(3, i, Color(pole.x, pole.y, pole.z, outer))
+		_body_image.set_pixel(4, i, Color(body.rings_inner / body.radius, 0.0, 0.0, 0.0))
+		_body_image.set_pixel(5, i, ring)
+	if _body_texture == null:
+		_body_texture = ImageTexture.create_from_image(_body_image)
+	else:
+		_body_texture.update(_body_image)
+	rs.material_set_param(get_rid(), &"body_data", _body_texture.get_rid())
+	rs.material_set_param(get_rid(), &"body_count", shown.size())
+
+
+## Discs before points, then the brighter first.
+static func _prominence(b: Dictionary, scale: float) -> float:
+	return (100.0 if b["size"] * scale > 0.001 else 0.0) - b["magnitude"]
 
 
 ## How far the sky is the air's light: none from a sky shader without the uniform.

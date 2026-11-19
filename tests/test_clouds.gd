@@ -284,7 +284,7 @@ func test_a_placed_sky_is_the_real_one() -> void:
 	assert_gt(sun.z, 0.4, "in the south, -Z being north")
 	assert_eq(sky.night, 0.0, "day")
 	assert_almost_eq(sky.phase(), 0.236, 0.002, "the moon's phase is the date's")
-	assert_vec3_almost_eq(sky.get_shader_parameter("moon_lit_from"), sun, 1e-6, "lit from the sun")
+	assert_lt(rad_to_deg((sky.get_shader_parameter("moon_lit_from") as Vector3).angle_to(sun)), 0.2, "lit from the sun, seen from the moon")
 	sky.moon_phase = 0.9
 	assert_almost_eq(sky.phase(), 0.236, 0.002, "and moon_phase goes unused")
 	sky.north = 180.0

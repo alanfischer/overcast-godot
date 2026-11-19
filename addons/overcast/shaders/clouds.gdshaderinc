@@ -24,11 +24,12 @@ global uniform float overcast_volumetric; // 1 when the sky ray-marches its clou
 // Where the clouds really are (OvercastSky.set_cover_map): a map, white where cloudy, black where
 // clear and mid grey where it has no say, of the real ground round the scene's origin, north up.
 // frame: east's world direction (xz), the real metres the map spans, the sky's world_scale.
-// place: the drift when it was laid, and its weight (0 off). _was: the one before, fading out.
+// place: the drift when it was laid, and its weight (0 off). _was_place: the one before, fading
+// out. Both are in the one texture, the laid on the left and the one before on the right: a
+// sampler apiece would put a world shader past Compatibility's sixteen.
 global uniform sampler2D overcast_cover_map : filter_linear, repeat_disable;
 global uniform vec4 overcast_cover_map_frame;
 global uniform vec4 overcast_cover_map_place;
-global uniform sampler2D overcast_cover_map_was : filter_linear, repeat_disable;
 global uniform vec4 overcast_cover_map_was_place;
 const float CLOUD_TILE = 12.0;
 // Every length below is tuned at a height of 100 m and scales with it, so a higher layer looks
@@ -150,15 +151,16 @@ vec3 cloud_map_uv(vec2 w, float height) {
 // The cover maps' tops, real km, at green 1.
 const float COVER_TOP_KM = 16.0;
 
-// What one cover map, laid at `place`, sees of a layer `height` up at noise point q, as
-// (cloud seen there times say, say). A top at the layer's height is that layer's cloud; one well
-// above it hides it, so the map has no say over what lies under.
-vec2 cloud_map_one(sampler2D map, vec4 place, vec2 q, float height) {
+// What one cover map, laid at `place` in `half` of the texture (0 left, 1 right), sees of a layer
+// `height` up at noise point q, as (cloud seen there times say, say). A top at the layer's height
+// is that layer's cloud; one well above it hides it, so the map has no say over what lies under.
+vec2 cloud_map_one(float half, vec4 place, vec2 q, float height) {
 	if (place.z <= 0.0) {
 		return vec2(0.0);
 	}
 	vec3 at = cloud_map_uv((q - place.xy) * (CLOUD_HEIGHT / overcast_scale), height);
-	vec4 m = textureLod(map, at.xy, 0.0);
+	vec2 uv = clamp(at.xy, 0.0, 1.0);
+	vec4 m = textureLod(overcast_cover_map, vec2((uv.x + half) * 0.5, uv.y), 0.0);
 	float rise = log(max(m.g * COVER_TOP_KM, 0.05) / max(height / overcast_cover_map_frame.w * 0.001, 0.05));
 	float say = m.a * at.z * place.z * (1.0 - m.r * smoothstep(0.4, 0.8, rise));
 	return vec2(m.r * (1.0 - smoothstep(0.4, 0.8, abs(rise))), 1.0) * say;
@@ -168,8 +170,8 @@ vec2 cloud_map_one(sampler2D map, vec4 place, vec2 q, float height) {
 // in), `amount` of it over the whole sky: the cover maps' where they see it, the laid one and the
 // one before as it fades.
 float cloud_map_amount(vec2 q, float height, float amount) {
-	vec2 seen = cloud_map_one(overcast_cover_map, overcast_cover_map_place, q, height)
-		+ cloud_map_one(overcast_cover_map_was, overcast_cover_map_was_place, q, height);
+	vec2 seen = cloud_map_one(0.0, overcast_cover_map_place, q, height)
+		+ cloud_map_one(1.0, overcast_cover_map_was_place, q, height);
 	return mix(amount, seen.x / max(seen.y, 1e-4), min(seen.y, 1.0));
 }
 

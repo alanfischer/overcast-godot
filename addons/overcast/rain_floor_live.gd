@@ -153,7 +153,7 @@ func _stamp(budget: int) -> void:
 			continue
 		var shown: bool = node.is_visible_in_tree()
 		var xform: Transform3D = node.global_transform
-		if shown == cover.shown and (xform == cover.xform or not _moved(cover, xform)):
+		if shown == cover.shown and not _moved(cover, xform):
 			continue
 		var turned := shown and _turned(cover, xform)
 		if turned:
@@ -182,6 +182,8 @@ func _stamp(budget: int) -> void:
 func _moved(cover: Cover, xform: Transform3D) -> bool:
 	if not cover.xform.origin.is_finite():
 		return true
+	if xform == cover.xform:
+		return false
 	var half := minf(cell.x, cell.y) * 0.5
 	for c in cover.corners:
 		var d := xform * c - cover.xform * c

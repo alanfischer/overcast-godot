@@ -71,7 +71,7 @@ func wetness_at(p: Vector3) -> float:
 ## How icy the ground is at world point `p`, 0 to 1, where rain reaches it: the cell's own ice, heat
 ## and all; `ice` off the rain floor.
 func ice_at(p: Vector3) -> float:
-	if not _weather.rains_on(p):
+	if (_ice_field == null and _ice <= 0.0) or not _weather.rains_on(p):
 		return 0.0
 	return _ice_field.value_at(p) if _ice_field else _ice
 
@@ -79,7 +79,7 @@ func ice_at(p: Vector3) -> float:
 ## Metres of snow lying at world point `p`, where snow reaches it: the cell's own, drifts and melts
 ## and all; the even layer as far as it has settled off the rain floor.
 func snow_depth_at(p: Vector3) -> float:
-	if not _weather.rains_on(p):
+	if (_snow == null and _snow_cover <= 0.0) or not _weather.rains_on(p):
 		return 0.0
 	return _snow.depth_at(p) if _snow else _snow_cover * OvercastWeather.DRIFT_LAYER
 

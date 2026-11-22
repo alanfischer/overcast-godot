@@ -18,9 +18,11 @@ const _SOLAR_SYSTEM := "res://addons/overcast/solar_system.tres"
 const MAX_BODIES := 16
 const _SkyShader = preload("res://addons/overcast/shaders/sky.gdshader")
 const _LutShader = preload("res://addons/overcast/shaders/atmosphere_lut.gdshader")
-## The air's light, drawn into a texture this size whenever the sun or the air changes.
-const _LUT_SIZE := Vector2i(256, 128)
-## How far the sun's height (the sine of it) moves before the air's light is summed again.
+## The air's light, drawn into a texture this size whenever the sun or the air changes: the step
+## below the sun in the top half, the step above in the bottom.
+const _LUT_SIZE := Vector2i(256, 256)
+## The steps in the sun's height (the sine of it) the air's light is summed at; the sky blends the
+## two either side of the sun.
 const _AIR_SUN_STEP := 0.002
 
 ## Cloud cover once a storm has closed the sky over.
@@ -40,6 +42,8 @@ const _CLOUD_FIELDS := [[&"cloud_amount", &"low_cover"], [&"cloud_height", &"low
 const _MID_VEIL := Vector2(0.45, 0.7)
 const _HIGH_VEIL := 0.12
 ## Shader parameters the air's light, taken once here for the whole sky, follows.
+## The air's light on the low, mid and high cloud.
+const _LAYER_LIGHTS := [&"atmosphere_cloud_light", &"atmosphere_mid_light", &"atmosphere_high_light"]
 const _AIR_UNIFORMS := [&"atmosphere", &"atmosphere_haze", &"atmosphere_exposure"]
 ## Set by the weather, straight on the RenderingServer, so a storm previewed in the editor is never
 ## saved with the sky.
@@ -314,10 +318,14 @@ var _air_horizon := Color.BLACK
 ## The viewport atmosphere_lut.gdshader draws in, and what it holds; none until the air lights a sky.
 var _lut := {}
 var _air_inputs := []
+## air_at for the steps either side of the sun's height.
+var _air_steps := []
 ## Where the sun and moon stand now and what follows from it (_sky_now).
 var _now := {}
 ## The air's light on each cloud layer, as _sync_air last took it, and what it went by.
 var _layer_inputs := []
+## Each layer's light at the steps either side of the sun's height.
+var _layer_steps := []
 ## What set_clouds last set, so a sky followed every frame is only set on a change.
 var _clouds := {}
 ## The noon sky's zenith, by haze: what the eye adapts against.
@@ -725,32 +733,47 @@ func _sync_air() -> void:
 	# DEFAULTS go in one at a time: the rest may not be there yet.
 	if _air() <= 0.0 or not haze is float or not exposure is float:
 		return
+	var rs := RenderingServer
 	var sun := _air_sun()
-	RenderingServer.material_set_param(get_rid(), &"atmosphere_sun", sun)
-	# Only when what they depend on has moved enough to see: the sun's height, not its bearing.
-	var height := snappedf(sun.y, _AIR_SUN_STEP)
-	var layers := [height, haze, cloud_height, mid_cloud_height, cirrus_height]
+	rs.material_set_param(get_rid(), &"atmosphere_sun", sun)
+	# Summed only at steps in the sun's height, the sun's bearing aside: a few thousand steps, and
+	# the texture a few million. Blended between the two either side, so the sky never jumps.
+	var below := floorf(sun.y / _AIR_SUN_STEP) * _AIR_SUN_STEP
+	var blend := (sun.y - below) / _AIR_SUN_STEP
+	var suns := [_sun_at_height(sun, below), _sun_at_height(sun, below + _AIR_SUN_STEP)]
+	var heights := [cloud_height, mid_cloud_height, cirrus_height]
+	var layers := [below, haze] + heights
 	if layers != _layer_inputs:
 		_layer_inputs = layers
-		for layer in [[&"atmosphere_cloud_light", cloud_height], [&"atmosphere_mid_light", mid_cloud_height],
-				[&"atmosphere_high_light", cirrus_height]]:
-			RenderingServer.material_set_param(get_rid(), layer[0], cloud_light_at(sun, haze, layer[1]))
-	# The sums are a few thousand steps, and the texture a few million.
-	var inputs := [height, haze, exposure]
-	if inputs == _air_inputs:
-		return
-	_air_inputs = inputs
-	var air := air_at(sun, haze, exposure)
-	_air_horizon = air["atmosphere_horizon"]
-	for key in air:
-		if key != &"atmosphere_gain" and key != &"atmosphere_dark":
-			RenderingServer.material_set_param(get_rid(), key, air[key])
-	_draw_lut(sun.y, haze, air["atmosphere_gain"], air["atmosphere_dark"])
+		_layer_steps = suns.map(func(s: Vector3) -> Array:
+			return heights.map(func(h: float) -> Vector3: return cloud_light_at(s, haze, h)))
+	for i in _LAYER_LIGHTS.size():
+		rs.material_set_param(get_rid(), _LAYER_LIGHTS[i], lerp(_layer_steps[0][i], _layer_steps[1][i], blend))
+	var inputs := [below, haze, exposure]
+	if inputs != _air_inputs:
+		_air_inputs = inputs
+		_air_steps = suns.map(func(s: Vector3) -> Dictionary: return air_at(s, haze, exposure))
+		_draw_lut(Vector2(suns[0].y, suns[1].y), haze,
+			Vector2(_air_steps[0][&"atmosphere_gain"], _air_steps[1][&"atmosphere_gain"]),
+			Vector2(_air_steps[0][&"atmosphere_dark"], _air_steps[1][&"atmosphere_dark"]))
+	_air_horizon = lerp(_air_steps[0][&"atmosphere_horizon"], _air_steps[1][&"atmosphere_horizon"], blend)
+	for key in [&"atmosphere_zenith", &"atmosphere_horizon", &"atmosphere_light"]:
+		rs.material_set_param(get_rid(), key, lerp(_air_steps[0][key], _air_steps[1][key], blend))
+	rs.material_set_param(get_rid(), &"atmosphere_blend", blend)
+
+
+## `sun` raised or lowered to `height` (a sine), its bearing kept.
+static func _sun_at_height(sun: Vector3, height: float) -> Vector3:
+	height = clampf(height, -1.0, 1.0)
+	var level := Vector2(sun.x, sun.z)
+	level = level.normalized() if level.length() > 1e-4 else Vector2.RIGHT
+	level *= sqrt(1.0 - height * height)
+	return Vector3(level.x, height, level.y)
 
 
 ## The sky samples the air's light rather than summing it per pixel: on sky brushes that cost
 ## more than the rest of the frame.
-func _draw_lut(sun_height: float, haze: float, gain: float, dark: float) -> void:
+func _draw_lut(sun_height: Vector2, haze: float, gain: Vector2, dark: Vector2) -> void:
 	var rs := RenderingServer
 	if _lut.is_empty():
 		var viewport := rs.viewport_create()

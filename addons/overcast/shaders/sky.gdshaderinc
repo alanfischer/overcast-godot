@@ -106,8 +106,10 @@ uniform vec3 atmosphere_mid_light = vec3(1.0);     // and at the middle layer's 
 uniform vec3 atmosphere_high_light = vec3(1.0);
 uniform vec3 atmosphere_zenith = vec3(0.0);
 uniform vec3 atmosphere_horizon = vec3(0.0);
-// The air's light over the sky for the sun now, as atmosphere_lut.gdshader draws it.
+// The air's light over the sky at the steps either side of the sun's height, as
+// atmosphere_lut.gdshader draws it, and how far the sun is from the lower toward the upper.
 uniform sampler2D atmosphere_lut : filter_linear, repeat_disable, hint_default_black;
+uniform float atmosphere_blend = 0.0;
 
 #include "res://addons/overcast/shaders/flash.gdshaderinc"
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
@@ -668,7 +670,10 @@ vec3 overcast_sky(vec3 eye_dir, vec3 cam, vec2 frag, bool clouds, out float stor
 		sun_col = mix(sun_col, lit_sun, atmosphere);
 		vec2 flat_air_sun = normalize(atmosphere_sun.xz + vec2(1e-5));
 		float bearing = acos(clamp(dot(flat_eye, flat_air_sun), -1.0, 1.0)) / PI;
-		vec3 air = texture(atmosphere_lut, vec2(bearing, 1.0 - sqrt(max(up, 0.0)))).rgb;
+		// Kept off each half's last half-row, so the halves never filter into each other.
+		float row = clamp(1.0 - sqrt(max(up, 0.0)), 0.5 / 128.0, 127.5 / 128.0) * 0.5;
+		vec3 air = mix(texture(atmosphere_lut, vec2(bearing, row)).rgb,
+			texture(atmosphere_lut, vec2(bearing, row + 0.5)).rgb, atmosphere_blend);
 #if CURRENT_RENDERER != RENDERER_COMPATIBILITY
 		air = overcast_to_linear(air);
 #endif

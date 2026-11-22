@@ -31,6 +31,8 @@ var covers := {}
 ## budget). Past it the rest keep their old stamp and go first next tick.
 var budget_usec := 1000
 var _cover_in := 0.0
+# The frame sync() last stamped in, as (process, physics) frames.
+var _synced := Vector2i(-1, -1)
 
 
 ## Takes `source` (none for rain everywhere); `drawn` keeps a texture for the shaders. Covers
@@ -70,6 +72,7 @@ func set_floor(source: RainFloor, drawn: bool) -> void:
 		covers[node].raster_xform = Transform3D(Basis(), Vector3.INF)
 		covers[node].rect = Rect2i()
 	_cover_in = 0.0
+	_synced = Vector2i(-1, -1)
 
 
 func add_cover(node: Node3D, tris: PackedVector3Array) -> void:
@@ -85,6 +88,7 @@ func add_cover(node: Node3D, tris: PackedVector3Array) -> void:
 		cover.corners.append(bounds.get_endpoint(i))
 	covers[node] = cover
 	_cover_in = 0.0
+	_synced = Vector2i(-1, -1)
 
 
 func remove_cover(node: Node3D) -> void:
@@ -123,9 +127,14 @@ func update(delta := COVER_EVERY) -> void:
 	_stamp(budget_usec)
 
 
-## Every cover where it is now, whatever the interval or budget: for a query on a peer that does
-## not draw the rain, and so does not keep the floor up to date each frame.
+## Every cover where it is as of this frame, whatever the interval or budget: for a query on a peer
+## that does not draw the rain, and so does not keep the floor up to date each frame. Once a frame,
+## as a server asks for every player's footing every tick.
 func sync() -> void:
+	var frame := Vector2i(Engine.get_process_frames(), Engine.get_physics_frames())
+	if frame == _synced:
+		return
+	_synced = frame
 	if image != null and not covers.is_empty():
 		_stamp(-1)
 
@@ -173,6 +182,8 @@ func _stamp(budget: int) -> void:
 func _moved(cover: Cover, xform: Transform3D) -> bool:
 	if not cover.xform.origin.is_finite():
 		return true
+	if xform == cover.xform:
+		return false
 	var half := minf(cell.x, cell.y) * 0.5
 	for c in cover.corners:
 		var d := xform * c - cover.xform * c

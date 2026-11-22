@@ -65,7 +65,7 @@ func _init(weather: OvercastWeather) -> void:
 ## How wet the ground is at world point `p`, 0 to 1: `wetness` where rain reaches it (the weather's
 ## rains_on), else none.
 func wetness_at(p: Vector3) -> float:
-	return _wetness if _weather.rains_on(p) else 0.0
+	return _wetness if _wetness > 0.0 and _weather.rains_on(p) else 0.0
 
 
 ## How icy the ground is at world point `p`, 0 to 1, where rain reaches it: the cell's own ice, heat

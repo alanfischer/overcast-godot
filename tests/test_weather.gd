@@ -654,6 +654,8 @@ func test_a_headless_peer_answers_with_its_covers() -> void:
 	w.add_cover(lift, AABB(Vector3(-1, -0.1, -1), Vector3(2, 0.2, 2)))
 	assert_almost_eq(w.floor_at(Vector3(-6, 0, -6)), 3.1, 1e-4, "a server sees the lift keep rain off")
 	lift.global_position = Vector3(6, 3, 6)
+	assert_almost_eq(w.floor_at(Vector3(-6, 0, -6)), 3.1, 1e-4, "a frame at a time")
+	await (Engine.get_main_loop() as SceneTree).physics_frame
 	assert_eq(w.floor_at(Vector3(-6, 0, -6)), 0.0, "and sees it move on, asked again")
 	assert_eq(w._live.texture, null, "with no texture to upload")
 

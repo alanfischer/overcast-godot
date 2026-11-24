@@ -16,9 +16,10 @@ global uniform vec2 overcast_rain_slant;
 global uniform vec4 overcast_ground_slant;
 global uniform float overcast_ground_shift;
 
-// The open air under what catches rain, per column: x the underside of the roof, y the ground under
+// The open air under what catches rain, per column: r the underside of the roof, g the ground under
 // it; none where they are equal (OvercastRainFloor.under). Unset, there is none anywhere, and all
-// that is under the floor is solid.
+// that is under the floor is solid. b the share of the cell the floor's height covers, a the height
+// rain falls to on the rest.
 global uniform sampler2D overcast_rain_under : filter_nearest;
 
 // Wind-driven rain comes down a slanted line. It reaches a point if, walking up that line toward
@@ -196,9 +197,18 @@ bool rain_falls_at(vec3 p) {
 	return rain_reaches_air(p) > 0.0;
 }
 
+// Cubic B-spline weights for the four cells around a point `t` (0 to 1) past the second.
+vec4 rain_bspline(float t) {
+	float s = 1.0 - t;
+	return vec4(s * s * s, 4.0 - 3.0 * t * t * (2.0 - t), 4.0 - 3.0 * s * s * (2.0 - s), t * t * t)
+		/ 6.0;
+}
+
 // 1 where nothing straight above world point p catches rain, 0 under cover; `off` off the floor.
-// The floor's four cells around p are blended, so a roof's shadow on the ground is not drawn as a
-// staircase.
+// Each cell reaches as far as the share of it under its height, and the rest down to the height
+// under that (overcast_rain_under's b and a); the sixteen cells around p are blended by a cubic
+// B-spline and the result sharpened, so a roof's shadow on the ground runs straight along the roof
+// at any angle to the cells, not as a staircase.
 float rain_open_blend(vec3 p, float off) {
 	vec2 uv = rain_floor_uv(p);
 	if (!rain_floor_covers(uv)) {
@@ -206,15 +216,23 @@ float rain_open_blend(vec3 p, float off) {
 	}
 	ivec2 res = textureSize(overcast_rain_floor, 0);
 	vec2 texel = uv * vec2(res) - 0.5;
-	ivec2 cell = ivec2(floor(texel));
+	ivec2 cell = ivec2(floor(texel)) - 1;
 	vec2 f = fract(texel);
-	vec4 reach;
-	for (int i = 0; i < 4; i++) {
-		ivec2 c = clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1);
-		// All of it at the height rain stops, none a quarter metre below.
-		reach[i] = clamp((p.y - texelFetch(overcast_rain_floor, c, 0).r) * 4.0 + 1.0, 0.0, 1.0);
+	vec4 wx = rain_bspline(f.x);
+	vec4 wy = rain_bspline(f.y);
+	float open = 0.0;
+	for (int j = 0; j < 4; j++) {
+		vec4 reach;
+		for (int i = 0; i < 4; i++) {
+			ivec2 c = clamp(cell + ivec2(i, j), ivec2(0), res - 1);
+			vec2 share = texelFetch(overcast_rain_under, c, 0).ba;
+			// All of it at the height rain stops, none a quarter metre below.
+			float high = clamp((p.y - texelFetch(overcast_rain_floor, c, 0).r) * 4.0 + 1.0, 0.0, 1.0);
+			reach[i] = mix(clamp((p.y - share.y) * 4.0 + 1.0, 0.0, 1.0), high, share.x);
+		}
+		open += wy[j] * dot(wx, reach);
 	}
-	return mix(mix(reach.x, reach.y, f.x), mix(reach.z, reach.w, f.x), f.y);
+	return smoothstep(0.25, 0.75, open);
 }
 
 // 1 where rain reaching world point p on a surface along `slant` would, 0 under cover.

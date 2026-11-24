@@ -13,9 +13,12 @@ extends Resource
 @export var size := Vector2.ONE
 ## No rain above this height.
 @export var top := 1e6
-## The open air under what catches rain, per cell (at its middle), FORMAT_RGF: r the underside of
-## the roof, g the ground under it; equal where there is none (a wall, solid ground). Wind blows
+## The open air under what catches rain, per cell (at its middle), FORMAT_RGBAF: r the underside
+## of the roof, g the ground under it; equal where there is none (a wall, solid ground). Wind blows
 ## rain in through it, under eaves and open shelters. Without it all under the floor is solid.
+## b is the share of the cell its height covers, and a the height rain falls to on the rest: where
+## a roof's edge crosses a cell, so the wet ground's edge runs along the roof's and not the cells'.
+## A cell all one height has b 1. A FORMAT_RGF one (baked before these) reads as b 1 everywhere.
 @export var under: Image
 
 ## Where a cell has no air under cover.
@@ -24,11 +27,17 @@ const _NO_GAP := -1e6
 ## _GAP_SEARCH metres under the top.
 const _MIN_GAP := 0.3
 const _GAP_SEARCH := 4.0
+## Columns per side a cell a roof's edge crosses is measured with, and how far under its top is
+## off the roof (m).
+const SHARE_SAMPLES := 4
+const EDGE_DROP := 0.3
 
 
 ## Bake by raycasting down through `box` in the world's physics, one column every `cell` metres.
 ## Each cell takes the highest of its centre and four corners: a wall's top along a cell's edge
 ## keeps rain off the floor beside it, at the cost of a dry strip under a cell's width outdoors.
+## Where one is EDGE_DROP or more under the top (a roof's edge crosses the cell), SHARE_SAMPLES²
+## more columns measure how much of the cell is that high.
 ## Colliders must exist in the physics space already (at runtime, call after a physics frame).
 static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> OvercastRainFloor:
 	var space := world.direct_space_state
@@ -63,7 +72,7 @@ static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> 
 	var heights := PackedFloat32Array()
 	heights.resize(w * h)
 	var gaps := PackedFloat32Array()
-	gaps.resize(w * h * 2)
+	gaps.resize(w * h * 4)
 	for j in h:
 		for i in w:
 			var x := box.position.x + (i + 0.5) * cell
@@ -78,11 +87,33 @@ static func bake(world: World3D, box: AABB, cell := 0.5, mask := 0xFFFFFFFF) -> 
 			var y: float = tops.max()
 			heights[j * w + i] = y
 			var gap := _cell_gap(y, tops, airs)
-			gaps[(j * w + i) * 2] = gap.x
-			gaps[(j * w + i) * 2 + 1] = gap.y
+			var share := Vector2(1.0, y)
+			if tops.min() < y - EDGE_DROP:
+				share = _share(drop, box.position.x + i * cell, box.position.z + j * cell, cell, y)
+			gaps[(j * w + i) * 4] = gap.x
+			gaps[(j * w + i) * 4 + 1] = gap.y
+			gaps[(j * w + i) * 4 + 2] = share.x
+			gaps[(j * w + i) * 4 + 3] = share.y
 	return create(Image.create_from_data(w, h, false, Image.FORMAT_RF, heights.to_byte_array()),
 		box.position, Vector2(w * cell, h * cell), ceiling,
-		Image.create_from_data(w, h, false, Image.FORMAT_RGF, gaps.to_byte_array()))
+		Image.create_from_data(w, h, false, Image.FORMAT_RGBAF, gaps.to_byte_array()))
+
+
+## Of the cell from (x, z) `cell` metres on a side, under its top `y`: the share of it that high
+## (x), and where rain lands on the rest (y), the highest of what is lower.
+static func _share(drop: Callable, x: float, z: float, cell: float, y: float) -> Vector2:
+	var high := 0
+	var low := -INF
+	for v in SHARE_SAMPLES:
+		for u in SHARE_SAMPLES:
+			var at: float = drop.call(x + (u + 0.5) * cell / SHARE_SAMPLES, z + (v + 0.5) * cell / SHARE_SAMPLES)
+			if at > y - EDGE_DROP:
+				high += 1
+			else:
+				low = maxf(low, at)
+	if low == -INF:
+		return Vector2(1.0, y)
+	return Vector2(float(high) / (SHARE_SAMPLES * SHARE_SAMPLES), low)
 
 
 ## The air under a cell's top `y`, from its middle and corners (`tops`, and the air under each,

@@ -32,6 +32,22 @@ func test_rain_stops_on_the_roof_and_the_ground() -> void:
 	assert_almost_eq(img.get_pixel(5, 10).r, 0.0, 0.01, "the next one out is open")
 
 
+func test_a_roof_edge_across_a_cell_shares_it() -> void:
+	_box(Vector3(40, 1, 40), Vector3(0, -0.5, 0))    # ground, top at 0
+	_box(Vector3(6.5, 0.2, 6), Vector3(0, 3.0, 0))   # roof, x -3.25..3.25, top at 3.1
+	await (Engine.get_main_loop() as SceneTree).physics_frame
+	await (Engine.get_main_loop() as SceneTree).physics_frame
+	var f := RainFloor.bake(_root().get_world_3d(), AABB(Vector3(-10, -2, -10), Vector3(20, 12, 20)), 1.0)
+	assert_eq(f.under.get_format(), Image.FORMAT_RGBAF, "the shares ride with the air under cover")
+	# Cell 6 is x -4..-3: the roof covers its last quarter metre.
+	var edge := f.under.get_pixel(6, 10)
+	assert_almost_eq(f.image.get_pixel(6, 10).r, 3.1, 0.01, "the cell takes the roof's height")
+	assert_almost_eq(edge.b, 0.25, 1e-6, "over a quarter of it")
+	assert_almost_eq(edge.a, 0.0, 0.01, "and rain reaches the ground on the rest")
+	assert_eq(f.under.get_pixel(10, 10).b, 1.0, "a cell all under the roof is all covered")
+	assert_eq(f.under.get_pixel(2, 2).b, 1.0, "and one all open is all ground")
+
+
 func test_a_baked_floor_saves_and_loads() -> void:
 	var img := Image.create_empty(3, 2, false, Image.FORMAT_RF)
 	img.set_pixel(2, 1, Color(4.5, 0, 0))
@@ -57,7 +73,7 @@ func test_the_air_under_cover_is_baked_and_walls_are_solid() -> void:
 	await (Engine.get_main_loop() as SceneTree).physics_frame
 	var f := RainFloor.bake(_root().get_world_3d(), AABB(Vector3(-10, -2, -10), Vector3(20, 12, 20)), 1.0)
 	assert_eq(f.under.get_size(), f.image.get_size(), "a gap per cell")
-	assert_eq(f.under.get_format(), Image.FORMAT_RGF)
+	assert_eq(f.under.get_format(), Image.FORMAT_RGBAF)
 	var gap := f.under.get_pixel(9, 11)
 	assert_almost_eq(gap.r, 2.9, 0.01, "under the roof the air reaches its underside")
 	assert_almost_eq(gap.g, 0.0, 0.01, "from the ground")

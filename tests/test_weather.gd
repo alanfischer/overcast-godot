@@ -788,6 +788,44 @@ func test_a_moving_cover_keeps_the_rain_off_under_it() -> void:
 	assert_eq(w._live.covers.size(), 0, "and is let go of")
 
 
+## _open_floor with the air under cover: none, but cell (7, 10), x -3..-2, a quarter under a
+## roof's edge at 5 m and the rest open to the ground. FORMAT_RGF without the shares.
+func _edged_floor(shares := true) -> RainFloor:
+	var f := _open_floor()
+	var air := Image.create_empty(20, 20, false, Image.FORMAT_RGBAF if shares else Image.FORMAT_RGF)
+	air.fill(Color(-1e6, -1e6, 1.0, 0.0))
+	if shares:
+		air.set_pixel(7, 10, Color(-1e6, -1e6, 0.25, 0.0))
+	f.image.set_pixel(7, 10, Color(5, 0, 0))
+	f.under = air
+	return f
+
+
+func test_a_cell_part_under_a_cover_is_all_covered() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _edged_floor()
+	assert_eq(w._live._under.get_pixel(7, 10).b, 0.25, "the roof's edge covers a quarter of the cell")
+	var lift := _platform(Vector3(-2.5, 6, 10.5 - 10))
+	w.add_cover(lift, AABB(Vector3(-0.4, -0.1, -0.4), Vector3(0.8, 0.2, 0.8)))
+	w._live.update()
+	assert_eq(w._live._under.get_pixel(7, 10).b, 1.0, "a cover over it covers all of it")
+	lift.global_position = Vector3(6, 6, 6)
+	w._live.update()
+	assert_eq(w._live._under.get_pixel(7, 10).b, 0.25, "and gone, the roof's share is back")
+
+
+func test_a_floor_without_shares_is_all_covered() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.rain_floor = _edged_floor(false)
+	var cell: Color = w._live._under.get_pixel(7, 10)
+	assert_eq(cell.b, 1.0, "a cell baked before the shares is all covered")
+	assert_eq(cell.a, 5.0, "at its height")
+
+
 func test_covers_leave_roofs_and_each_other_alone() -> void:
 	var w := _weather()
 	_keep(w)

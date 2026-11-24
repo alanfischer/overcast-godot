@@ -36,9 +36,8 @@ const int RAIN_SLANT_TAPS = 7;
 const float RAIN_SLANT_UP = 5.0;
 const float RAIN_SLANT_REACH = 3.0;
 const float RAIN_SHELTER_DEPTH = 3.0;
-// A surface's walk reads the floor's height blended between cells, and lets rain fade in over the
-// top RAIN_EDGE metres of what it would stop on, so the edge of a wind shadow is a smooth line and
-// not a staircase of cells.
+// A surface's walk (rain_slant_surface) lets rain fade in over the top RAIN_EDGE metres of what it
+// would stop on, so the edge of a wind shadow is a smooth line and not a staircase of cells.
 const float RAIN_EDGE = 0.15;
 #include "res://addons/overcast/shaders/noise.gdshaderinc"
 
@@ -64,62 +63,62 @@ bool rain_open_above(vec3 p) {
 	return p.y > textureLod(overcast_rain_floor, uv, 0.0).r;
 }
 
+// The cell of a field `res` cells across whose middle is the corner of the four around uv, and in
+// `f` where uv is between their middles; rain_cell steps to each of the four, rain_bilerp blends
+// their values.
+ivec2 rain_quad(vec2 uv, ivec2 res, out vec2 f) {
+	vec2 texel = uv * vec2(res) - 0.5;
+	f = fract(texel);
+	return ivec2(floor(texel));
+}
+
+ivec2 rain_cell(ivec2 cell, int i, ivec2 res) {
+	return clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1);
+}
+
+float rain_bilerp(vec4 v, vec2 f) {
+	return mix(mix(v.x, v.y, f.x), mix(v.z, v.w, f.x), f.y);
+}
+
 // A field laid out as the rain floor is (its own texture, or the snow's or the ice's) at uv,
 // blended between the four cells around it.
 float rain_floor_blend(sampler2D field, vec2 uv) {
 	ivec2 res = textureSize(field, 0);
-	vec2 texel = uv * vec2(res) - 0.5;
-	ivec2 cell = ivec2(floor(texel));
-	vec2 f = fract(texel);
+	vec2 f;
+	ivec2 cell = rain_quad(uv, res, f);
 	vec4 h;
 	for (int i = 0; i < 4; i++) {
-		h[i] = texelFetch(field, clamp(cell + ivec2(i % 2, i / 2), ivec2(0), res - 1), 0).r;
+		h[i] = texelFetch(field, rain_cell(cell, i, res), 0).r;
 	}
-	return mix(mix(h.x, h.y, f.x), mix(h.z, h.w, f.x), f.y);
-}
-
-// The height rain falls to at uv, blended between the four cells around it.
-float rain_floor_smooth(vec2 uv) {
-	return rain_floor_blend(overcast_rain_floor, uv);
+	return rain_bilerp(h, f);
 }
 
 // Where q is for rain slanting through it: in the open (over whatever catches rain there), in the
 // air under cover, or in something solid. `roofed`: whether q's column has air under cover at all.
-// `soft`: the floor's height blended (rain_floor_smooth), and `edge` how near the top of the
-// solid q is in, 1 at it to 0 RAIN_EDGE under; 0 without `soft`.
 const int RAIN_OPEN = 0;
 const int RAIN_SHELTERED = 1;
 const int RAIN_SOLID = 2;
-int rain_place(vec3 q, bool soft, out bool roofed, out float edge) {
+int rain_place(vec3 q, out bool roofed) {
 	roofed = false;
-	edge = 0.0;
 	vec2 uv = rain_floor_uv(q);
 	if (!rain_floor_covers(uv)) {
 		return RAIN_OPEN;  // the slant only adds what is there to catch it
 	}
 	vec2 gap = textureLod(overcast_rain_under, uv, 0.0).rg;
 	roofed = gap.x > gap.y;
-	float top = soft ? rain_floor_smooth(uv) : textureLod(overcast_rain_floor, uv, 0.0).r;
-	if (q.y > top) {
+	if (q.y > textureLod(overcast_rain_floor, uv, 0.0).r) {
 		return RAIN_OPEN;
 	}
-	if (q.y > gap.y && q.y < gap.x) {
-		return RAIN_SHELTERED;
-	}
-	if (soft) {
-		edge = clamp((q.y - top) / RAIN_EDGE + 1.0, 0.0, 1.0);
-	}
-	return RAIN_SOLID;
+	return q.y > gap.y && q.y < gap.x ? RAIN_SHELTERED : RAIN_SOLID;
 }
 
 // Whether the slanted line from `a` (in the air under cover) to `b` (in the open) came out past the
 // roof's edge rather than up through the roof: looked at between them, where it would be in the
 // roof if it went through it.
-bool rain_slant_exits(vec3 a, vec3 b, bool soft) {
+bool rain_slant_exits(vec3 a, vec3 b) {
 	for (int i = 1; i <= 2; i++) {
 		bool roofed;
-		float edge;
-		int at = rain_place(mix(a, b, float(i) / 3.0), soft, roofed, edge);
+		int at = rain_place(mix(a, b, float(i) / 3.0), roofed);
 		if (at == RAIN_SOLID || (at == RAIN_OPEN && roofed)) {
 			return false;
 		}
@@ -127,19 +126,50 @@ bool rain_slant_exits(vec3 a, vec3 b, bool soft) {
 	return true;
 }
 
-// How much of the rain slanting in on the wind reaches p, 0 to 1, by the walk described above;
-// `soft` for a surface (see RAIN_EDGE).
-float rain_slant_reach(vec3 p, vec2 slant, bool soft) {
-	bool roofed;
-	float edge;
-	int was = rain_place(p, soft, roofed, edge);
-	float lit = 1.0;  // the least of what the edges it grazed let through
-	if (was == RAIN_SOLID) {
-		if (edge <= 0.0) {
-			return 0.0;
+// A rain floor cell's size in metres, x and z.
+vec2 rain_floor_cell() {
+	return overcast_rain_floor_size / vec2(max(textureSize(overcast_rain_floor, 0), ivec2(1)));
+}
+
+// Cubic B-spline weights for the four cells around a point `t` (0 to 1) past the second.
+vec4 rain_bspline(float t) {
+	float s = 1.0 - t;
+	return vec4(s * s * s, 4.0 - 3.0 * t * t * (2.0 - t), 4.0 - 3.0 * s * s * (2.0 - s), t * t * t)
+		/ 6.0;
+}
+
+// 1 where nothing straight above world point p (on the floor) catches rain, 0 under cover, all of
+// it `ramp` per metre over where rain stops. Each cell reaches as far as the share of it under its
+// height, and the rest down to the height under that (overcast_rain_under's b and a); the sixteen
+// cells around p are blended by a cubic B-spline and the result sharpened, so the edge of what
+// covers p runs straight along a roof at any angle to the cells, not as a staircase.
+float rain_open_spline(vec3 p, float ramp) {
+	ivec2 res = textureSize(overcast_rain_floor, 0);
+	vec2 f;
+	ivec2 cell = rain_quad(rain_floor_uv(p), res, f) - 1;
+	vec4 wx = rain_bspline(f.x);
+	vec4 wy = rain_bspline(f.y);
+	float open = 0.0;
+	for (int j = 0; j < 4; j++) {
+		vec4 reach;
+		for (int i = 0; i < 4; i++) {
+			ivec2 c = clamp(cell + ivec2(i, j), ivec2(0), res - 1);
+			vec2 share = texelFetch(overcast_rain_under, c, 0).ba;
+			float high = clamp((p.y - texelFetch(overcast_rain_floor, c, 0).r) * ramp + 1.0, 0.0, 1.0);
+			reach[i] = mix(clamp((p.y - share.y) * ramp + 1.0, 0.0, 1.0), high, share.x);
 		}
-		lit = edge;
-		was = RAIN_OPEN;
+		open += wy[j] * dot(wx, reach);
+	}
+	return smoothstep(0.25, 0.75, open);
+}
+
+// How much of the rain slanting in on the wind reaches p in the air, 0 to 1, by the walk described
+// above. Surfaces have rain_slant_surface.
+float rain_slant_reach(vec3 p, vec2 slant) {
+	bool roofed;
+	int was = rain_place(p, roofed);
+	if (was == RAIN_SOLID) {
+		return 0.0;
 	}
 	float len = length(slant);
 	float up = min(RAIN_SLANT_UP, RAIN_SLANT_REACH / max(len, 1e-4));
@@ -151,15 +181,11 @@ float rain_slant_reach(vec3 p, vec2 slant, bool soft) {
 	for (int i = 0; i < RAIN_SLANT_TAPS; i++) {
 		float s = up * (float(i) + wander) / float(RAIN_SLANT_TAPS);
 		vec3 q = p + vec3(-slant.x * s, s, -slant.y * s);
-		int now = rain_place(q, soft, roofed, edge);
+		int now = rain_place(q, roofed);
 		if (now == RAIN_SOLID) {
-			if (edge <= 0.0) {
-				return 0.0;
-			}
-			lit = min(lit, edge);
-			now = RAIN_OPEN;
+			return 0.0;
 		}
-		if (was == RAIN_SHELTERED && now == RAIN_OPEN && (roofed || !rain_slant_exits(last, q, soft))) {
+		if (was == RAIN_SHELTERED && now == RAIN_OPEN && (roofed || !rain_slant_exits(last, q))) {
 			return 0.0;  // down through the roof
 		}
 		if (inside) {
@@ -173,7 +199,118 @@ float rain_slant_reach(vec3 p, vec2 slant, bool soft) {
 	if (inside) {
 		return 0.0;  // under cover as far as the wind carries it: none comes this far in
 	}
-	return lit * exp(-under / RAIN_SHELTER_DEPTH);
+	return exp(-under / RAIN_SHELTER_DEPTH);
+}
+
+// Around world point q, blended between its four cells, the height of the solid under it: the
+// ground under a roof, not the roof (`ground`); of those four that are roofs, with air under them,
+// the highest one's top (x) and underside (y), or -1e30 with none (`roof`); and how much q is in
+// the air under a roof, on the share of each cell roofed (`roofed`). Over all four, there is
+// nothing: ground and roof -1e30, roofed 0.
+void rain_cells(vec3 q, out float ground, out vec2 roof, out float roofed) {
+	ivec2 res = textureSize(overcast_rain_floor, 0);
+	vec2 f;
+	ivec2 cell = rain_quad(rain_floor_uv(q), res, f);
+	vec4 tops;
+	for (int i = 0; i < 4; i++) {
+		tops[i] = texelFetch(overcast_rain_floor, rain_cell(cell, i, res), 0).r;
+	}
+	roof = vec2(-1e30);
+	ground = -1e30;
+	roofed = 0.0;
+	if (q.y >= max(max(tops.x, tops.y), max(tops.z, tops.w))) {
+		return;
+	}
+	vec4 h;
+	vec4 in_air;
+	for (int i = 0; i < 4; i++) {
+		vec4 under = texelFetch(overcast_rain_under, rain_cell(cell, i, res), 0);
+		in_air[i] = q.y > under.g && q.y < under.r ? under.b : 0.0;
+		if (under.r > under.g) {
+			h[i] = under.g;
+			if (tops[i] > roof.x) {
+				roof = vec2(tops[i], under.r);
+			}
+		} else {
+			h[i] = mix(under.a, tops[i], under.b);
+		}
+	}
+	ground = rain_bilerp(h, f);
+	roofed = rain_bilerp(in_air, f);
+}
+
+// On a surface, slanting rain is stopped by the ground and walls as the walk above has it, by the
+// solid's height blended between cells, letting it in over the top RAIN_EDGE metres of what it
+// would stop on (rain_cells: the ground under a roof, so a roof's height does not spill onto the
+// open ground beside it). The roof p is under, or the first the walk finds, it clears if the line
+// is not over it where it comes level with the roof's slab, asked as rain_open_spline asks it of
+// the ground in still air: so the edge of what the wind blows in under a roof, and of its lee,
+// runs straight along the roof's at any angle to the cells. A roof is found where any of the four
+// cells around a step is one RAIN_SLANT_RISE or more above it: a cell early, so the test, not the
+// cells, decides.
+const float RAIN_EDGE_TEST = 0.05;
+const float RAIN_SLANT_RISE = 0.3;
+
+// How much of the rain along `dir` from p clears what has its top and underside in `cover`: not
+// over it where the line comes level with the middle of it (of a roof's slab, or just under the
+// top of what has no air under it).
+float rain_slant_clears(vec3 p, vec3 dir, vec2 cover) {
+	float level = cover.y < cover.x ? (cover.x + cover.y) * 0.5 : cover.x - RAIN_EDGE_TEST;
+	vec3 e = p + dir * max(level - p.y, 0.0);
+	if (!rain_floor_covers(rain_floor_uv(e))) {
+		return 1.0;
+	}
+	return rain_open_spline(vec3(e.x, level, e.z), 2.0 / RAIN_EDGE_TEST);
+}
+
+// How much of the rain slanting in on the wind reaches p on a surface (on the floor), 0 to 1, as
+// above. Past a roof it thins by how far it comes under cover.
+float rain_slant_surface(vec3 p, vec2 slant) {
+	float len = length(slant);
+	float up = min(RAIN_SLANT_UP, RAIN_SLANT_REACH / max(len, 1e-4));
+	vec3 dir = vec3(-slant.x, 1.0, -slant.y);
+	float reach = 1.0;
+	vec2 cover = vec2(-1e30);
+	float covered = 0.0;  // the share of the walk in the air under a roof
+	float wander = 0.15 + 0.7 * overcast_vnoise(p.xz * 1.3);
+	for (int i = 0; i < RAIN_SLANT_TAPS; i++) {
+		vec3 q = p + dir * (up * (float(i) + wander) / float(RAIN_SLANT_TAPS));
+		if (!rain_floor_covers(rain_floor_uv(q))) {
+			continue;
+		}
+		float ground;
+		vec2 roof;
+		float roofed;
+		rain_cells(q, ground, roof, roofed);
+		reach = min(reach, clamp((q.y - ground) / RAIN_EDGE + 1.0, 0.0, 1.0));
+		if (reach <= 0.0) {
+			return 0.0;
+		}
+		covered += roofed;
+		if (cover.x < -1e29 && q.y < roof.x - RAIN_SLANT_RISE) {
+			cover = roof;
+		}
+	}
+	// The roof p is under, if it is, is the one to clear.
+	vec2 uv = rain_floor_uv(p);
+	float top = textureLod(overcast_rain_floor, uv, 0.0).r;
+	vec2 gap = textureLod(overcast_rain_under, uv, 0.0).rg;
+	if (p.y <= top && p.y > gap.y && p.y < gap.x) {
+		cover = vec2(top, gap.x);
+	}
+	if (cover.x < -1e29) {
+		return reach;
+	}
+	// A roof whose underside is higher over p than the walk goes up, the walk lets by: it ends
+	// under it, or out from under it, and the thinning says which.
+	float far = smoothstep(0.85 * up, up, cover.y - p.y);
+	if (far < 1.0) {
+		reach *= mix(rain_slant_clears(p, dir, cover), 1.0, far);
+	}
+	// Thinning by how far the wind blew it in under cover (alike from under a roof and beside it).
+	float under = up * len * covered / float(RAIN_SLANT_TAPS);
+	return reach * exp(-under / RAIN_SHELTER_DEPTH)
+		* smoothstep(RAIN_SLANT_REACH, 0.85 * RAIN_SLANT_REACH, under);
 }
 
 // How much of the rain reaches world point p in the air, 0 to 1: everywhere with no floor, off it
@@ -189,7 +326,7 @@ float rain_reaches_air(vec3 p) {
 	if (overcast_rain_slant == vec2(0.0)) {
 		return p.y > textureLod(overcast_rain_floor, uv, 0.0).r ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p, overcast_rain_slant, false);
+	return rain_slant_reach(p, overcast_rain_slant);
 }
 
 // Whether rain falling past world point p, slanted by the wind, has not yet been caught.
@@ -197,59 +334,13 @@ bool rain_falls_at(vec3 p) {
 	return rain_reaches_air(p) > 0.0;
 }
 
-// Cubic B-spline weights for the four cells around a point `t` (0 to 1) past the second.
-vec4 rain_bspline(float t) {
-	float s = 1.0 - t;
-	return vec4(s * s * s, 4.0 - 3.0 * t * t * (2.0 - t), 4.0 - 3.0 * s * s * (2.0 - s), t * t * t)
-		/ 6.0;
-}
-
-// 1 where nothing straight above world point p catches rain, 0 under cover; `off` off the floor.
-// Each cell reaches as far as the share of it under its height, and the rest down to the height
-// under that (overcast_rain_under's b and a); the sixteen cells around p are blended by a cubic
-// B-spline and the result sharpened, so a roof's shadow on the ground runs straight along the roof
-// at any angle to the cells, not as a staircase.
-float rain_open_blend(vec3 p, float off) {
-	vec2 uv = rain_floor_uv(p);
-	if (!rain_floor_covers(uv)) {
-		return off;
-	}
-	ivec2 res = textureSize(overcast_rain_floor, 0);
-	vec2 texel = uv * vec2(res) - 0.5;
-	ivec2 cell = ivec2(floor(texel)) - 1;
-	vec2 f = fract(texel);
-	vec4 wx = rain_bspline(f.x);
-	vec4 wy = rain_bspline(f.y);
-	float open = 0.0;
-	for (int j = 0; j < 4; j++) {
-		vec4 reach;
-		for (int i = 0; i < 4; i++) {
-			ivec2 c = clamp(cell + ivec2(i, j), ivec2(0), res - 1);
-			vec2 share = texelFetch(overcast_rain_under, c, 0).ba;
-			// All of it at the height rain stops, none a quarter metre below.
-			float high = clamp((p.y - texelFetch(overcast_rain_floor, c, 0).r) * 4.0 + 1.0, 0.0, 1.0);
-			reach[i] = mix(clamp((p.y - share.y) * 4.0 + 1.0, 0.0, 1.0), high, share.x);
-		}
-		open += wy[j] * dot(wx, reach);
-	}
-	return smoothstep(0.25, 0.75, open);
-}
-
-// 1 where rain reaching world point p on a surface along `slant` would, 0 under cover.
+// 1 where rain reaching world point p on a surface along `slant` would, 0 under cover: in still
+// air all of it at the height rain stops and none a quarter metre below (rain_open_spline).
 float rain_reaches_along(vec3 p, vec2 slant) {
-	if (slant == vec2(0.0)) {
-		return rain_open_blend(p, overcast_rain_beyond_floor ? 1.0 : 0.0);
-	}
-	vec2 uv = rain_floor_uv(p);
-	if (!rain_floor_covers(uv)) {
+	if (!rain_floor_covers(rain_floor_uv(p))) {
 		return overcast_rain_beyond_floor ? 1.0 : 0.0;
 	}
-	return rain_slant_reach(p, slant, true);
-}
-
-// A rain floor cell's size in metres, x and z.
-vec2 rain_floor_cell() {
-	return overcast_rain_floor_size / vec2(max(textureSize(overcast_rain_floor, 0), ivec2(1)));
+	return slant == vec2(0.0) ? rain_open_spline(p, 4.0) : rain_slant_surface(p, slant);
 }
 
 // How far to raise a point on a slope with this normal before asking whether rain reaches it. A

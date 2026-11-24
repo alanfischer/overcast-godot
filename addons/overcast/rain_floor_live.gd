@@ -20,9 +20,8 @@ var texture: ImageTexture
 ## baked, but a cell a cover is stamped over all covered. Only when drawn and baked with one.
 var under_texture: ImageTexture
 var _under: Image
-## Per cell, the share its baked top covers; and where under covers less than all, the share now.
+## Per cell, the share its baked top covers (_under's b holds the share now).
 var _shares := PackedFloat32Array()
-var _shares_now := PackedFloat32Array()
 var origin := Vector3.ZERO
 var size := Vector2.ONE
 var cell := Vector2.ONE
@@ -67,12 +66,7 @@ func set_floor(source: RainFloor, drawn: bool) -> void:
 		if drawn:
 			texture = ImageTexture.create_from_image(image)
 			if source.under and source.under.get_size() == dims:
-				_under = _with_shares(source.under, baked)
-				var data := _under.get_data().to_float32_array()
-				_shares.resize(dims.x * dims.y)
-				for i in _shares.size():
-					_shares[i] = data[i * 4 + 2]
-				_shares_now = _shares.duplicate()
+				_take_under(source.under)
 				under_texture = ImageTexture.create_from_image(_under)
 	for node in covers:
 		covers[node].xform = Transform3D(Basis(), Vector3.INF)
@@ -82,20 +76,22 @@ func set_floor(source: RainFloor, drawn: bool) -> void:
 	_synced = Vector2i(-1, -1)
 
 
-## `air` as FORMAT_RGBAF; one without shares (FORMAT_RGF) all covered, at the `heights`.
-static func _with_shares(air: Image, heights: PackedFloat32Array) -> Image:
+## `air` as _under, FORMAT_RGBAF, and its shares in _shares; one without shares (FORMAT_RGF) all
+## covered, at the baked heights.
+func _take_under(air: Image) -> void:
 	var had := air.get_format() == Image.FORMAT_RGBAF or air.get_format() == Image.FORMAT_RGBAH
-	air = air.duplicate()
-	if air.get_format() != Image.FORMAT_RGBAF:
-		air.convert(Image.FORMAT_RGBAF)
-	if had:
-		return air
-	var data := air.get_data().to_float32_array()
-	for i in heights.size():
-		data[i * 4 + 2] = 1.0
-		data[i * 4 + 3] = heights[i]
-	air.set_data(air.get_width(), air.get_height(), false, Image.FORMAT_RGBAF, data.to_byte_array())
-	return air
+	_under = air.duplicate()
+	if _under.get_format() != Image.FORMAT_RGBAF:
+		_under.convert(Image.FORMAT_RGBAF)
+	var data := _under.get_data().to_float32_array()
+	_shares.resize(baked.size())
+	for i in baked.size():
+		if not had:
+			data[i * 4 + 2] = 1.0
+			data[i * 4 + 3] = baked[i]
+		_shares[i] = data[i * 4 + 2]
+	if not had:
+		_under.set_data(dims.x, dims.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
 
 
 func add_cover(node: Node3D, tris: PackedVector3Array) -> void:
@@ -370,9 +366,8 @@ func _restamp(rects: Array[Rect2i]) -> void:
 				if _shares[i] >= 1.0:
 					continue
 				var share := 1.0 if heights[i] > baked[i] else _shares[i]
-				if share != _shares_now[i]:
-					_shares_now[i] = share
-					var c := _under.get_pixel(x, z)
+				var c := _under.get_pixel(x, z)
+				if share != c.b:
 					c.b = share
 					_under.set_pixel(x, z, c)
 					shares_moved = true

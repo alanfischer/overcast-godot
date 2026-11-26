@@ -195,7 +195,8 @@ switches, and a mode where showers come and go on their own.
   own rather than the wind, so it blows under a roof too: a fan, a spell, a jet engine. It points
   down its -Z. Set `blowing` and the dust runs out from the mouth; clear it and the last of it runs
   off the end, then `blown_out` is emitted. `reach` cuts it short at a wall, and `light` is the
-  light where it blows, since it draws unshaded.
+  light where it blows, since it draws unshaded. `twist` turns the dust about the axis on its way,
+  for a whirl: a dust devil, the debris round a tornado's foot.
 - **`OvercastRainFloor`** is where rain stops: roofs, overhangs, the ground. The weather's
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a

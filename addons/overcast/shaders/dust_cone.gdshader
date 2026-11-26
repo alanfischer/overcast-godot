@@ -17,6 +17,8 @@ uniform float start_radius = 0.5;
 uniform float end_radius = 4.0;
 // m/s at the mouth; the motes slow to a third of it by the end.
 uniform float speed = 30.0;
+// Radians each mote turns about the axis on its way down the cone: a whirl, not a jet.
+uniform float twist = 0.0;
 // How far (in lengths) the air has carried them, wrapped at 4: each mote rides 3/4 to 6/4 as fast.
 uniform float flowed = 0.0;
 // Metres down the cone the dust shows between: the front runs out when it starts blowing, the tail
@@ -45,14 +47,16 @@ void vertex() {
 	float d = s * cone_length;
 	float spread = (end_radius - start_radius) / cone_length;
 	float r = start_radius + spread * d;
-	float a = h.y * TAU;
+	float a = h.y * TAU + twist * s;
 	vec2 out_dir = vec2(cos(a), sin(a));
+	vec2 round_dir = vec2(-out_dir.y, out_dir.x);
 	float u = sqrt(h.z);
 	vec3 local = vec3(out_dir * u * r, -d);
 	float t = TIME * eddy_rate * mix(0.6, 1.4, g.y) * mix(1.0, 0.4, wisp);
 	vec3 swirl = vec3(sin(t + g.z * TAU), sin(t * 1.31 + g.y * TAU), 0.5 * cos(t * 0.77 + g.w * TAU));
 	local += eddy * mix(0.2, 1.0, s) * mix(1.0, 2.0, wisp) * swirl;
-	vec3 move = vec3(out_dir * u * spread, -1.0) * speed / 1.5 * k * (1.5 - p);
+	vec3 move = vec3(out_dir * u * spread + round_dir * u * r * twist / cone_length, -1.0)
+		* speed / 1.5 * k * (1.5 - p);
 
 	fade = smoothstep(0.0, 0.08, p) * smoothstep(1.0, 0.7, p)
 		* smoothstep(front + 0.01, front - 0.5, d) * smoothstep(tail - 0.01, tail + 0.5, d)

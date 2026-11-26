@@ -33,9 +33,14 @@ const _TAIL_SPEED := 0.5
 @export_range(0.0, 50.0, 0.05, "or_greater") var end_radius := 4.0
 ## How fast (m/s) the air leaves the mouth: the dust slows to a third of it by the end.
 @export_range(0.0, 100.0, 0.5, "or_greater") var speed := 30.0
+## Radians each mote turns about the axis on its way down: a whirl (a dust devil, the debris round
+## a tornado's foot) rather than a jet.
+@export_range(-50.0, 50.0, 0.1) var twist := 0.0
 ## How far down it (m) the dust shows: where something stands in the way.
 @export var reach := INF
 @export_range(0, 20000, 10) var motes := 1500
+## The share of the motes that are wisps, soft puffs of fine dust, rather than grit.
+@export_range(0.0, 1.0, 0.01) var wisps := 0.1
 @export var color := _MOTE_COLOR
 ## The light on the dust where it blows; with `color` it gives what the dust shows.
 @export var light := Color.WHITE
@@ -109,6 +114,8 @@ func _push() -> void:
 	_material.set_shader_parameter("start_radius", start_radius)
 	_material.set_shader_parameter("end_radius", end_radius)
 	_material.set_shader_parameter("speed", speed)
+	_material.set_shader_parameter("twist", twist)
+	_material.set_shader_parameter("wisps", wisps)
 	_material.set_shader_parameter("flowed", _flowed)
 	_material.set_shader_parameter("front", _front)
 	_material.set_shader_parameter("tail", _tail if not blowing else 0.0)

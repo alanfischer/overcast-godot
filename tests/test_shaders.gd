@@ -10,7 +10,7 @@ const SHADERS := {
 	"res://addons/overcast/shaders/drift.gdshader": ["contours", "contour"],
 	"res://addons/overcast/shaders/splash.gdshader": ["color", "box", "haze_density", "opacity", "flash", "puddle_scale"],
 	"res://addons/overcast/shaders/dust.gdshader": ["color", "box", "drift", "haze_density", "amount", "motes", "wind", "opacity", "flash"],
-	"res://addons/overcast/shaders/dust_cone.gdshader": ["color", "cone_xform", "cone_length", "start_radius", "end_radius", "speed", "flowed", "front", "tail", "reach", "haze_density"],
+	"res://addons/overcast/shaders/dust_cone.gdshader": ["color", "cone_xform", "cone_length", "start_radius", "end_radius", "speed", "twist", "wisps", "flowed", "front", "tail", "reach", "haze_density"],
 }
 
 

@@ -191,6 +191,11 @@ switches, and a mode where showers come and go on their own.
   - lightning: a glowing bolt, a flash, and thunder delayed by the distance
   - its own rain and wind loops and thunder, CC0 (`sounds/CREDITS.md`). Set `rain_stream`,
     `wind_stream` and `thunder_stream` to use your own, and `bolt_drawer` to draw bolts your way.
+- **`OvercastDustCone`** is a gust of the weather's dust blown out along a cone, with air of its
+  own rather than the wind, so it blows under a roof too: a fan, a spell, a jet engine. It points
+  down its -Z. Set `blowing` and the dust runs out from the mouth; clear it and the last of it runs
+  off the end, then `blown_out` is emitted. `reach` cuts it short at a wall, and `light` is the
+  light where it blows, since it draws unshaded.
 - **`OvercastRainFloor`** is where rain stops: roofs, overhangs, the ground. The weather's
   **Bake Rain Floor** raycasts down through your level's colliders once and saves it beside the
   scene as `<scene>_rain_floor.res`. A level built at runtime calls `bake_rain_floor()` after a

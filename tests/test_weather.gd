@@ -1529,3 +1529,27 @@ func test_fog_hazes_with_no_rain() -> void:
 	w.visibility = Weather.CLEAR_VISIBILITY
 	w._process(0.01)
 	assert_false(w._haze.visible, "cleared, it goes")
+
+
+func test_a_dust_cone_runs_out_and_blows_out() -> void:
+	var cone: OvercastDustCone = _keep(OvercastDustCone.new())
+	cone.length = 8.0
+	cone.speed = 20.0
+	_root().add_child(cone)
+	var mesh := cone.get_child(0, true) as MultiMeshInstance3D
+	assert_false(mesh.visible, "nothing up until it blows")
+	cone.blowing = true
+	assert_true(mesh.visible, "blowing, it is drawn")
+	cone._process(0.2)
+	assert_almost_eq(cone._front, 4.0, 1e-4, "the front runs out at the mouth's speed")
+	cone._process(1.0)
+	assert_almost_eq(cone._front, 8.0, 1e-4, "and stops at the end")
+	assert_eq(mesh.multimesh.instance_count, cone.motes, "every mote")
+	var out := [false]
+	cone.blown_out.connect(func() -> void: out[0] = true)
+	cone.blowing = false
+	cone._process(0.5)
+	assert_true(mesh.visible and not out[0], "the last of it still running off the end")
+	cone._process(0.5)
+	assert_true(out[0], "blown out once the tail reaches the end")
+	assert_false(mesh.visible, "and no longer drawn")

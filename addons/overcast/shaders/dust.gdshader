@@ -7,8 +7,10 @@ render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled, skip_ve
 uniform vec3 color = vec3(0.6, 0.53, 0.43);
 uniform float opacity = 0.7;
 uniform float flash = 0.0;
-// How much is up, 0 to 1: a mote shows once it passes the mote's own share.
+// How much is up, 0 to 1, out of how many motes in all: the first amount's share of them show
+// (OvercastWeather draws only those), the last few fading in.
 uniform float amount = 0.0;
+uniform float motes = 1.0;
 // Horizontal, m/s: what streaks them (`drift` is what carries them).
 uniform vec3 wind = vec3(0.0);
 uniform float mote_size = 0.02;
@@ -31,12 +33,16 @@ void vertex() {
 	vec4 h = overcast_fall_hash(uint(INSTANCE_ID) + 1u);
 	vec4 g = overcast_fall_hash(uint(INSTANCE_ID) + 0x9e3779b9u);
 	vec3 cam = INV_VIEW_MATRIX[3].xyz;
+	float share = float(INSTANCE_ID) / motes;
+	fade = smoothstep(share, share + 0.15, amount * 1.15);
 	wisp = step(fract(g.z * 7.0), wisps);
 	vec3 p = overcast_fall_place(h.xyz, 0.0, cam);
 	float t = TIME * eddy_rate * mix(0.6, 1.4, g.x) * mix(1.0, 0.3, wisp);
 	vec3 swirl = vec3(sin(t + g.z * TAU), 0.5 * sin(t * 1.31 + g.y * TAU), cos(t * 0.77 + g.w * TAU));
 	p += eddy * mix(0.3, 1.0, g.y) * mix(1.0, 3.0, wisp) * swirl;
-	fade = overcast_fall_fade(p, cam, p) * smoothstep(g.w, g.w + 0.15, amount * 1.15);
+	if (fade > 0.0) {
+		fade *= overcast_fall_fade(p, cam, p);
+	}
 	if (fade > 0.0 && overcast_has_rain_floor) {
 		vec2 uv = rain_floor_uv(p);
 		if (rain_floor_covers(uv)) {
@@ -44,20 +50,20 @@ void vertex() {
 			fade *= exp(-over / (lift * mix(1.0, 0.5, wisp)));
 		}
 	}
-	if (fade <= 0.0) {
+	fade *= wisp > 0.0 ? wisp_opacity : opacity;
+	if (fade * (1.0 + flash) < 1.0 / 255.0) {
 		VERTEX = vec3(0.0);
 	} else {
 		vec3 rel = p - cam;
 		float dist = length(rel);
 		float speed = length(wind);
-		vec3 axis = speed > 0.01 ? wind / speed : vec3(1.0, 0.0, 0.0);
+		vec3 axis = normalize(wind + vec3(1e-4, 0.0, 0.0));
 		vec3 side = normalize(cross(axis, rel + vec3(1e-4)));
-		vec3 up = normalize(cross(side, axis));
 		vec3 world;
 		if (wisp > 0.0) {
 			// Facing the eye as far as it can while drawn out along the wind.
 			float size = mix(1.5, 4.0, g.x);
-			fade *= wisp_opacity / opacity * smoothstep(1.0, 4.0, dist);
+			fade *= smoothstep(1.0, 4.0, dist);
 			world = p + side * VERTEX.x * size + axis * VERTEX.y * size * mix(1.5, 3.0, h.w);
 		} else {
 			float size = mote_size * mix(0.5, 2.0, g.x * g.x);
@@ -79,5 +85,5 @@ void fragment() {
 		shape = (1.0 - abs(q.x)) * smoothstep(0.0, 0.3, UV.y) * smoothstep(1.0, 0.7, UV.y);
 	}
 	ALBEDO = color;
-	ALPHA = min(opacity * (1.0 + flash) * fade * shape, 1.0);
+	ALPHA = min((1.0 + flash) * fade * shape, 1.0);
 }

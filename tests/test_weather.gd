@@ -253,7 +253,7 @@ func test_wind_lifts_dust_off_dry_ground() -> void:
 	w._process(0.1)
 	assert_almost_eq(w.dustiness(), 1.0, 1e-6, "a gale lifts it all")
 	assert_true(w._dust.visible, "and it is drawn")
-	assert_eq(w._dust.multimesh.instance_count, w.dust_motes, "every mote")
+	assert_eq(w._dust.multimesh.visible_instance_count, w.dust_motes, "every mote")
 	w.dust = 0.5
 	assert_almost_eq(w.dustiness(), 0.5, 1e-6, "as much as the ground has")
 	w.dust = 1.0

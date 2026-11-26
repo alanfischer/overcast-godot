@@ -1167,7 +1167,12 @@ func _update_exposure(delta: float) -> void:
 
 ## How loud the wind is now, 0 to 1 (of _WIND_DB), in the open: none in a breeze.
 func _wind_loudness() -> float:
-	var k := smoothstep(_WIND_QUIET, _WIND_LOUD, _wind_now.length())
+	return _wind_ramp(_WIND_QUIET, _WIND_LOUD)
+
+
+## 0 with the wind as it gusts below `calm` (m/s), rising slowly then fast to 1 at `full`.
+func _wind_ramp(calm: float, full: float) -> float:
+	var k := smoothstep(calm, full, _wind_now.length())
 	return k * k
 
 
@@ -1327,28 +1332,24 @@ func _update_snow() -> void:
 func _update_drops(light: Color) -> void:
 	if not _drops.visible:
 		return
-	var color := _DROP_COLOR * light
-	if not _linear_output:
-		color = color.linear_to_srgb()
+	var color := _output_rgb(_DROP_COLOR * light)
 	for mat in [_drop_material, _splash_material]:
-		mat.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+		mat.set_shader_parameter("color", color)
 		mat.set_shader_parameter("flash", _flash_k * _DROP_FLASH_OPACITY)
 
 
 func _update_flakes(light: Color) -> void:
 	if not _flakes.visible:
 		return
-	var color := light if _linear_output else light.linear_to_srgb()
-	_flake_material.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+	_flake_material.set_shader_parameter("color", _output_rgb(light))
 	_flake_material.set_shader_parameter("flash", _flash_k)
 
 
 ## How much dust the wind has up, 0 to 1: by its speed as it gusts, as much as `dust` says, and
 ## none off ground that is wet, snowed on or frozen, or while it rains or snows.
 func dustiness() -> float:
-	var k := smoothstep(_DUST_CALM, _DUST_GALE, _wind_now.length())
-	var held := maxf(maxf(ground.wetness, ground.snow_cover), maxf(ground.ice, clampf(rain * 4.0, 0.0, 1.0)))
-	return maxf(dust, 0.0) * k * k * (1.0 - held)
+	var held: float = max(ground.wetness, ground.snow_cover, ground.ice, clampf(rain * 4.0, 0.0, 1.0))
+	return maxf(dust, 0.0) * _wind_ramp(_DUST_CALM, _DUST_GALE) * (1.0 - held)
 
 
 func _update_dust(light: Color) -> void:
@@ -1356,14 +1357,18 @@ func _update_dust(light: Color) -> void:
 	_dust.visible = amount > 0.0 and dust_motes > 0 and not underwater
 	if not _dust.visible:
 		return
-	if _dust.multimesh.instance_count != dust_motes:
-		_dust.multimesh.instance_count = dust_motes
-	var color := dust_color * light
-	if not _linear_output:
-		color = color.linear_to_srgb()
-	_dust_material.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+	_fill(_dust, 0, dust_motes, minf(amount * 1.15, 1.0))
+	_dust_material.set_shader_parameter("motes", float(dust_motes))
+	_dust_material.set_shader_parameter("color", _output_rgb(dust_color * light))
 	_dust_material.set_shader_parameter("flash", _flash_k)
 	_dust_material.set_shader_parameter("amount", amount)
+
+
+## `c` in the renderer's output space, for a shader that draws unshaded.
+func _output_rgb(c: Color) -> Vector3:
+	if not _linear_output:
+		c = c.linear_to_srgb()
+	return Vector3(c.r, c.g, c.b)
 
 
 ## The sky in use: `sky`, else the one the scene's environment draws.

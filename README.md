@@ -153,6 +153,9 @@ switches, and a mode where showers come and go on their own.
     the sky, as real rain does
   - `wind`, with gusts (`gustiness`): the clouds ride it, the rain slants and sways, the snow is carried off on it, and
     whatever stands upwind keeps rain and snow off the ground in its lee
+  - dust in a strong wind: grit streaking past and soft wisps rolling low over the ground, more
+    as it gusts harder, none off ground that is wet, snowed on or frozen, and none under a roof.
+    `dust` says how dusty the ground is (0 for none), `dust_motes` and `dust_color` how it looks
   - splashes where the rain lands, on roofs and the open ground, with rings where it lands in
     standing water. They land on the rain floor, so they need one
   - haze and far rain only through air that rain is actually falling in; snow turns the storm

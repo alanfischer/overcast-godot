@@ -110,6 +110,11 @@ const _FLAKE_COLOR := Color(0.95, 0.96, 1.0)
 const _SNOW_HAZE := 0.6
 const _SNOW_HAZE_COLOR := Color(0.72, 0.74, 0.78)
 const _FLAKE_DIM := 0.7
+## Dust: none in a wind below _DUST_CALM (m/s, gusts and all), all of `dust` at _DUST_GALE; in a box
+## this size around the camera.
+const _DUST_CALM := 4.0
+const _DUST_GALE := 16.0
+const _DUST_BOX := Vector3(24.0, 10.0, 24.0)
 ## Opacity of the far rain's streaks at a downpour, and of the far snow's flakes at a blizzard.
 const _FAR_OPACITY := 0.6
 const _FAR_SNOW_OPACITY := 0.8
@@ -278,6 +283,12 @@ const _GROUND_REACH := 1.0
 ## Flakes around the camera at the lightest snow and at a blizzard.
 @export_range(0, 100000, 100) var flakes_light := 8000
 @export_range(0, 100000, 100) var flakes_heavy := 50000
+## Dust the wind lifts off dry ground, 0 none to 1 all a gale lifts; wet, snowed on or frozen
+## ground lifts none.
+@export_range(0.0, 1.0, 0.01, "or_greater") var dust := 1.0
+## Motes around the camera with all of it up, and their colour in white light.
+@export_range(0, 100000, 100) var dust_motes := 10000
+@export var dust_color := Color(0.6, 0.53, 0.43)
 ## Wet ground (shaders/wet.gdshaderinc): seconds to soak at a downpour (longer in light rain) and
 ## to dry once it stops, and the same for puddles, which only a downpour fills.
 @export_range(0.1, 600.0, 0.1, "or_greater", "suffix:s") var soak_time := 20.0
@@ -401,6 +412,8 @@ var _flakes: MultiMeshInstance3D
 var _splashes: MultiMeshInstance3D
 var _splash_material: ShaderMaterial
 var _flake_material: ShaderMaterial
+var _dust: MultiMeshInstance3D
+var _dust_material: ShaderMaterial
 var _haze: MeshInstance3D
 var _haze_material: ShaderMaterial
 var _rain_audio: AudioStreamPlayer
@@ -434,6 +447,7 @@ var _wind_now := Vector3.ZERO
 ## How far it has carried the drops and the flakes, wrapped into their boxes.
 var _drop_drift := Vector3.ZERO
 var _flake_drift := Vector3.ZERO
+var _dust_drift := Vector3.ZERO
 var _drop_fall := 9.0
 var _flake_fall := 1.0
 var _far_fall := 9.0
@@ -475,6 +489,8 @@ func _ready() -> void:
 	_drops = _falling("RainDrops", _drop_material)
 	_flake_material = _falling_material(preload("res://addons/overcast/shaders/snow.gdshader"), _FLAKE_BOX)
 	_flakes = _falling("SnowFlakes", _flake_material)
+	_dust_material = _falling_material(preload("res://addons/overcast/shaders/dust.gdshader"), _DUST_BOX)
+	_dust = _falling("Dust", _dust_material)
 	drift_material = ShaderMaterial.new()
 	drift_material.shader = preload("res://addons/overcast/shaders/drift.gdshader")
 	_splash_material = _falling_material(preload("res://addons/overcast/shaders/splash.gdshader"),
@@ -1151,7 +1167,12 @@ func _update_exposure(delta: float) -> void:
 
 ## How loud the wind is now, 0 to 1 (of _WIND_DB), in the open: none in a breeze.
 func _wind_loudness() -> float:
-	var k := smoothstep(_WIND_QUIET, _WIND_LOUD, _wind_now.length())
+	return _wind_ramp(_WIND_QUIET, _WIND_LOUD)
+
+
+## 0 with the wind as it gusts below `calm` (m/s), rising slowly then fast to 1 at `full`.
+func _wind_ramp(calm: float, full: float) -> float:
+	var k := smoothstep(calm, full, _wind_now.length())
 	return k * k
 
 
@@ -1203,6 +1224,9 @@ func _blow(delta: float) -> void:
 	_drop_material.set_shader_parameter("wind", _wind_now)
 	_flake_material.set_shader_parameter("drift", _flake_drift)
 	_flake_material.set_shader_parameter("fallen", _flake_fallen)
+	_dust_drift = (_dust_drift + _wind_now * delta).posmodv(_DUST_BOX)
+	_dust_material.set_shader_parameter("drift", _dust_drift)
+	_dust_material.set_shader_parameter("wind", _wind_now)
 	# Roofs keep rain off by the steady wind, not each gust: wet ground does not flicker with it.
 	var fall := _flake_fall if snowfall > rainfall else _drop_fall
 	var slant := (Vector2(wind.x, wind.z) / fall).snapped(Vector2.ONE / 64.0)
@@ -1260,6 +1284,7 @@ func _update_haze(delta: float, haze_color: Color, drop_light: Color) -> void:
 	_drop_material.set_shader_parameter("haze_density", density)
 	_splash_material.set_shader_parameter("haze_density", density)
 	_flake_material.set_shader_parameter("haze_density", density)
+	_dust_material.set_shader_parameter("haze_density", density)
 	_haze_material.set_shader_parameter("haze_color", Vector3(haze_color.r, haze_color.g, haze_color.b))
 	var streak := _DROP_COLOR * drop_light
 	if _far_snow():
@@ -1307,20 +1332,43 @@ func _update_snow() -> void:
 func _update_drops(light: Color) -> void:
 	if not _drops.visible:
 		return
-	var color := _DROP_COLOR * light
-	if not _linear_output:
-		color = color.linear_to_srgb()
+	var color := _output_rgb(_DROP_COLOR * light)
 	for mat in [_drop_material, _splash_material]:
-		mat.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+		mat.set_shader_parameter("color", color)
 		mat.set_shader_parameter("flash", _flash_k * _DROP_FLASH_OPACITY)
 
 
 func _update_flakes(light: Color) -> void:
 	if not _flakes.visible:
 		return
-	var color := light if _linear_output else light.linear_to_srgb()
-	_flake_material.set_shader_parameter("color", Vector3(color.r, color.g, color.b))
+	_flake_material.set_shader_parameter("color", _output_rgb(light))
 	_flake_material.set_shader_parameter("flash", _flash_k)
+
+
+## How much dust the wind has up, 0 to 1: by its speed as it gusts, as much as `dust` says, and
+## none off ground that is wet, snowed on or frozen, or while it rains or snows.
+func dustiness() -> float:
+	var held: float = max(ground.wetness, ground.snow_cover, ground.ice, clampf(rain * 4.0, 0.0, 1.0))
+	return maxf(dust, 0.0) * _wind_ramp(_DUST_CALM, _DUST_GALE) * (1.0 - held)
+
+
+func _update_dust(light: Color) -> void:
+	var amount := dustiness()
+	_dust.visible = amount > 0.0 and dust_motes > 0 and not underwater
+	if not _dust.visible:
+		return
+	_fill(_dust, 0, dust_motes, minf(amount * 1.15, 1.0))
+	_dust_material.set_shader_parameter("motes", float(dust_motes))
+	_dust_material.set_shader_parameter("color", _output_rgb(dust_color * light))
+	_dust_material.set_shader_parameter("flash", _flash_k)
+	_dust_material.set_shader_parameter("amount", amount)
+
+
+## `c` in the renderer's output space, for a shader that draws unshaded.
+func _output_rgb(c: Color) -> Vector3:
+	if not _linear_output:
+		c = c.linear_to_srgb()
+	return Vector3(c.r, c.g, c.b)
 
 
 ## The sky in use: `sky`, else the one the scene's environment draws.
@@ -1395,6 +1443,7 @@ func _process(delta: float) -> void:
 	var drop_light := light * _DROP_LIGHT + _SKY_FLASH * _flash_k * _DROP_FLASH
 	_update_drops(drop_light)
 	_update_flakes(light * _FLAKE_COLOR + _SKY_FLASH * _flash_k * _DROP_FLASH)
+	_update_dust(light)
 	if _haze or on_ground:
 		var haze_color := _haze_base(drawn, light) + _SKY_FLASH * _flash_k * _HAZE_FLASH
 		if _haze:

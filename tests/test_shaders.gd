@@ -9,6 +9,7 @@ const SHADERS := {
 	"res://addons/overcast/shaders/rain_haze.gdshader": ["density", "haze_color", "gust_noise", "linear_output", "streak_gap", "slant", "fallen", "carried"],
 	"res://addons/overcast/shaders/drift.gdshader": ["contours", "contour"],
 	"res://addons/overcast/shaders/splash.gdshader": ["color", "box", "haze_density", "opacity", "flash", "puddle_scale"],
+	"res://addons/overcast/shaders/dust.gdshader": ["color", "box", "drift", "haze_density", "amount", "motes", "wind", "opacity", "flash"],
 }
 
 

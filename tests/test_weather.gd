@@ -241,6 +241,30 @@ func test_snow_falls_as_flakes_and_lies() -> void:
 	assert_eq(Globals.value("overcast_snow_cover"), 0.0, "and gone, it leaves none behind")
 
 
+func test_wind_lifts_dust_off_dry_ground() -> void:
+	var w := _weather()
+	_keep(w)
+	_root().add_child(w)
+	w.gustiness = 0.0
+	w.wind = Vector3(2, 0, 0)
+	w._process(0.1)
+	assert_false(w._dust.visible, "a breeze lifts none")
+	w.wind = Vector3(Weather._DUST_GALE, 0, 0)
+	w._process(0.1)
+	assert_almost_eq(w.dustiness(), 1.0, 1e-6, "a gale lifts it all")
+	assert_true(w._dust.visible, "and it is drawn")
+	assert_eq(w._dust.multimesh.visible_instance_count, w.dust_motes, "every mote")
+	w.dust = 0.5
+	assert_almost_eq(w.dustiness(), 0.5, 1e-6, "as much as the ground has")
+	w.dust = 1.0
+	w.rain = 1.0
+	w._process(0.1)
+	assert_false(w._dust.visible, "rain lays it")
+	w.rain = 0.0
+	w.ground.wetness = 0.5
+	assert_almost_eq(w.dustiness(), 0.5, 1e-6, "wet ground lifts less")
+
+
 ## 30 m by 20 m of open ground at 0, a cell a metre, with a wall 2 m high across it at x 10.
 func _walled_floor() -> RainFloor:
 	var img := Image.create_empty(30, 20, false, Image.FORMAT_RF)
